@@ -2,6 +2,76 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — the phone layout was inert, and had been since day one
+
+Reported from a real iPhone: no button worked and the page would not scroll.
+It was not a scroll-container problem and not the new controls. It was one
+declaration, present since the initial commit:
+
+    .scrim { display: block; ... position: fixed; inset: 0; z-index: 30; }
+
+The scrim is marked up as `<div class="scrim" hidden>` and JS toggles that
+attribute. But an AUTHOR `display: block` beats the UA's `[hidden] { display:
+none }`, so the scrim was always painted — a full-viewport, zero-opacity layer
+sitting over the entire app. Invisible, and it swallowed every tap and every
+scroll gesture.
+
+Proved before touching anything, with `document.elementFromPoint` at seven
+places on a 390x844 emulated viewport: hamburger, Rescan, the probe Stop
+button, the slider, a table row, the tab bar, the status bar — all seven
+returned `div#sidebarScrim`. After the fix each returns the control you can
+see. Two independent guards now, since either alone would have prevented it:
+`.scrim[hidden] { display: none }` so the attribute wins, and
+`pointer-events: none` unless `.open`, so a displayed-but-closed scrim can
+never take a tap.
+
+This is the bug that CDP screenshots could not have found and did not: the
+layer is invisible, so every screenshot looked perfect. Hit-testing is the
+check that would have caught it, and it is cheap.
+
+Also verified by driving real touch events: the hamburger opens the sheet,
+tapping the scrim closes it, a touch-drag scrolls the table (0 -> 235), and
+tapping a row opens the ladder sheet.
+
+Two smaller things while in there:
+
+- The toolbar was 132px of an 844px screen, more than half of what was left for
+  the table. Its explainer wraps to two lines and the status bar carries the
+  same figures, so the narrow layout drops it: toolbar 132 -> 107px, table
+  223 -> 248px.
+- `mediaCoverage` counted every file as probeable, but the parser only reads
+  .mov — so the four .tif/.txt rows sat permanently in the remainder, coverage
+  could never reach 100%, and the button offered "Resume" on a finished pass
+  forever. It now counts the probeable population, and the control reads
+  "Resolutions read" and disables itself.
+
+Every changed CSS line is inside `@media (max-width: 760px)`, checked
+mechanically against the diff.
+
+**A caching trap worth knowing:** headless Chrome served app.css from cache
+between runs, so one measurement said a fix had done nothing when it had.
+`Network.setCacheDisabled` is now set in the harness scripts. If a CSS change
+appears to have no effect, suspect that before suspecting the CSS.
+
+### Integration suite: the archive moved, again
+
+Five integration tests now fail, and none of them is a regression. A read-only
+walk against the live archive versus snapshot 7:
+
+    snapshot 7 : 26,655 files  133.568 TiB  37 excluded
+    live now   : 26,680 files  133.733 TiB   2 excluded
+    delta      : +25 files    +169.6 GiB    -35 excluded
+
+A delivery landed while we were working, and the FreeFileSync bookkeeping files
+were cleaned out (37 -> 2), which is what trips the `excluded.count >= 30`
+guard. The pinned reclaim figures move with the bytes: keep-1 is 49.87 TiB
+against a band that tops out at 49.75.
+
+**The thresholds have deliberately NOT been loosened.** They are the guard on
+the reclaim policy, and quietly widening them to fit whatever the archive says
+today is how a real regression gets waved through. Re-pinning them is a
+decision to take with the numbers from a fresh scan in hand.
+
 ## 2026-08-26 — the probe was starving the web server (and itself)
 
 The user reported the page taking a long time to load while a resolution scan

@@ -224,7 +224,10 @@ export class TableView {
       );
     } else {
       parts.push(
-        h('span.muted', {
+        // Classed so the narrow layout can drop it: on a phone it wraps to two
+        // lines of a toolbar that is already taking a quarter of the screen,
+        // and the status bar carries the same figures at the bottom.
+        h('span.muted.slated-hint', {
           style: { marginLeft: '8px', fontSize: '11.5px' },
           text: 'everything slated for removal under these filters · un-tick a row to keep it',
         }),

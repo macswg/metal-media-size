@@ -37,6 +37,9 @@ const TOTAL_FILE_BYTES = 75_840;
 const TOTAL_VERSIONS = 14;
 const TOTAL_VERSION_BYTES = 69_742;
 
+/** The probeable population: the header parser only understands .mov. */
+const TOTAL_MOV_FILES = 29;
+
 /** 100_ALPHA: v001 3100, v002 3400, v003 3100, v004 11000, patches 300 + 400. */
 const ALPHA_TOTAL = 21_300;
 
@@ -299,7 +302,11 @@ describe('GET /api/files -- filters', () => {
 
   it('reports probe coverage on the summary, so the UI can say why a cell is empty', async () => {
     const { body } = await get('/api/summary?keepN=1');
-    expect(body.media).toMatchObject({ probed: 3, withDimensions: 2, total: TOTAL_FILES });
+    // `total` is the PROBEABLE population -- the .mov files, not every row.
+    // Counting the .tif and .txt files would leave coverage permanently short
+    // of 100% and the UI offering to resume a finished pass.
+    expect(body.media).toMatchObject({ probed: 3, withDimensions: 2, total: TOTAL_MOV_FILES });
+    expect(TOTAL_MOV_FILES).toBeLessThan(TOTAL_FILES);
   });
 
   it('filters by the version-derived columns through the join', async () => {
@@ -1070,7 +1077,7 @@ describe('GET /api/anomalies', () => {
 
   it('says what the header check actually covered, so an empty list is not a clean bill of health', async () => {
     const { body } = await get('/api/anomalies');
-    expect(body.probeCoverage).toMatchObject({ probed: 3, total: TOTAL_FILES });
+    expect(body.probeCoverage).toMatchObject({ probed: 3, total: TOTAL_MOV_FILES });
     expect(body.probeCoverage.probed).toBeLessThan(body.probeCoverage.total);
   });
 

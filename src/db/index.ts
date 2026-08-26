@@ -334,10 +334,19 @@ export function carryForwardMedia(db: Db, snapshotId: number): number {
   return info.changes;
 }
 
-/** How much of a snapshot has been probed, for the summary route. */
+/**
+ * How much of a snapshot has been probed.
+ *
+ * `total` counts only what CAN be probed -- the .mov files the header parser
+ * understands. Counting every file would mean the archive's handful of .tif
+ * and .txt rows sat permanently in the unprobed remainder, so coverage could
+ * never reach 100%, the UI would offer 'Resume' forever, and the anomalies
+ * card would never be able to say the check was complete.
+ */
 export function mediaCoverage(
   db: Db,
   snapshotId: number,
+  ext = 'mov',
 ): { probed: number; withDimensions: number; total: number } {
   const row = db
     .prepare(
@@ -346,8 +355,8 @@ export function mediaCoverage(
               COUNT(fm.width) AS withDimensions
          FROM file f
          LEFT JOIN file_media fm ON fm.file_id = f.id
-        WHERE f.snapshot_id = ?`,
+        WHERE f.snapshot_id = ? AND f.ext = ?`,
     )
-    .get(snapshotId) as { total: number; probed: number; withDimensions: number };
+    .get(snapshotId, ext) as { total: number; probed: number; withDimensions: number };
   return row;
 }

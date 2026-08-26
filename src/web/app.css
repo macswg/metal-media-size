@@ -966,6 +966,15 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
     visibility: visible;
   }
 
+  /* THIS RULE MADE THE WHOLE PHONE LAYOUT INERT. The scrim is marked up as
+     `<div class="scrim" hidden>` and JS toggles that attribute -- but an
+     author `display: block` beats the UA's `[hidden] { display: none }`, so
+     the scrim was ALWAYS painted: a full-viewport, zero-opacity, z-index 30
+     layer over everything. Invisible, and it swallowed every tap and every
+     scroll gesture on the page. Two independent guards now, because either
+     alone would have prevented it:
+       - the hidden attribute wins, so a closed scrim is not in the layout;
+       - a scrim that is not `.open` never receives a pointer event. */
   .scrim {
     display: block;
     position: fixed;
@@ -973,9 +982,12 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
     inset: 0;
     background: rgba(0, 0, 0, 0.55);
     opacity: 0;
+    pointer-events: none;
     transition: opacity 0.22s ease;
   }
-  .scrim.open { opacity: 1; }
+  .scrim[hidden] { display: none; }
+  /* Open, it is the tap target that closes the sheet, so it takes events. */
+  .scrim.open { opacity: 1; pointer-events: auto; }
 
   /* The ladder stops being a rail and becomes a full-screen sheet. */
   .drawer {
@@ -1058,12 +1070,16 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
     flex: none;
   }
 
+  /* The toolbar was taking 132px of an 844px screen -- more than half of what
+     was left for the table itself. The explainer wraps to two lines and the
+     status bar already carries the same figures, so on a phone it goes. */
   .toolbar {
     gap: 8px;
     padding: 8px 10px;
   }
   .toolbar .totals { font-size: 12px; }
   .toolbar .spacer { display: none; }
+  .toolbar .slated-hint { display: none; }
 
   .tab-pane.scrollpane.on {
     padding: 12px 12px 72px;
