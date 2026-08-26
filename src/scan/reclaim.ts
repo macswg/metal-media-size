@@ -84,7 +84,7 @@
  * THE PROXY-ONLY RULE -- the patch rule's sibling. Same danger, same shape.
  * ----------------------------------------------------------------------------
  *
- * A version may consist of NOTHING BUT its `proxy3_region0` preview: no LED
+ * A version may consist of NOTHING BUT its `proxy3_region0` preview: no
  * region files at all (`regionCount === 0`). That is not a delivery of the
  * asset. It is a low-res whole-canvas preview, and it CANNOT stand in for the
  * region-bearing masters it appears to sit above.
@@ -103,8 +103,8 @@
  * WHY THIS EXISTS, recorded so it is never "simplified" away. Without rule 6
  * this policy marked 85 region-bearing versions -- 3.86 TiB, of which 3.17 TiB
  * was the LAST full-resolution copy of its asset -- as superseded by a preview.
- * `580_CAUSEWAY_0000A_LL180` was the clearest: v002 is 15 files and 475 GiB of LED
- * masters, v003 is a single 1.5 GiB proxy, and keep-1 proposed deleting v002
+ * `580_CAUSEWAY_0000A_LL180` was the clearest: v002 is 15 files and 475 GiB
+ * of masters, v003 is a single 1.5 GiB proxy, and keep-1 proposed deleting v002
  * and retaining v003. The at-risk previews cluster on 2026-08-20 and
  * 2026-08-25 -- days old at the time of writing, against masters from July --
  * so they are previews of IN-PROGRESS work whose regions have not been
@@ -132,7 +132,7 @@ export interface ReclaimVersionInput {
   proxyBytes: number;
   fileCount: number;
   /**
-   * Distinct LED region tiles in this version, EXCLUDING the proxy. Zero means
+   * Distinct regions in this version, EXCLUDING the proxy. Zero means
    * the version is a preview and nothing else -- see THE PROXY-ONLY RULE. A
    * missing value is read as 0, which is the safe direction.
    */

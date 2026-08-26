@@ -35,16 +35,16 @@
  * JS (metadata only -- no file is opened), and then, per asset:
  *
  *   expected set = the MODAL region set across that asset's versions, i.e. the
- *   tile layout the asset actually uses. An asset with one version has nothing
+ *   region layout the asset actually uses. An asset with one version has nothing
  *   to disagree with and is never flagged.
  *
- *   missingRegions = a version lacking a tile the expected set has.
+ *   missingRegions = a version lacking a region the expected set has.
  *                    That version cannot be played back whole.
- *   orphanRegions  = a file whose tile number is NOT in the expected set.
+ *   orphanRegions  = a file whose region number is NOT in the expected set.
  *                    A leftover from a different layout, or a typo in a name.
  *
  * `_proxyN` files are excluded from both: a proxy is tagged `region0` but is a
- * whole-canvas preview, not an LED tile.
+ * whole-canvas preview, not a region.
  *
  * The `excluded` block carries `snapshot.excluded_*` so the FreeFileSync
  * bookkeeping files stay visible rather than silently dropped.
@@ -103,7 +103,7 @@ interface VersionMeta {
   isPatch: boolean;
 }
 
-/** Tile number from a file name, or null for proxies and region-less files. */
+/** Region number from a file name, or null for proxies and region-less files. */
 export function regionOf(name: string): number | null {
   if (/_proxy\d+/i.test(name)) return null;
   const m = /_region(\d+)/i.exec(name);
@@ -289,7 +289,7 @@ export function registerAnomalyRoutes(app: FastifyInstance, ctx: AppContext): vo
     }
 
     // -----------------------------------------------------------------------
-    // One pass over the files: unparsed, zero-byte, and the tile inventory.
+    // One pass over the files: unparsed, zero-byte, and the region inventory.
     // -----------------------------------------------------------------------
     const regionsByVersion = new Map<number, Set<number>>();
     const regionFiles: { file: NameRow; region: number; versionId: number }[] = [];
@@ -356,12 +356,12 @@ export function registerAnomalyRoutes(app: FastifyInstance, ctx: AppContext): vo
       regionFiles.push({ file: f, region, versionId: f.asset_version_id });
     }
 
-    // Expected tile layout per asset.
+    // Expected region layout per asset.
     const setsByAsset = new Map<number, number[][]>();
     for (const [versionId, set] of regionsByVersion) {
       const meta = metaById.get(versionId);
       if (!meta) continue;
-      // A patch covers a frame range, not necessarily every tile, so it must
+      // A patch covers a frame range, not necessarily every region, so it must
       // not vote on the layout and must not be flagged against it.
       if (meta.isPatch) continue;
       const list = setsByAsset.get(meta.assetId) ?? [];

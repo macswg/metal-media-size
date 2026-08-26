@@ -916,7 +916,7 @@ describe('GET /api/anomalies', () => {
     expect((missing.get('200_BETA_EDIT_LL180') as any).missing).toEqual([2]);
     expect((missing.get('400_DELTA_FULL_LL180') as any).missing).toEqual([2]);
 
-    // 100_ALPHA v002 carries a region-9 tile no other version has.
+    // 100_ALPHA v002 carries a region-9 file no other version has.
     expect(body.orphanRegions).toHaveLength(1);
     expect(body.orphanRegions[0].region).toBe(9);
 
@@ -962,9 +962,9 @@ describe('anomaly severity', () => {
     expect(row.supersededBy).toBe('v002');
   });
 
-  it('orphan tiles are graded the same way', async () => {
+  it('orphan regions are graded the same way', async () => {
     const { body } = await get('/api/anomalies');
-    // The stray region-9 tile sits on 100_ALPHA v002; v004 is the newest full.
+    // The stray region-9 file sits on 100_ALPHA v002; v004 is the newest full.
     expect(body.orphanRegions[0].severity).toBe('low');
     expect(body.orphanRegions[0].supersededBy).toBe('v004');
   });

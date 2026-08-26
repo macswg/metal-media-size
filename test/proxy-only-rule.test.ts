@@ -1,7 +1,7 @@
 /**
  * THE PROXY-ONLY RULE.
  *
- * A version with no LED region files is a low-res whole-canvas preview and
+ * A version with no region files is a low-res whole-canvas preview and
  * nothing else. It is not a delivery of the asset and must never be treated as
  * a replacement for one.
  *
@@ -17,7 +17,7 @@ import { computeReclaim, type ReclaimAssetInput, type ReclaimVersionInput } from
 
 let nextId = 1;
 
-/** A real delivery: 14 LED region tiles plus a proxy. */
+/** A real delivery: 14 regions plus a proxy. */
 function master(verNum: number, bytes: number, sub: string | null = null): ReclaimVersionInput {
   return {
     id: nextId++,
@@ -73,7 +73,7 @@ function verdictFor(result: ReturnType<typeof computeReclaim>, v: ReclaimVersion
 
 describe('a preview never supersedes a master', () => {
   it('the 580_CAUSEWAY_0000A_LL180 case: a preview above the only master keeps the master', () => {
-    // v002: 15 files, 475 GiB of LED masters. v003: a single 1.5 GiB proxy.
+    // v002: 15 files, 475 GiB of masters. v003: a single 1.5 GiB proxy.
     // The policy once proposed deleting v002 and retaining v003.
     const v002 = master(2, 510_447_402_940);
     const v003 = preview(3, 1_527_861_757);

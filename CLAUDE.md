@@ -86,7 +86,7 @@ reasoning is recorded in `src/scan/reclaim.ts` and `src/scan/derive.ts`.
 but cannot be used for show, so do not count them as a valid version for
 playback."*
 
-A version may consist of nothing but its `proxy3_region0` preview, with no LED
+A version may consist of nothing but its `proxy3_region0` preview, with no
 region files at all (`regionCount === 0`). That is **not a delivery of the
 asset** and must never be ranked as one.
 - Supersession ranking considers **region-bearing full versions only**. A
@@ -103,7 +103,7 @@ asset** and must never be ranked as one.
 
 Without this rule the policy marked 85 region-bearing versions (3.86 TiB, of
 which 3.17 TiB was the last full-resolution copy of its asset) as superseded by
-a preview. `580_CAUSEWAY_0000A_LL180` was the clearest case: v002 is 475 GiB of LED
+a preview. `580_CAUSEWAY_0000A_LL180` was the clearest case: v002 is 475 GiB of
 masters, v003 is a single 1.5 GiB proxy, and keep-1 proposed deleting v002. The
 correction moved keep-1 from 52.87 → **49.69 TiB**. Do not reinstate the old
 figure. Reasoning is recorded in `src/scan/reclaim.ts` and pinned by

@@ -138,7 +138,7 @@ describe.skipIf(!haveArchive)('integration: scan of the real archive', () => {
     //    number alone and silently discarded the letter, collapsing `v002d`
     //    and `v002f` into one row. Known-wrong; never reinstate as targets.
     //
-    // 2. THE PROXY-ONLY RULE. A version with no LED region files is a preview
+    // 2. THE PROXY-ONLY RULE. A version with no region files is a preview
     //    and cannot supersede a master. Before this rule the figures were
     //    52.87 / 19.83 / 5.97 TiB (864 / 316 / 127), which counted 3.86 TiB of
     //    region-bearing versions as reclaimable on the strength of a preview
@@ -308,7 +308,7 @@ describe.skipIf(!haveArchive)('integration: scan of the real archive', () => {
     it('never marks a master superseded by a preview alone', () => {
       // THE PROXY-ONLY RULE against the real archive. For every superseded
       // REGION-BEARING version there must exist another REGION-BEARING version
-      // that sorts strictly after it. A version with no LED regions is a
+      // that sorts strictly after it. A version with no regions is a
       // preview and can never do the superseding.
       const r = computeReclaim(reclaimInput, 1);
       const byAsset = new Map(reclaimInput.map((a) => [a.id, a]));

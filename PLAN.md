@@ -6,7 +6,7 @@ The design. Edit in place — don't append a "v2" section.
 
 `SHOW_2026/00_D3_Delivery` holds ~26.6k files / ~133.6 TiB across 65 song
 folders on a read-only macFUSE object mount. A logical *version* is up to 15
-files (14 unequal LED tiles + a proxy), so version-level tonnage is invisible
+files (14 unequal regions + a proxy), so version-level tonnage is invisible
 from the folder. The goal is to make superseded tonnage visible, trustworthy and
 actionable — without ever touching the archive.
 

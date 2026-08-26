@@ -6,7 +6,7 @@
  * a prefix are two different deliverables.
  *
  * A VERSION groups every file sharing (ver, sub, isPatch, patchFrame) within an
- * asset -- i.e. all of a version's LED-tile regions plus its proxy roll up into
+ * asset -- i.e. all of a version's regions plus its proxy roll up into
  * one version row. A `_frameNNNNN` patch is its OWN version row, distinct from
  * the full version of the same number, because it is a partial re-render and
  * NOT a replacement for it.
@@ -40,8 +40,8 @@ export interface DerivedVersion {
   /** Subtotal of `bytes` contributed by `_proxyN` files. */
   proxyBytes: number;
   /**
-   * Distinct LED-tile regions present, EXCLUDING proxy files (region0 is the
-   * whole-canvas proxy, not a tile). A region-less version has 0.
+   * Distinct regions present, EXCLUDING proxy files (region0 is the
+   * whole-canvas proxy, not a region). A region-less version has 0.
    */
   regionCount: number;
   latestMtime: number;
@@ -166,7 +166,7 @@ export function deriveAssets(
     if (f.mtime > version.latestMtime) version.latestMtime = f.mtime;
     version.fileIndexes.push(i);
 
-    // region0 belongs to the proxy canvas, not to the LED tile set.
+    // region0 belongs to the proxy canvas, not to the region set.
     if (p.region !== null && !p.isProxy) {
       (regionSets.get(`${assetKey} ${vkey}`) as Set<number>).add(p.region);
     }

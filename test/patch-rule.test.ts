@@ -20,7 +20,7 @@ function full(verNum: number, bytes: number, sub: string | null = null): Reclaim
     bytes,
     proxyBytes: 0,
     fileCount: 1,
-    // A full delivery carries LED region files. Versions with none are
+    // A full delivery carries region files. Versions with none are
     // previews and are governed by THE PROXY-ONLY RULE -- see
     // test/proxy-only-rule.test.ts.
     regionCount: 14,
@@ -307,7 +307,7 @@ describe('derive keeps sub-letters as distinct version rows', () => {
 
     expect(assets[0]!.versions).toHaveLength(2);
     expect(assets[0]!.versions.map((v) => v.subLetter)).toEqual([null, 'd']);
-    // The region-less v001d contributes no LED tile; the bare v001 has one.
+    // The region-less v001d contributes no region; the bare v001 has one.
     expect(assets[0]!.versions[0]).toMatchObject({ verNum: 1, bytes: 50, regionCount: 1 });
     expect(assets[0]!.versions[1]).toMatchObject({ verNum: 1, bytes: 50, regionCount: 0 });
   });

@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS asset (
 );
 
 -- One row per (version number, sub-letter, patch) group within an asset. A
--- version's LED regions and its proxy roll up into one row. A '_frameNNNNN'
+-- version's regions and its proxy roll up into one row. A '_frameNNNNN'
 -- patch gets its OWN row, because a patch never replaces the full render of
 -- the same number.
 CREATE TABLE IF NOT EXISTS asset_version (
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS asset_version (
   bytes        INTEGER NOT NULL,            -- includes proxy_bytes
   file_count   INTEGER NOT NULL,
   proxy_bytes  INTEGER NOT NULL,            -- subtotal of bytes
-  region_count INTEGER NOT NULL,            -- distinct LED tiles, excl. proxy
+  region_count INTEGER NOT NULL,            -- distinct regions, excl. proxy
   latest_mtime INTEGER NOT NULL,            -- epoch ms
   ver_label    TEXT    NOT NULL             -- e.g. 'v008d', 'v003 frame05259'
 );

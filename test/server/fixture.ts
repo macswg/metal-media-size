@@ -66,7 +66,7 @@ interface AssetSpec {
  *   patch, and v003 whose per-region sizes are identical to v001 (the
  *   version-shape duplicate case).
  * 200_BETA_EDIT_LL180  -- carries a sub-revision letter and a version that is
- *   missing a tile (the missing-region case).
+ *   missing a region (the missing-region case).
  * 300_GAMMA_ANIMATIC_LL180 -- a single version, so nothing can supersede it.
  */
 export const FIXTURE_ASSETS: AssetSpec[] = [
@@ -100,7 +100,7 @@ export const FIXTURE_ASSETS: AssetSpec[] = [
         files: [
           { region: 1, size: 1100 },
           { region: 2, size: 2100 },
-          // Region 9 exists in no other version of this asset: an ORPHAN tile.
+          // Region 9 exists in no other version of this asset: an ORPHAN region.
           { region: 9, size: 90 },
           { region: 0, size: 110, proxy: true },
         ],
@@ -177,7 +177,7 @@ export const FIXTURE_ASSETS: AssetSpec[] = [
         ],
       },
       {
-        // Missing region 2: the layout says two tiles, this version has one.
+        // Missing region 2: the layout says two regions, this version has one.
         tag: 'beta-v1a',
         verNum: 1,
         subLetter: 'a',

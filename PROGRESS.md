@@ -12,13 +12,13 @@ reproduced the recorded figures exactly (26,655 files, 133.57 TiB, keep-1
 
 `computeReclaim` ranked every non-patch version against every other. But 671 of
 2,403 versions consist of **nothing but** their `proxy3_region0` preview — no
-LED region files at all. The policy treated those as complete deliveries, so a
+region files at all. The policy treated those as complete deliveries, so a
 preview sitting above a master marked the master superseded.
 
 Archive-wide that was **85 region-bearing versions, 3.86 TiB**, of which
 **3.17 TiB was the last full-resolution copy of its asset**. The clearest case:
 
-- `580_CAUSEWAY_0000A_LL180` — v002 is 15 files and 475 GiB of LED masters, v003 is
+- `580_CAUSEWAY_0000A_LL180` — v002 is 15 files and 475 GiB of masters, v003 is
   a single 1.5 GiB proxy. keep-1 proposed deleting v002 and keeping v003.
 - `520_THICKET_HERON_IDLE_0000A_ALPHA_LOOP_LL180` — both v003 and v003b (625 GiB
   of masters) superseded by a 4 GiB proxy at v004.
