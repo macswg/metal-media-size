@@ -1,10 +1,11 @@
 /**
  * Shared per-server state and the row shapes the routes return.
  *
- * The API is READ-ONLY over the SQLite index. The only route with a side
- * effect is `POST /api/scan`, which delegates to the scanner, and
- * `POST /api/export`, which delegates to the exporter agent's module. Nothing
- * in `src/server` touches the archive directly.
+ * The API is READ-ONLY over the SQLite index. Three routes have side effects:
+ * `POST /api/scan`, which delegates to the scanner; `POST /api/probe`, which
+ * delegates to the header-reading pass; and `POST /api/export`, which
+ * delegates to the exporter agent's module. Nothing in `src/server` touches
+ * the archive directly -- both readers go through the read-only chokepoint.
  */
 
 import type { Database as Db } from 'better-sqlite3';
@@ -13,6 +14,7 @@ import { getSnapshot, latestSnapshot, type SnapshotRow } from '../db/index.ts';
 import type { KeepReason } from '../scan/reclaim.ts';
 import { ReclaimCache } from './reclaim-cache.ts';
 import { ScanRunner } from './scan-runner.ts';
+import { ProbeRunner } from './probe-runner.ts';
 import { badRequest, notFound } from './errors.ts';
 import { intParam, type Query } from './query.ts';
 
@@ -21,6 +23,12 @@ export interface AppContext {
   cfg: AppConfig;
   reclaim: ReclaimCache;
   scans: ScanRunner;
+  /**
+   * The resolution pass. Separate from `scans` on purpose: a scan is one
+   * atomic walk, a probe is thousands of independent header reads that can be
+   * stopped and resumed. See `probe-runner.ts`.
+   */
+  probes: ProbeRunner;
   /**
    * Where the exporter puts its artefacts. Undefined in normal operation, so
    * the exporter uses its own jailed default of `<project>/exports`. Tests set
@@ -32,7 +40,8 @@ export interface AppContext {
 export function createContext(db: Db, cfg: AppConfig, exportsDir?: string): AppContext {
   const reclaim = new ReclaimCache(db);
   const scans = new ScanRunner(db, cfg, (snapshotId) => reclaim.invalidate(snapshotId));
-  return { db, cfg, reclaim, scans, ...(exportsDir === undefined ? {} : { exportsDir }) };
+  const probes = new ProbeRunner(db, cfg);
+  return { db, cfg, reclaim, scans, probes, ...(exportsDir === undefined ? {} : { exportsDir }) };
 }
 
 /**
@@ -87,6 +96,16 @@ export interface FileRow {
   status: 'kept' | 'superseded' | 'unknown';
   keepReason: KeepReason | null;
   /**
+   * Pixel dimensions from the file's own header, or null when it has not been
+   * probed. `npm run probe` is what fills these in; a scan never reads a byte
+   * of the archive, so an unprobed index reports null everywhere and the UI
+   * says so rather than inventing a size.
+   */
+  width: number | null;
+  height: number | null;
+  /** False until `npm run probe` has read this file's header. */
+  probed: boolean;
+  /**
    * The asset this file belongs to, so a file row can open the version ladder
    * without a second lookup. NULL exactly when `parseOk` is false -- an
    * unparsed file has no asset-version and therefore no asset.
@@ -105,6 +124,9 @@ export interface FileDbRow {
   parse_ok: number;
   asset_version_id: number | null;
   asset_id: number | null;
+  width: number | null;
+  height: number | null;
+  probed: number;
 }
 
 export function toFileRow(
@@ -124,6 +146,12 @@ export function toFileRow(
     status: verdict === undefined ? 'unknown' : verdict.keep ? 'kept' : 'superseded',
     keepReason: verdict?.reason ?? null,
     assetId: r.asset_id,
+    width: r.width,
+    height: r.height,
+    // Whether anyone has LOOKED. Without this, 'we never read this file' and
+    // 'we read it and it has no header' both arrive as null, and the second of
+    // those is an interrupted render -- bytes on disk that will not play.
+    probed: r.probed === 1,
   };
 }
 

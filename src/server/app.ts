@@ -31,6 +31,7 @@ import { registerDuplicateRoutes } from './routes/duplicates.ts';
 import { registerExportRoutes } from './routes/export.ts';
 import { registerFileRoutes } from './routes/files.ts';
 import { registerReclaimRoutes } from './routes/reclaim.ts';
+import { registerProbeRoutes } from './routes/probe.ts';
 import { registerScanRoutes } from './routes/scan.ts';
 import { registerSnapshotRoutes } from './routes/snapshots.ts';
 import { registerSongRoutes } from './routes/songs.ts';
@@ -138,6 +139,7 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
 
   registerSnapshotRoutes(app, ctx);
   registerScanRoutes(app, ctx);
+  registerProbeRoutes(app, ctx);
   registerFileRoutes(app, ctx);
   registerVersionRoutes(app, ctx);
   registerReclaimRoutes(app, ctx);

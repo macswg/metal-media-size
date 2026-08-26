@@ -199,6 +199,9 @@ async function loadSummary() {
       (Array.isArray(s?.byFamily) ? s.byFamily.map((f) => f.family).filter(Boolean) : []) ||
       [];
 
+    // Drives whether the Files table shows a Resolution column at all.
+    state.mediaProbed = Number(s?.media?.withDimensions ?? 0);
+
     app.filters.setOptions({
       songFolders: s?.songFolders || [],
       families,

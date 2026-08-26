@@ -113,9 +113,14 @@ export class AnomaliesPanel {
     const orphan = a.orphanRegions || [];
     const unparsed = a.unparsed || [];
     const zero = a.zeroByte || [];
+    const noHeader = a.noHeader || [];
     const excluded = a.excluded || {};
+    // How much of the snapshot the probe has actually read. Without it, an
+    // empty noHeader list would read as "no broken files" when it may only
+    // mean "nobody has looked yet".
+    const coverage = a.probeCoverage || null;
 
-    const graded = [...missing, ...orphan, ...unparsed, ...zero];
+    const graded = [...missing, ...orphan, ...unparsed, ...zero, ...noHeader];
     const counts = a.severity ||
       a.severityCounts || {
         high: graded.filter((r) => r.severity === 'high').length,
@@ -132,6 +137,13 @@ export class AnomaliesPanel {
         statMuted('Already superseded', count(counts.low ?? 0), 'a later full render presumably fixes these'),
         stat('Unparsed filenames', count(unparsed.length), 'in no asset-version at all'),
         stat('Zero-byte files', count(zero.length), ''),
+        stat(
+          'Unplayable renders',
+          count(noHeader.length),
+          coverage && coverage.probed < coverage.total
+            ? `of ${count(coverage.probed)} files read so far`
+            : 'no header — nothing can open these',
+        ),
         stat('Excluded bookkeeping', count(excluded.count ?? 0), excluded.bytes != null ? fmtBytes(excluded.bytes) : ''),
       ),
       h(
@@ -149,6 +161,21 @@ export class AnomaliesPanel {
       anomalyCard('Versions with regions but no proxy', orphan, () => 'no proxy render'),
       anomalyCard('Files whose names did not parse', unparsed, (r) => r.reason || 'did not match the version grammar', 'relPath'),
       anomalyCard('Zero-byte files', zero, () => 'zero bytes on disk', 'relPath'),
+      anomalyCard(
+        'Files with no header — an interrupted render',
+        noHeader,
+        (r) => r.reason || 'no header atom',
+        'relPath',
+        // What was actually looked at. An empty list on an unprobed archive is
+        // not a clean bill of health, and must not be presented as one.
+        coverage
+          ? coverage.probed === 0
+            ? 'Nothing has been probed yet, so nothing here has been checked. Run `npm run probe` to read the file headers.'
+            : coverage.probed < coverage.total
+              ? `Checked ${count(coverage.probed)} of ${count(coverage.total)} files so far — the probe is still working through the archive.`
+              : `Every file in this snapshot has been checked.`
+          : null,
+      ),
       card(
         'Excluded from the index',
         excluded.count ?? 0,
@@ -208,7 +235,13 @@ export class AnomaliesPanel {
  * superseded ones stay present but recede behind a disclosure, each showing
  * what supersedes it so the de-emphasis is visible rather than asserted.
  */
-function anomalyCard(title, rows, describe, identityKey) {
+/**
+ * `scopeNote` says what the card was computed OVER. Only categories that can
+ * be computed from part of the archive need it -- everything derived from the
+ * index covers all of it by construction, but the header check covers only
+ * what has been probed, and an empty list there means nothing without it.
+ */
+function anomalyCard(title, rows, describe, identityKey, scopeNote) {
   rows = rows || [];
   const high = rows.filter((r) => r.severity !== 'low');
   const low = rows.filter((r) => r.severity === 'low');
@@ -218,6 +251,7 @@ function anomalyCard(title, rows, describe, identityKey) {
   if (high.length === 0 && low.length === 0) {
     body.appendChild(h('div.muted', 'None found.'));
   }
+  if (scopeNote) body.appendChild(h('div.card-note', { style: { padding: '6px 0 0' }, text: scopeNote }));
   if (high.length) body.appendChild(h('div.anom-list', ...high.map((r) => anomalyRow(r, describe, false, identityKey))));
   if (low.length) {
     const list = h('div.anom-list.low', ...low.map((r) => anomalyRow(r, describe, true, identityKey)));
@@ -269,7 +303,9 @@ function anomalyRow(r, describe, isLow, identityKey) {
     isLow && r.supersededBy
       ? h('span.anom-by', { text: `superseded by ${r.supersededBy}` })
       : h('span.anom-by', { text: isLow ? 'superseded' : 'no newer full render' }),
-    h('span.anom-bytes', { text: r.bytes != null ? fmtBytes(r.bytes) : '' }),
+    // File-level rows carry `size`, version-level rows carry `bytes`. A 140 GB
+    // unplayable file is the whole point of its row; it must not render blank.
+    h('span.anom-bytes', { text: r.bytes != null ? fmtBytes(r.bytes) : r.size != null ? fmtBytes(r.size) : '' }),
   );
 }
 

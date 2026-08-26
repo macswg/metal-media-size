@@ -150,6 +150,26 @@ export function keepReasonText(reason) {
   return KEEP_REASON[reason]?.short ?? reason ?? '—';
 }
 
+/**
+ * What the Why column says once you have overridden the policy on a row.
+ *
+ * The policy's reason is still true -- a newer version really does exist --
+ * but it is no longer WHY this version is staying. You are. Leaving the
+ * policy's sentence in place would read as though the tool decided to keep it,
+ * which is the one thing this column must never imply. The original verdict
+ * moves into the tooltip rather than being thrown away.
+ */
+export const OVERRIDE_REASON_TEXT = 'manual override';
+
+export function overrideReasonDetail(reason) {
+  const policy = KEEP_REASON[reason]?.short;
+  return (
+    'You un-ticked this version, so it stays out of the export manifest and nothing will touch it.' +
+    (policy ? `\n\nThe policy's verdict was: ${policy}.` : '') +
+    '\n\nTick it again to hand the decision back to the policy.'
+  );
+}
+
 export function keepReasonDetail(reason) {
   return KEEP_REASON[reason]?.long ?? '';
 }

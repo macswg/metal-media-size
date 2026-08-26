@@ -68,6 +68,7 @@ interface AssetSpec {
  * 200_BETA_EDIT_LL180  -- carries a sub-revision letter and a version that is
  *   missing a region (the missing-region case).
  * 300_GAMMA_ANIMATIC_LL180 -- a single version, so nothing can supersede it.
+ * 500_ECHO_PREVIEW_LL180 -- a region-bearing v001 and a proxy-only v002.
  */
 export const FIXTURE_ASSETS: AssetSpec[] = [
   {
@@ -216,6 +217,41 @@ export const FIXTURE_ASSETS: AssetSpec[] = [
         verLabel: 'v001',
         mtime: 900_000,
         files: [{ region: 1, size: 4242 }],
+      },
+    ],
+  },
+  {
+    // The PROXY-ONLY case: v002 is nothing but a preview. It must never rank as
+    // a delivery of the asset, so it neither supersedes v001 nor takes a slot
+    // in the keep-N window. It is also the only `hasProxy=only` row here.
+    songFolder: '500_ECHO',
+    base: '500_ECHO_PREVIEW_LL180',
+    family: 'LL180',
+    versions: [
+      {
+        tag: 'echo-v1',
+        verNum: 1,
+        subLetter: null,
+        isPatch: false,
+        patchFrame: null,
+        verLabel: 'v001',
+        mtime: 6_000_000,
+        files: [
+          { region: 1, size: 1200 },
+          { region: 2, size: 1300 },
+          { region: 0, size: 120, proxy: true },
+        ],
+      },
+      {
+        // No region files at all: a preview, not a playable version.
+        tag: 'echo-v2-proxy-only',
+        verNum: 2,
+        subLetter: null,
+        isPatch: false,
+        patchFrame: null,
+        verLabel: 'v002',
+        mtime: 6_100_000,
+        files: [{ region: 0, size: 130, proxy: true }],
       },
     ],
   },
@@ -465,6 +501,31 @@ function finish(
 }
 
 /**
+ * Stand in for `npm run probe` on a handful of files.
+ *
+ * Three states, because the API has to be able to tell them apart: dimensions
+ * on record, PROBED AND EMPTY (a render interrupted before its header was
+ * written -- bytes that no player can open), and never looked at. The third is
+ * the default, so it needs no row here.
+ */
+function probeSomeFiles(db: Db, snapshotId: number): void {
+  const byName = db.prepare(`SELECT id FROM file WHERE snapshot_id = ? AND name = ?`);
+  const insert = db.prepare(
+    `INSERT INTO file_media (file_id, width, height, probed_at) VALUES (?, ?, ?, ?)`,
+  );
+  const probes: [string, number | null, number | null][] = [
+    ['100_ALPHA_MAIN_LL180_v001_region1.mov', 8996, 2584],
+    ['100_ALPHA_MAIN_LL180_v001_region2.mov', 3976, 3248],
+    // Read cleanly, no header atom: the interrupted-render case.
+    ['100_ALPHA_MAIN_LL180_v001_proxy3_region0.mov', null, null],
+  ];
+  for (const [name, w, h] of probes) {
+    const row = byName.get(snapshotId, name) as { id: number } | undefined;
+    if (row) insert.run(row.id, w, h, 9_000_000);
+  }
+}
+
+/**
  * Build the fixture.
  *
  * The EARLIER snapshot is the archive before the newest render landed:
@@ -498,6 +559,7 @@ export function makeFixture(): Fixture {
 
   const latest = insertSnapshot(db, 'fixture-latest', 2_000);
   finish(db, latest, populate(db, latest, { versionIds, assetIds }));
+  probeSomeFiles(db, latest);
 
   return { db, cfg: FIXTURE_CONFIG, snapshotId: latest, snapshotIdPrev: prev, versionIds, assetIds };
 }

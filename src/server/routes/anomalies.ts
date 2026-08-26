@@ -1,7 +1,23 @@
 /**
  * `GET /api/anomalies` -- everything the index knows is odd.
  *
- * `{ missingRegions[], orphanRegions[], unparsed[], zeroByte[], excluded{} }`
+ * `{ missingRegions[], orphanRegions[], unparsed[], zeroByte[], noHeader[],
+ *    excluded{} }`
+ *
+ * ---------------------------------------------------------------------------
+ * `noHeader` IS THE ONE CATEGORY THAT NEEDS A PROBE
+ *
+ * Every other anomaly here is derived from names, sizes and counts. `noHeader`
+ * comes from `npm run probe`: a file that read cleanly and turned out to carry
+ * no `moov` atom is a render interrupted before its header was written. The
+ * bytes are on disk and no player can open them -- 140 GB of nothing, in the
+ * worst case found so far.
+ *
+ * It is reported ONLY for files that have actually been probed. An unprobed
+ * archive reports an empty list, never a clean bill of health inferred from
+ * not having looked. Zero-byte files are left to `zeroByte`, which already
+ * describes them better.
+ * ---------------------------------------------------------------------------
  *
  * ---------------------------------------------------------------------------
  * SEVERITY
@@ -57,6 +73,7 @@ import { resolveSnapshot } from '../context.ts';
 import { badRequest } from '../errors.ts';
 import { intParam, type Query } from '../query.ts';
 import { toSnapshotView } from './snapshots.ts';
+import { mediaCoverage } from '../../db/index.ts';
 
 const DEFAULT_ANOMALY_LIMIT = 500;
 const MAX_ANOMALY_LIMIT = 20_000;
@@ -82,6 +99,10 @@ interface NameRow {
   mtime: number;
   parse_ok: number;
   asset_version_id: number | null;
+  /** 1 once `npm run probe` has read this file's header. */
+  probed: number;
+  /** NULL when unprobed OR when probed and headerless -- `probed` separates them. */
+  width: number | null;
 }
 
 /**
@@ -190,8 +211,12 @@ export function registerAnomalyRoutes(app: FastifyInstance, ctx: AppContext): vo
 
     const files = ctx.db
       .prepare(
-        `SELECT id, rel_path, song_folder, name, ext, size, mtime, parse_ok, asset_version_id
-           FROM file WHERE snapshot_id = ? ORDER BY id ASC`,
+        `SELECT f.id, f.rel_path, f.song_folder, f.name, f.ext, f.size, f.mtime,
+                f.parse_ok, f.asset_version_id,
+                (fm.file_id IS NOT NULL) AS probed, fm.width AS width
+           FROM file f
+           LEFT JOIN file_media fm ON fm.file_id = f.id
+          WHERE f.snapshot_id = ? ORDER BY f.id ASC`,
       )
       .all(snapshot.id) as NameRow[];
 
@@ -295,12 +320,37 @@ export function registerAnomalyRoutes(app: FastifyInstance, ctx: AppContext): vo
     const regionFiles: { file: NameRow; region: number; versionId: number }[] = [];
     const unparsed: unknown[] = [];
     const zeroByte: unknown[] = [];
+    const noHeader: unknown[] = [];
     const unparsedTally = new Tally();
     const zeroByteTally = new Tally();
+    const noHeaderTally = new Tally();
 
     const keep = (v: SeverityVerdict): boolean => want === undefined || v.severity === want;
 
     for (const f of files) {
+      // Probed, non-empty, and no dimensions: the header atom is missing.
+      // Zero-byte files are left to `zeroByte`, which says it better.
+      if (f.probed === 1 && f.width === null && f.size > 0) {
+        const a = attribute(f);
+        noHeaderTally.add(a);
+        if (keep(a) && noHeader.length < limit) {
+          noHeader.push({
+            fileId: f.id,
+            relPath: f.rel_path,
+            songFolder: f.song_folder,
+            name: f.name,
+            ext: f.ext,
+            size: f.size,
+            mtime: f.mtime,
+            assetId: a.assetId,
+            base: a.base,
+            severity: a.severity,
+            supersededBy: a.supersededBy,
+            reason: 'read cleanly but carries no header atom — an interrupted render',
+          });
+        }
+      }
+
       if (f.parse_ok !== 1 || f.size === 0) {
         const a = attribute(f);
         if (f.parse_ok !== 1) {
@@ -440,6 +490,7 @@ export function registerAnomalyRoutes(app: FastifyInstance, ctx: AppContext): vo
       orphanRegions,
       unparsed,
       zeroByte,
+      noHeader,
       excluded: {
         // Straight from snapshot.excluded_*: FreeFileSync bookkeeping and
         // AppleDouble files are COUNTED, never silently dropped.
@@ -457,17 +508,29 @@ export function registerAnomalyRoutes(app: FastifyInstance, ctx: AppContext): vo
         unparsed: unparsedTally.total,
         unparsedRecordedBySnapshot: snapshot.unparsed_count,
         zeroByte: zeroByteTally.total,
+        noHeader: noHeaderTally.total,
         excluded: snapshot.excluded_count,
         skippedDirs: view.skipped.length,
       },
+      /**
+       * What `noHeader` was computed over. Without this the UI cannot tell
+       * 'no interrupted renders' from 'nobody has probed yet', and would
+       * report the second as though it were the first.
+       */
+      probeCoverage: mediaCoverage(ctx.db, snapshot.id),
       severity: {
-        high: missingTally.high + orphanTally.high + unparsedTally.high + zeroByteTally.high,
-        low: missingTally.low + orphanTally.low + unparsedTally.low + zeroByteTally.low,
+        high:
+          missingTally.high + orphanTally.high + unparsedTally.high + zeroByteTally.high +
+          noHeaderTally.high,
+        low:
+          missingTally.low + orphanTally.low + unparsedTally.low + zeroByteTally.low +
+          noHeaderTally.low,
         byCategory: {
           missingRegions: missingTally.toJSON(),
           orphanRegions: orphanTally.toJSON(),
           unparsed: unparsedTally.toJSON(),
           zeroByte: zeroByteTally.toJSON(),
+          noHeader: noHeaderTally.toJSON(),
         },
       },
     };

@@ -51,8 +51,10 @@ const LIVE = {
   get(path, params) {
     return LIVE.request(path, params);
   },
-  post(path, payload) {
-    return LIVE.request(path, null, {
+  post(path, payload, params) {
+    // `params` matters for POST /api/probe: which snapshot is being probed is
+    // resolved from the query string, exactly as every read route resolves it.
+    return LIVE.request(path, params ?? null, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
@@ -132,6 +134,12 @@ export const api = {
   health: () => impl.get('/api/health'),
   scanStatus: () => impl.get('/api/scan/status'),
   startScan: (name) => impl.post('/api/scan', name ? { name } : {}),
+
+  // The resolution pass. Unlike a scan it can be stopped: results are written
+  // as they land, so cancelling loses nothing and the next run resumes.
+  probeStatus: (params) => impl.get('/api/probe/status', params),
+  startProbe: (payload, params) => impl.post('/api/probe', payload || {}, params),
+  cancelProbe: () => impl.post('/api/probe/cancel', {}),
   // Removes an index entry, never a file. See the route docblock.
   deleteSnapshot: (id) => impl.del(`/api/snapshots/${id}`),
   diff: (a, b) => impl.get(`/api/snapshots/${a}/diff/${b}`),

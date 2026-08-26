@@ -27,6 +27,9 @@
  *     the FreeFileSync bookkeeping files are counted so they are never
  *     silently invisible.
  *   asset_version.ver_label -- the version as displayed, e.g. `v008d`.
+ *   file_media -- pixel dimensions, written only by `npm run probe`. Kept out
+ *     of `file` so that the insert-only guarantee on a scan's rows holds
+ *     literally: a probe adds rows to its own table and edits nothing.
  * ---------------------------------------------------------------------------
  */
 
@@ -76,6 +79,21 @@ CREATE TABLE IF NOT EXISTS file (
   asset_version_id INTEGER REFERENCES asset_version(id) ON DELETE SET NULL
 );
 
+-- Pixel dimensions, filled in by 'npm run probe' and NEVER by a scan.
+--
+-- A separate table on purpose. Snapshots are insert-only: a scan's file rows
+-- are a record of what the archive looked like at a moment, and the probe --
+-- which runs later, on the operator's say-so -- must not reach back and edit
+-- them. A row here means the file HAS been probed; NULL width/height means it
+-- was probed and had no dimensions to give (unreadable, or not a movie), which
+-- is what stops the next run retrying it forever.
+CREATE TABLE IF NOT EXISTS file_media (
+  file_id   INTEGER PRIMARY KEY REFERENCES file(id) ON DELETE CASCADE,
+  width     INTEGER,
+  height    INTEGER,
+  probed_at INTEGER NOT NULL                -- epoch ms
+);
+
 -- Asset identity is (snapshot_id, song_folder, base). The base is VERBATIM.
 CREATE TABLE IF NOT EXISTS asset (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,6 +136,8 @@ CREATE INDEX IF NOT EXISTS idx_file_song          ON file(snapshot_id, song_fold
 CREATE INDEX IF NOT EXISTS idx_file_version       ON file(asset_version_id);
 CREATE INDEX IF NOT EXISTS idx_file_relpath       ON file(snapshot_id, rel_path);
 CREATE INDEX IF NOT EXISTS idx_file_parse_ok      ON file(snapshot_id, parse_ok);
+-- Carrying probe results across a rescan matches on identity, not on file id.
+CREATE INDEX IF NOT EXISTS idx_file_identity      ON file(rel_path, size, mtime);
 
 CREATE INDEX IF NOT EXISTS idx_asset_snapshot     ON asset(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_asset_song         ON asset(snapshot_id, song_folder);

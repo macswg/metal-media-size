@@ -271,6 +271,17 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
   color: var(--dim); margin-bottom: 5px;
 }
 .fgroup input, .fgroup select { width: 100%; }
+
+/* A field with a clear button inside it. */
+.field-wrap { position: relative; display: block; }
+.field-wrap input { padding-right: 26px; }
+.field-x {
+  position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--faint); font-size: 11px; line-height: 1;
+  padding: 4px 6px; border-radius: 3px;
+}
+.field-x:hover { color: var(--text); background: var(--panel-3); }
 .frow { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .fhint { font-size: 10.5px; color: var(--faint); margin-top: 4px; font-family: var(--mono); }
 .fhint.bad { color: var(--warn); }
@@ -296,6 +307,12 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .seg button:last-child { border-right: 0; }
 .seg button:hover { background: var(--panel-3); }
 .seg button.on { background: var(--accent-dim); color: #eaf6ff; }
+/* Four options do not fit across a 268px sidebar, so the proxy control wraps
+   into a 2x2 block. Only the interior edges keep a rule. */
+.seg.wrap { flex-wrap: wrap; }
+.seg.wrap button { flex: 1 0 45%; border-bottom: 1px solid var(--line); }
+.seg.wrap button:nth-child(even) { border-right: 0; }
+.seg.wrap button:nth-last-child(-n + 2) { border-bottom: 0; }
 .seg.kept button.on { background: rgba(63, 174, 122, 0.25); color: #9fe0c1; }
 .seg.superseded button.on { background: rgba(224, 163, 58, 0.25); color: #f0cf92; }
 
@@ -359,10 +376,22 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
   user-select: none;
 }
 .vt-th {
+  position: relative;
   display: flex; align-items: center; gap: 4px;
   padding: 6px 8px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.7px;
   color: var(--dim); border-right: 1px solid var(--line-soft); white-space: nowrap; overflow: hidden;
 }
+
+/* Column resize grip. 6px is wider than the 1px rule it sits on, so the edge
+   is catchable without hunting for it, and it stays inside the header cell so
+   the header's own overflow: hidden never clips it. */
+.vt-grip {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 6px;
+  cursor: col-resize; touch-action: none;
+}
+.vt-grip:hover, .vt-grip.dragging { background: var(--accent); }
+/* Hold the resize cursor for the whole drag, not just over the grip. */
+.vt.is-resizing, .vt.is-resizing * { cursor: col-resize !important; }
 .vt-th.num { justify-content: flex-end; }
 .vt-th.sortable { cursor: pointer; }
 .vt-th.sortable:hover { color: var(--text-2); background: var(--panel-3); }
@@ -429,6 +458,13 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .pill.kept { color: var(--kept); background: var(--kept-bg); }
 .pill.unknown { color: var(--dim); background: var(--panel-2); }
 .pill.superseded { color: var(--superseded); background: var(--superseded-bg); }
+/* Red, not amber. Amber is 'a newer version replaces this' — a normal, safe
+   state. A file with no header is broken: the bytes are there and nothing can
+   open them. The two must not read as the same kind of news. */
+.pill.broken {
+  color: #ff6b6b; background: rgba(255, 107, 107, 0.14);
+  border: 1px solid rgba(255, 107, 107, 0.45);
+}
 .pill.patch { color: var(--patch); background: var(--patch-bg); }
 /* An override: the policy slated it, you kept it. Reads as kept, but marked
    as a decision rather than a verdict, so the two are never confused. */
@@ -440,6 +476,8 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .pill.family { color: var(--text-2); background: var(--panel-3); }
 .pill.muted { color: var(--dim); background: var(--panel-2); }
 .reason { color: var(--dim); font-size: 11.5px; }
+/* A decision you made reads louder than a verdict the policy reached. */
+.reason.override { color: var(--kept); font-style: italic; }
 
 .checkcell { display: flex; align-items: center; justify-content: center; }
 
@@ -608,6 +646,34 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
 .field input, .field textarea { width: 100%; }
 .field .hint { font-size: 11px; color: var(--faint); margin-top: 4px; }
 .field .hint.bad { color: var(--warn); }
+
+/* ------------------------------------------------------- probe controls */
+
+/* Lives in the topbar, which is a 46px flex ROW -- so this is an inline group
+   like .snap-actions, not a banner. A bordered block here competed with the
+   snapshot picker for width and then wrapped inside itself. */
+.snap-probe {
+  display: inline-flex; align-items: center; gap: 7px;
+  flex: none; margin-left: 10px;
+  padding-left: 10px; border-left: 1px solid var(--line);
+}
+.snap-probe .probe-note {
+  font-size: 11px; color: var(--dim); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.probe-meter {
+  flex: 0 0 52px; height: 4px; border-radius: 2px; background: #29313c; overflow: hidden;
+}
+.probe-meter i { display: block; height: 100%; background: var(--accent); transition: width 0.4s; }
+.probe-meter.done i { background: var(--kept); }
+
+/* Narrow: the button is the part you need, the commentary is not. */
+@media (max-width: 1320px) {
+  .snap-probe .probe-note { display: none; }
+}
+@media (max-width: 1100px) {
+  .snap-probe .probe-meter { display: none; }
+}
 
 /* ---------------------------------------------------------------- toasts */
 

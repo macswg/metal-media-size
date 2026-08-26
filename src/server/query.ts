@@ -33,6 +33,9 @@
  *   family       family of the file's version (display label only)
  *   isPatch      the file's version          asset_version.is_patch
  *   hasProxy     the file's version          asset_version.proxy_bytes > 0
+ *                (0|1|only)                  only = proxy_bytes > 0 AND
+ *                                            region_count = 0 -- a preview
+ *                                            with no slices behind it
  *   status       verdict of the file's       verdict of the version at keepN
  *                version at keepN
  *   q            substring of rel_path       substring of
@@ -77,7 +80,7 @@ export interface FilterSpec {
   family?: string;
   status?: StatusValue;
   isPatch?: 0 | 1;
-  hasProxy?: 0 | 1;
+  hasProxy?: 0 | 1 | 'only';
   q?: string;
   /**
    * Restrict to these version ids. Exists so the UI can show "only what I have
@@ -134,6 +137,22 @@ function boolIntParam(q: Query, key: string): 0 | 1 | undefined {
   if (s === '1' || s === 'true') return 1;
   if (s === '0' || s === 'false') return 0;
   throw badRequest('bad_param', `${key} must be 0 or 1, got ${JSON.stringify(s)}`);
+}
+
+/**
+ * `hasProxy` is not quite a boolean. Beyond "has one" / "has none" there is a
+ * third state worth filtering on: a version that is NOTHING BUT its proxy --
+ * `proxy_bytes > 0` with `region_count = 0`. Those are previews, not
+ * deliveries of the asset, and the reclaim policy treats them specially, so
+ * being able to see exactly which versions they are matters.
+ */
+function proxyParam(q: Query): 0 | 1 | 'only' | undefined {
+  const s = str(q, 'hasProxy');
+  if (s === undefined) return undefined;
+  if (s === 'only') return 'only';
+  if (s === '1' || s === 'true') return 1;
+  if (s === '0' || s === 'false') return 0;
+  throw badRequest('bad_param', `hasProxy must be 0, 1 or 'only', got ${JSON.stringify(s)}`);
 }
 
 export function parseKeepN(q: Query): number {
@@ -287,7 +306,7 @@ export function parseFilters(q: Query): FilterSpec {
 
   const isPatch = boolIntParam(q, 'isPatch');
   if (isPatch !== undefined) f.isPatch = isPatch;
-  const hasProxy = boolIntParam(q, 'hasProxy');
+  const hasProxy = proxyParam(q);
   if (hasProxy !== undefined) f.hasProxy = hasProxy;
 
   const qq = str(q, 'q');
@@ -439,7 +458,13 @@ export function fileWhere(snapshotId: number, f: FilterSpec): SqlWhere {
     params.push(f.isPatch);
   }
   if (f.hasProxy !== undefined) {
-    parts.push(f.hasProxy === 1 ? 'COALESCE(av.proxy_bytes, 0) > 0' : 'COALESCE(av.proxy_bytes, 0) = 0');
+    parts.push(
+      f.hasProxy === 'only'
+        ? 'COALESCE(av.proxy_bytes, 0) > 0 AND COALESCE(av.region_count, 0) = 0'
+        : f.hasProxy === 1
+          ? 'COALESCE(av.proxy_bytes, 0) > 0'
+          : 'COALESCE(av.proxy_bytes, 0) = 0',
+    );
   }
   if (f.q !== undefined) {
     parts.push('instr(lower(f.rel_path), lower(?)) > 0');
@@ -503,7 +528,13 @@ export function versionWhere(snapshotId: number, f: FilterSpec): SqlWhere {
     params.push(f.isPatch);
   }
   if (f.hasProxy !== undefined) {
-    parts.push(f.hasProxy === 1 ? 'av.proxy_bytes > 0' : 'av.proxy_bytes = 0');
+    parts.push(
+      f.hasProxy === 'only'
+        ? 'av.proxy_bytes > 0 AND av.region_count = 0'
+        : f.hasProxy === 1
+          ? 'av.proxy_bytes > 0'
+          : 'av.proxy_bytes = 0',
+    );
   }
   if (f.q !== undefined) {
     parts.push("instr(lower(av.song_folder || '/' || av.base || ' ' || av.ver_label), lower(?)) > 0");
@@ -528,6 +559,12 @@ export const FILE_SORT_COLUMNS: Record<string, string> = {
   mtime: 'f.mtime',
   parseOk: 'f.parse_ok',
   assetVersionId: 'f.asset_version_id',
+  // Sorting by resolution means sorting by pixel count: 8996x2584 and
+  // 3976x3248 cannot be ordered by either axis alone. Unprobed rows sort as 0,
+  // which puts them at one end rather than scattering them through the list.
+  resolution: 'COALESCE(fm.width, 0) * COALESCE(fm.height, 0)',
+  width: 'COALESCE(fm.width, 0)',
+  height: 'COALESCE(fm.height, 0)',
 };
 
 export const VERSION_SORT_COLUMNS: Record<string, string> = {

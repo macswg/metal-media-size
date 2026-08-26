@@ -255,3 +255,99 @@ export function latestSnapshot(db: Db, root?: string): SnapshotRow | undefined {
 export function listSnapshots(db: Db): SnapshotRow[] {
   return db.prepare(`SELECT * FROM snapshot ORDER BY id DESC`).all() as SnapshotRow[];
 }
+
+// ---------------------------------------------------------------------------
+// Pixel dimensions (`file_media`)
+//
+// Written ONLY by `npm run probe`. A scan never touches this table, and this
+// table never touches a scan's rows -- which is how the insert-only promise on
+// snapshots survives a feature that learns something new about an old file.
+// ---------------------------------------------------------------------------
+
+export interface MediaProbeRow {
+  fileId: number;
+  width: number | null;
+  height: number | null;
+}
+
+/** Files in a snapshot that have not been probed yet, largest first. */
+export function unprobedFiles(
+  db: Db,
+  snapshotId: number,
+  opts: { ext?: string; limit?: number; retryEmpty?: boolean } = {},
+): { id: number; rel_path: string; size: number }[] {
+  const ext = opts.ext ?? 'mov';
+  const limit = opts.limit && opts.limit > 0 ? opts.limit : -1;
+  // Default: a file with a row has been dealt with. `retryEmpty` also picks up
+  // the rows recorded as having no dimensions, for when the parser changes.
+  const todo = opts.retryEmpty ? 'fm.file_id IS NULL OR fm.width IS NULL' : 'fm.file_id IS NULL';
+  return db
+    .prepare(
+      `SELECT f.id, f.rel_path, f.size
+         FROM file f
+         LEFT JOIN file_media fm ON fm.file_id = f.id
+        WHERE f.snapshot_id = ? AND f.ext = ? AND (${todo})
+        ORDER BY f.size DESC
+        LIMIT ?`,
+    )
+    .all(snapshotId, ext, limit) as { id: number; rel_path: string; size: number }[];
+}
+
+/** Record probe results. `width`/`height` NULL means 'probed, none found'. */
+export function recordMedia(db: Db, rows: MediaProbeRow[], probedAt = Date.now()): void {
+  if (rows.length === 0) return;
+  const stmt = db.prepare(
+    `INSERT INTO file_media (file_id, width, height, probed_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(file_id) DO UPDATE SET
+       width = excluded.width, height = excluded.height, probed_at = excluded.probed_at`,
+  );
+  db.transaction((batch: MediaProbeRow[]) => {
+    for (const r of batch) stmt.run(r.fileId, r.width, r.height, probedAt);
+  })(rows);
+}
+
+/**
+ * Carry probe results forward onto a newer snapshot's rows.
+ *
+ * A rescan produces new `file` ids for files that did not change, which would
+ * otherwise mean re-probing all 26k of them. Identity here is
+ * (rel_path, size, mtime): same path, same bytes, same timestamp is the same
+ * render. Anything that moved, grew or was re-rendered is deliberately NOT
+ * matched, and gets probed again.
+ */
+export function carryForwardMedia(db: Db, snapshotId: number): number {
+  const info = db
+    .prepare(
+      `INSERT INTO file_media (file_id, width, height, probed_at)
+       SELECT f.id, src.width, src.height, src.probed_at
+         FROM file f
+         JOIN file prev ON prev.rel_path = f.rel_path
+                       AND prev.size = f.size
+                       AND prev.mtime = f.mtime
+                       AND prev.snapshot_id <> f.snapshot_id
+         JOIN file_media src ON src.file_id = prev.id
+         LEFT JOIN file_media have ON have.file_id = f.id
+        WHERE f.snapshot_id = ? AND have.file_id IS NULL
+        GROUP BY f.id`,
+    )
+    .run(snapshotId);
+  return info.changes;
+}
+
+/** How much of a snapshot has been probed, for the summary route. */
+export function mediaCoverage(
+  db: Db,
+  snapshotId: number,
+): { probed: number; withDimensions: number; total: number } {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS total,
+              COUNT(fm.file_id) AS probed,
+              COUNT(fm.width) AS withDimensions
+         FROM file f
+         LEFT JOIN file_media fm ON fm.file_id = f.id
+        WHERE f.snapshot_id = ?`,
+    )
+    .get(snapshotId) as { total: number; probed: number; withDimensions: number };
+  return row;
+}

@@ -40,7 +40,15 @@ const VERSION_COLUMNS = `av.version_id, av.asset_id, av.snapshot_id, av.song_fol
 // `av.asset_id` rides along on the LEFT JOIN the file queries already carry,
 // so a file row can link straight to its asset ladder. NULL for unparsed files.
 const FILE_COLUMNS = `f.id, f.rel_path, f.song_folder, f.name, f.ext, f.size, f.mtime,
-  f.parse_ok, f.asset_version_id, av.asset_id`;
+  f.parse_ok, f.asset_version_id, av.asset_id, fm.width, fm.height,
+  (fm.file_id IS NOT NULL) AS probed`;
+
+// Dimensions come from `npm run probe`, which most files may not have had yet,
+// so the join is LEFT and a missing row reads as 'not probed' -- never as an
+// assertion about the file.
+const FILE_FROM = `FROM file f
+  LEFT JOIN v_asset_version av ON av.version_id = f.asset_version_id
+  LEFT JOIN file_media fm ON fm.file_id = f.id`;
 
 /**
  * Every asset-version in `snapshotId` that passes `filters`, annotated with its
@@ -118,8 +126,7 @@ export function selectFilesPaged(
   offset: number,
 ): FilePage {
   const where = fileWhere(snapshotId, filters);
-  const from = `FROM file f LEFT JOIN v_asset_version av ON av.version_id = f.asset_version_id
-                WHERE ${where.sql}`;
+  const from = `${FILE_FROM} WHERE ${where.sql}`;
 
   const totals = ctx.db
     .prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(f.size), 0) AS b ${from}`)
@@ -151,8 +158,7 @@ export function selectFilesFiltered(
   orderBySql: string,
 ): FileRow[] {
   const where = fileWhere(snapshotId, filters);
-  const from = `FROM file f LEFT JOIN v_asset_version av ON av.version_id = f.asset_version_id
-                WHERE ${where.sql}`;
+  const from = `${FILE_FROM} WHERE ${where.sql}`;
 
   const count = (
     ctx.db.prepare(`SELECT COUNT(*) AS n ${from}`).get(...where.params) as { n: number }

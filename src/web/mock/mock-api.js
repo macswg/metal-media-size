@@ -119,6 +119,10 @@ export async function createMockApi() {
             // Additive beyond the contract: the UI needs it to open the
             // version ladder straight from a file row. Flagged in the report.
             assetId: v.assetId,
+            // Dimensions come from `npm run probe`, which the mock cannot run.
+            // A proxy is square, a region slice is not: enough shape for the
+            // Resolution column to be worth looking at in the mock UI.
+            ...mockDimensions(name, id),
           });
         }
       }
@@ -134,6 +138,9 @@ export async function createMockApi() {
           parseOk: 0,
           assetVersionId: null,
           assetId: null,
+          width: null,
+          height: null,
+          probed: false,
         });
       }
       return files;
@@ -142,6 +149,26 @@ export async function createMockApi() {
     const c = { raw, assets, assetById, versions, versionById, buildFiles };
     caches.set(snapId, c);
     return c;
+  }
+
+  /**
+   * Stand-in dimensions for the mock. Every ninth file is left unprobed and
+   * every seventeenth is probed-but-headerless, so the three states the
+   * Resolution column has to render all appear without running a probe.
+   */
+  function mockDimensions(name, id) {
+    if (id % 9 === 0) return { width: null, height: null, probed: false };
+    if (id % 17 === 0) return { width: null, height: null, probed: true };
+    if (/_proxy3_region0\./i.test(name)) return { width: 1500, height: 1500, probed: true };
+    const shapes = [
+      [8996, 2584],
+      [4012, 3240],
+      [3976, 3248],
+      [3700, 3696],
+      [1740, 3288],
+    ];
+    const shape = shapes[id % shapes.length];
+    return { width: shape[0], height: shape[1], probed: true };
   }
 
   function verdict(v, keepN) {
@@ -163,6 +190,8 @@ export async function createMockApi() {
     if (p.isPatch === '0' || p.isPatch === 0) tests.push((v) => !v.isPatch);
     if (p.hasProxy === '1' || p.hasProxy === 1) tests.push((v) => v.proxyBytes > 0);
     if (p.hasProxy === '0' || p.hasProxy === 0) tests.push((v) => v.proxyBytes === 0);
+    // 'only' = a preview with no regions behind it, never a playable delivery.
+    if (p.hasProxy === 'only') tests.push((v) => v.proxyBytes > 0 && !v.regionCount);
     if (p.q) {
       const q = String(p.q).toLowerCase();
       tests.push((v) => `${v.songFolder}/${v.base} ${v.verLabel}`.toLowerCase().includes(q));

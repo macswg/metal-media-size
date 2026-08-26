@@ -2,6 +2,135 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-25 — the probe control was the wrong shape for where it lives
+
+It rendered as a bordered banner appended to `#snapshotBar` — which is
+`.topbar-mid`, a flex ROW inside a header pinned to 46px. So it competed with
+the snapshot picker for width and then wrapped inside itself. Rebuilt as an
+inline group like `.snap-actions`: a 52px meter, a terse note (`4,650 / 26,655`
+idle, `4.6/s · 74 min left` running), and one button. The meter carries the
+proportion so the text only carries what a meter cannot. Below 1320px the note
+drops, below 1100px the meter does; the button always survives.
+
+Also: an ✕ inside the search field, shown only when there is something to clear,
+with Escape bound to the same thing and focus kept in the field. A search you
+have to select-all-and-delete to undo is one people leave on by accident and
+then wonder why the table is empty.
+
+## 2026-08-25 — the resolution scan gets a button, and a stop button
+
+`POST /api/probe`, `POST /api/probe/cancel`, `GET /api/probe/status`, and a
+strip under the snapshot bar that drives them: a coverage meter, live rate and
+ETA while running, and a Run/Resume/Stop button. Worded so the difference from
+Rescan is visible — a scan reads names and sizes, this opens each file's header.
+
+**Cancellable, where a scan is not.** A scan is one atomic walk that is either a
+snapshot or nothing. A probe is tens of thousands of independent reads written
+in batches as they land, so stopping halfway is a legitimate outcome that loses
+nothing — the next run resumes from what is on disk. A second start is a 409,
+never a queued job. `test/server/probe.test.ts` runs in its own fixture because
+a probe writes, and the other API tests assert on exactly which files carry
+dimensions.
+
+**"no header" is now red, not amber.** Amber means "a newer version replaces
+this" — a normal, safe state. A file with no header is broken. They should not
+read as the same kind of news.
+
+**The Parsed column is gone.** `parse_ok = 0` and `asset_version_id IS NULL`
+are the same set — checked in both directions against the live index, 0 rows
+disagree either way — so the column repeated what the Status pill ("no version")
+and the Version column ("—") already said, and read "yes" for 26,650 of 26,655
+rows. The Status pill now carries the explanation, and the Anomalies tab still
+lists those five files with the reason.
+
+## 2026-08-25 — headerless files are an anomaly, not a footnote
+
+`noHeader` joins the anomalies page: a file the probe read cleanly that carries
+no `moov` atom. Severity works exactly as every other category does — high when
+no newer full render of the asset exists — and it earns its place immediately.
+
+**The first one found is `high`:** `180_NIGHTLIGHT_LAYOUT_LL180` has exactly one
+version, v003, 14 regions, 1.66 TB. Region 5 of it is 141 GB with no header.
+There is no newer version to fix it. That is a live master with an unplayable
+slice, and nothing in the index could have told us — the name parses, the size
+is enormous, the mtime is fine.
+
+It is the only anomaly category that does not cover the whole archive, so
+`/api/anomalies` returns `probeCoverage` with it and the card says what was
+actually checked. An empty list on an unprobed archive is not a clean bill of
+health and is not shown as one. Zero-byte files stay in `zeroByte`; they are not
+reported twice.
+
+Also fixed while there: anomaly rows showed a size only for version-level rows
+(`bytes`), so file-level rows rendered blank. A 141 GB unplayable file is the
+entire point of its row.
+
+## 2026-08-25 — pixel resolution, from an EXTENDED scan that reads headers
+
+The file list can now show a file's resolution. Nothing in the filename or the
+stat carries it, so this is the first code here that opens an archive file —
+deliberately, measurably, and never as part of a scan.
+
+**Measured before committing to it.** One small file, one 293 GB master, one
+proxy: the mount serves real range reads, so finding `moov` and reading `tkhd`
+costs **8 positioned reads and ~210 bytes**, whatever the file weighs. Whole
+archive: ~6 MB of egress, ~50 min of wall clock at concurrency 64. It is
+latency-bound, not bandwidth-bound — the reads are trivial, the round trips are
+not, which is why concurrency is what makes it finish.
+
+**`npm run probe`, separate from `npm run scan`.** A scan stays metadata-only.
+The probe is opt-in, resumable (work = 'no row in `file_media` yet'), and
+carries results across a rescan for files whose (path, size, mtime) did not
+change. Results live in their own table so the insert-only promise on a scan's
+rows holds literally: the probe inserts and edits nothing.
+
+**Display vs coded dimensions.** `tkhd` and `stsd` were compared across a
+sample of the archive and agreed on every track, so the cheaper is read —
+`tkhd` sits two levels under `moov`, `stsd` five.
+
+**A finding, from 650 files in:** `180_NIGHTLIGHT_LAYOUT_LL180_v003_region5.mov`
+is 140 GB whose `mdat` runs to the last byte with **no `moov` at all**. That is
+a render interrupted before its header was written: the bytes are there and
+nothing can play them. So "probed, no dimensions" is kept distinct from "not
+probed" all the way through — table, API and UI — and the file list says
+**no header** rather than a dash.
+
+The Resolution column only appears once something has been probed; before that
+it would be a column of dashes explaining nothing.
+
+## 2026-08-25 — the Why column says who decided
+
+Un-ticking a slated version made the Status cell read "keeping", but the Why
+cell still showed the policy's sentence — which reads as though the tool
+decided to keep it. It now says **manual override**, in the keep colour, with
+the policy's original verdict moved into the tooltip. Files rows gained a row
+signature so an override made in the versions view repaints them too.
+
+## 2026-08-25 — proxy-only filter, resizable columns, Proxy column dropped
+
+Three UI changes, no policy change.
+
+**`hasProxy=only`.** The proxy filter gained a fourth state: versions that are
+*nothing but* their preview (`proxy_bytes > 0` AND `region_count = 0`). The
+policy has treated those as a special case since the proxy-only rule went in;
+until now there was no way to look at them. 417 versions in snapshot 7.
+Parsed in `proxyParam()` rather than the boolean helper, applied in both filter
+domains, and the fixture gained `500_ECHO_PREVIEW_LL180` — a region-bearing
+v001 under a proxy-only v002 — so the API test asserts on a real row and also
+re-checks that the preview does not supersede the master.
+
+**Resizable columns.** Every table header carries a 6px grip; a drag pins that
+one column in pixels and the flexible columns absorb the difference, so nothing
+to its left moves and the table never overflows its pane. Double-click resets a
+column. Widths persist per layout (`aa.colWidths.<mode>`), and the narrow
+layout keeps its own.
+
+**Proxy column removed** from the asset-versions table. It showed the proxy
+byte subtotal, which is already inside the version size — a number that never
+decided anything. The per-version figure is still in the ladder drawer, where
+the rest of a version's detail lives, and a proxy-only row is now identifiable
+by `Regions = —` or by the new filter.
+
 ## 2026-08-26 — first human-driven verification; THE PROXY-ONLY RULE added
 
 Ran the whole thing from a clean checkout against the live archive. The scan

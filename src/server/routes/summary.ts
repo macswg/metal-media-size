@@ -12,6 +12,7 @@ import { resolveSnapshot } from '../context.ts';
 import { intParam, parseKeepN, type Query } from '../query.ts';
 import { toGiB, toTiB } from '../../scan/reclaim.ts';
 import { toSnapshotView } from './snapshots.ts';
+import { mediaCoverage } from '../../db/index.ts';
 
 /**
  * The keep-N slider used to stop at a hard-coded 5. It now scales to the data:
@@ -159,6 +160,13 @@ export function registerSummaryRoutes(app: FastifyInstance, ctx: AppContext): vo
       versionBytes: versionTotals.bytes,
       proxyBytes: versionTotals.proxy_bytes,
       excluded: { count: snapshot.excluded_count, bytes: snapshot.excluded_bytes },
+      /**
+       * How much of this snapshot has had its pixel dimensions read.
+       * `probed < total` is the honest reason a Resolution cell is empty, and
+       * lets the UI say 'not probed yet' instead of implying the file has no
+       * dimensions. Filled in by `npm run probe`, never by a scan.
+       */
+      media: mediaCoverage(ctx.db, snapshot.id),
       // `family` is a DISPLAY LABEL. This breakdown is for the eye only and
       // must never drive a delete decision.
       byFamily,

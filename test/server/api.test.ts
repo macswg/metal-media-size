@@ -32,10 +32,10 @@ let exportsDir: string;
 // ---------------------------------------------------------------------------
 // Fixture arithmetic, restated here so a drift in either place is caught.
 // ---------------------------------------------------------------------------
-const TOTAL_FILES = 29;
-const TOTAL_FILE_BYTES = 73_090;
-const TOTAL_VERSIONS = 12;
-const TOTAL_VERSION_BYTES = 66_992;
+const TOTAL_FILES = 33;
+const TOTAL_FILE_BYTES = 75_840;
+const TOTAL_VERSIONS = 14;
+const TOTAL_VERSION_BYTES = 69_742;
 
 /** 100_ALPHA: v001 3100, v002 3400, v003 3100, v004 11000, patches 300 + 400. */
 const ALPHA_TOTAL = 21_300;
@@ -218,7 +218,7 @@ describe('GET /api/files -- filters', () => {
   });
 
   it('filters by ext', async () => {
-    expect((await get('/api/files?ext=mov&limit=2000')).body.total).toBe(25);
+    expect((await get('/api/files?ext=mov&limit=2000')).body.total).toBe(29);
     expect((await get('/api/files?ext=txt,tif&limit=2000')).body.total).toBe(4);
   });
 
@@ -244,7 +244,7 @@ describe('GET /api/files -- filters', () => {
 
   it('applies pathRe in JS, not in SQL', async () => {
     const { body } = await get('/api/files?pathRe=_region2%5C.mov%24&limit=2000');
-    expect(body.total).toBe(7);
+    expect(body.total).toBe(8);
     expect(body.rows.every((r: any) => /_region2\.mov$/.test(r.relPath))).toBe(true);
   });
 
@@ -265,9 +265,46 @@ describe('GET /api/files -- filters', () => {
     expect(body.error.code).toBe('bad_regex');
   });
 
+  /**
+   * Pixel dimensions come from `npm run probe`, which is a separate pass over
+   * the archive. Three states have to survive the round trip, because the UI
+   * says something different for each: dimensions on record, probed with none
+   * (an interrupted render), and never probed.
+   */
+  it('reports pixel dimensions, and distinguishes unprobed from probed-and-empty', async () => {
+    const { body } = await get('/api/files?songFolder=100_ALPHA&limit=2000');
+    const byName = new Map(body.rows.map((r: any) => [r.name, r]));
+
+    const measured: any = byName.get('100_ALPHA_MAIN_LL180_v001_region1.mov');
+    expect(measured).toMatchObject({ width: 8996, height: 2584, probed: true });
+
+    // Read cleanly, no header atom. NOT the same as 'not looked at'.
+    const headerless: any = byName.get('100_ALPHA_MAIN_LL180_v001_proxy3_region0.mov');
+    expect(headerless).toMatchObject({ width: null, height: null, probed: true });
+
+    const untouched: any = byName.get('100_ALPHA_MAIN_LL180_v002_region1.mov');
+    expect(untouched).toMatchObject({ width: null, height: null, probed: false });
+  });
+
+  it('sorts by resolution as pixel count, not by either axis alone', async () => {
+    // 8996x2584 = 23.2M pixels beats 3976x3248 = 12.9M, though it is shorter.
+    const { body } = await get('/api/files?sort=resolution&dir=desc&limit=2000');
+    const withDims = body.rows.filter((r: any) => r.width);
+    expect(withDims[0]).toMatchObject({ width: 8996, height: 2584 });
+    expect(withDims[1]).toMatchObject({ width: 3976, height: 3248 });
+    // Unprobed rows sort as zero pixels: they collect at one end rather than
+    // scattering through the list.
+    expect(body.rows.at(-1).width).toBeNull();
+  });
+
+  it('reports probe coverage on the summary, so the UI can say why a cell is empty', async () => {
+    const { body } = await get('/api/summary?keepN=1');
+    expect(body.media).toMatchObject({ probed: 3, withDimensions: 2, total: TOTAL_FILES });
+  });
+
   it('filters by the version-derived columns through the join', async () => {
     expect((await get('/api/files?isPatch=1&limit=2000')).body.total).toBe(2);
-    expect((await get('/api/files?hasProxy=1&limit=2000')).body.total).toBe(10);
+    expect((await get('/api/files?hasProxy=1&limit=2000')).body.total).toBe(14);
     expect((await get('/api/files?family=ANIMATIC&limit=2000')).body.total).toBe(1);
   });
 });
@@ -280,7 +317,7 @@ describe('GET /api/files -- paging', () => {
     expect(first.body.total).toBe(TOTAL_FILES);
     expect(first.body.matchedBytes).toBe(TOTAL_FILE_BYTES);
 
-    const last = await get('/api/files?sort=size&dir=desc&limit=5&offset=26');
+    const last = await get('/api/files?sort=size&dir=desc&limit=5&offset=30');
     expect(last.body.rows).toHaveLength(3);
     expect(last.body.total).toBe(TOTAL_FILES);
     expect(last.body.matchedBytes).toBe(TOTAL_FILE_BYTES);
@@ -402,8 +439,41 @@ describe('GET /api/versions', () => {
     expect(body.rows[0].status).toBe('kept');
   });
 
+  /**
+   * `hasProxy=only` is the proxy-only rule made visible: a version with a
+   * preview and NO regions behind it. It is a strict subset of hasProxy=1, and
+   * the point of having it is being able to see those rows without reading
+   * every version's region count by eye.
+   */
+  it('filters proxy-only versions apart from versions that merely have a proxy', async () => {
+    const { body } = await get('/api/versions?hasProxy=only&limit=2000');
+    expect(body.total).toBe(1);
+    expect(body.rows[0].base).toBe('500_ECHO_PREVIEW_LL180');
+    expect(body.rows[0].verLabel).toBe('v002');
+    expect(body.rows[0].regionCount).toBe(0);
+    expect(body.rows[0].proxyBytes).toBeGreaterThan(0);
+    // And it does not supersede the region-bearing version beneath it.
+    expect(body.rows[0].status).toBe('kept');
+    const echoV1 = (await get('/api/versions?songFolder=500_ECHO&keepN=1&limit=2000')).body.rows.find(
+      (r: any) => r.verLabel === 'v001',
+    );
+    expect(echoV1.status).toBe('kept');
+  });
+
+  it('maps hasProxy=only through the join for files too', async () => {
+    const { body } = await get('/api/files?hasProxy=only&limit=2000');
+    expect(body.total).toBe(1);
+    expect(body.rows[0].relPath).toContain('proxy3_region0');
+  });
+
+  it('rejects a hasProxy value that is neither a boolean nor only', async () => {
+    const { status, body } = await get('/api/versions?hasProxy=proxyish');
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('bad_param');
+  });
+
   it('filters on version-domain columns', async () => {
-    expect((await get('/api/versions?hasProxy=1&limit=2000')).body.total).toBe(3);
+    expect((await get('/api/versions?hasProxy=1&limit=2000')).body.total).toBe(5);
     expect((await get('/api/versions?isPatch=1&limit=2000')).body.total).toBe(2);
     expect((await get('/api/versions?family=ANIMATIC&limit=2000')).body.total).toBe(1);
     expect(
@@ -576,7 +646,7 @@ describe('GET /api/songs', () => {
   it('rolls up files and versions per folder', async () => {
     const { body } = await get('/api/songs?keepN=1');
     const bySong = new Map(body.rows.map((r: any) => [r.songFolder, r]));
-    expect(bySong.size).toBe(4);
+    expect(bySong.size).toBe(5);
 
     const alpha: any = bySong.get('100_ALPHA');
     expect(alpha.fileCount).toBe(17);
@@ -601,8 +671,8 @@ describe('GET /api/summary', () => {
     const { body } = await get('/api/summary?keepN=1');
     expect(body.files.count).toBe(TOTAL_FILES);
     expect(body.files.totalBytes).toBe(TOTAL_FILE_BYTES);
-    expect(body.songCount).toBe(4);
-    expect(body.assetCount).toBe(4);
+    expect(body.songCount).toBe(5);
+    expect(body.assetCount).toBe(5);
     expect(body.versionCount).toBe(TOTAL_VERSIONS);
     expect(body.patchVersionCount).toBe(2);
     expect(body.reclaim.reclaimBytes).toBe(32_700);
@@ -978,6 +1048,46 @@ describe('GET /api/anomalies', () => {
     expect(body.excluded.skippedDirs).toHaveLength(1);
   });
 
+  /**
+   * The one anomaly that needs a probe. A file that read cleanly and carries
+   * no header atom is a render interrupted before its header was written --
+   * bytes on disk that nothing can play. It must not be conflated with a file
+   * nobody has probed, and an unprobed archive must not report 'none found' as
+   * though the question had been asked.
+   */
+  it('reports files that were probed and turned out to have no header', async () => {
+    const { body } = await get('/api/anomalies');
+    expect(body.counts.noHeader).toBe(1);
+    expect(body.noHeader[0].name).toBe('100_ALPHA_MAIN_LL180_v001_proxy3_region0.mov');
+    expect(body.noHeader[0].reason).toContain('no header atom');
+    // 100_ALPHA has a v004 full render above v001, so this is not a live master.
+    expect(body.noHeader[0].severity).toBe('low');
+    expect(body.noHeader[0].supersededBy).toBe('v004');
+    // The size is the point of the row -- a 140 GB unplayable file is not a
+    // footnote -- so it has to survive to the client.
+    expect(body.noHeader[0].size).toBeGreaterThan(0);
+  });
+
+  it('says what the header check actually covered, so an empty list is not a clean bill of health', async () => {
+    const { body } = await get('/api/anomalies');
+    expect(body.probeCoverage).toMatchObject({ probed: 3, total: TOTAL_FILES });
+    expect(body.probeCoverage.probed).toBeLessThan(body.probeCoverage.total);
+  });
+
+  it('counts headerless files in the severity totals like every other category', async () => {
+    const { body } = await get('/api/anomalies');
+    expect(body.severity.byCategory.noHeader).toEqual({ high: 0, low: 1 });
+    const cats = body.severity.byCategory;
+    const summed = Object.values(cats).reduce((n: number, c: any) => n + c.high + c.low, 0);
+    expect(body.severity.high + body.severity.low).toBe(summed);
+  });
+
+  it('leaves a zero-byte file to the zeroByte category rather than reporting it twice', async () => {
+    const { body } = await get('/api/anomalies');
+    const zeroNames = new Set(body.zeroByte.map((z: any) => z.name));
+    for (const row of body.noHeader) expect(zeroNames.has(row.name)).toBe(false);
+  });
+
   it('distinguishes a failed .mov from a file the grammar never covered', async () => {
     const { body } = await get('/api/anomalies');
     const byName = new Map(body.unparsed.map((u: any) => [u.name, u]));
@@ -1080,9 +1190,10 @@ describe('anomaly severity', () => {
       orphanRegions: { high: 0, low: 1 },
       unparsed: { high: 5, low: 1 },
       zeroByte: { high: 1, low: 0 },
+      noHeader: { high: 0, low: 1 },
     });
     expect(body.severity.high).toBe(7);
-    expect(body.severity.low).toBe(3);
+    expect(body.severity.low).toBe(4);
   });
 
   it('filters rows by severity, without moving the counts', async () => {
@@ -1093,6 +1204,7 @@ describe('anomaly severity', () => {
       ...high.orphanRegions,
       ...high.unparsed,
       ...high.zeroByte,
+      ...high.noHeader,
     ];
     expect(highRows).toHaveLength(7);
     expect(highRows.every((r: any) => r.severity === 'high')).toBe(true);

@@ -18,6 +18,8 @@ import {
   keepReasonText,
   keepReasonDetail,
   statusLabel,
+  OVERRIDE_REASON_TEXT,
+  overrideReasonDetail,
 } from './format.js';
 
 /** What ticking a row actually does. Shown on the column head and every box. */
@@ -68,6 +70,9 @@ export class TableView {
     this.table = new VirtualTable(this.tableHost, {
       rowHeight: 30,
       columns: this.columns(),
+      // Column widths are remembered per table, and the narrow layout is a
+      // different table from the wide one, so it gets its own widths.
+      layoutKey: () => (isNarrow() ? `${state.mode}.narrow` : state.mode),
       getSort: () => ({ sort: state.sort, dir: state.dir }),
       onSort: (key) => this.sortBy(key),
       fetchPage: (offset, limit) => this.fetchPage(offset, limit),
@@ -256,6 +261,11 @@ export class TableView {
   }
 
   rowSignature(row) {
+    // Files rows carry the verdict of their version, so an override made in
+    // the versions view has to be able to repaint them too -- otherwise the
+    // Status and Why cells keep showing the policy's answer after you have
+    // overruled it.
+    if (state.mode === 'files') return `${row.id}|${effectiveStatus(row)}`;
     if (state.mode !== 'versions') return null;
     return `${row.versionId}|${effectiveStatus(row)}|${inManifest(row) ? 1 : 0}|${row.assetId === this.activeAssetId ? 1 : 0}`;
   }
@@ -445,8 +455,17 @@ export class TableView {
         label: 'Why',
         width: 'minmax(180px, 1.6fr)',
         sortable: false,
-        render: (row) => h('span.reason', { text: keepReasonText(row.keepReason) }),
-        tooltip: (row) => `${row.keepReason}\n\n${keepReasonDetail(row.keepReason)}`,
+        // Once you have un-ticked a row, YOU are the reason it is being kept.
+        // Showing the policy's sentence there would read as though the tool
+        // decided; it moves to the tooltip instead.
+        render: (row) =>
+          effectiveStatus(row) === 'kept-by-you'
+            ? h('span.reason.override', { text: OVERRIDE_REASON_TEXT })
+            : h('span.reason', { text: keepReasonText(row.keepReason) }),
+        tooltip: (row) =>
+          effectiveStatus(row) === 'kept-by-you'
+            ? overrideReasonDetail(row.keepReason)
+            : `${row.keepReason}\n\n${keepReasonDetail(row.keepReason)}`,
       },
       {
         key: 'family',
@@ -471,14 +490,6 @@ export class TableView {
         align: 'right',
         render: (row) => (row.regionCount ? count(row.regionCount) : h('span.muted', { text: '—' })),
         tooltip: (row) => `${row.regionCount} distinct regions (the proxy is not a region)`,
-      },
-      {
-        key: 'proxyBytes',
-        label: 'Proxy',
-        width: '86px',
-        align: 'right',
-        render: (row) => (row.proxyBytes ? sizeCell(row.proxyBytes) : h('span.muted', { text: '—' })),
-        tooltip: (row) => (row.proxyBytes ? 'Low-res proxy subtotal, already inside the version size' : 'No proxy render'),
       },
       {
         key: 'bytes',
@@ -516,7 +527,12 @@ export class TableView {
         // A file has no fate of its own: it goes or stays with its version.
         render: (row) =>
           row.status === 'unknown'
-            ? h('span.pill.muted', { text: 'no version', title: 'This file matched no version in the filename grammar, so no keep-N verdict applies to it.' })
+            ? h('span.pill.muted', {
+                text: 'no version',
+                title:
+                  'This filename did not match the version grammar, so the file belongs to no asset-version and no keep-N verdict applies to it. ' +
+                  'The Anomalies tab lists these with the reason.',
+              })
             : h(`span.pill.${effectiveStatus(row)}`, {
                 text: statusLabel(effectiveStatus(row)),
                 title:
@@ -530,18 +546,16 @@ export class TableView {
         label: 'Why',
         width: 'minmax(160px, 1.4fr)',
         sortable: false,
-        render: (row) =>
-          row.keepReason
+        render: (row) => {
+          if (effectiveStatus(row) === 'kept-by-you') return h('span.reason.override', { text: OVERRIDE_REASON_TEXT });
+          return row.keepReason
             ? h('span.reason', { text: keepReasonText(row.keepReason) })
-            : h('span.muted', { text: '—' }),
-        tooltip: (row) => (row.keepReason ? `${row.keepReason}\n\n${keepReasonDetail(row.keepReason)}` : ''),
-      },
-      {
-        key: 'parseOk',
-        label: 'Parsed',
-        width: '84px',
-        render: (row) => (row.parseOk ? h('span.pill.muted', { text: 'yes' }) : h('span.pill.superseded', { text: 'no' })),
-        tooltip: (row) => (row.parseOk ? 'Filename matched the version grammar' : 'Filename did not match the version grammar — this file is in no asset-version'),
+            : h('span.muted', { text: '—' });
+        },
+        tooltip: (row) => {
+          if (effectiveStatus(row) === 'kept-by-you') return overrideReasonDetail(row.keepReason);
+          return row.keepReason ? `${row.keepReason}\n\n${keepReasonDetail(row.keepReason)}` : '';
+        },
       },
       {
         key: 'assetVersionId',
@@ -550,9 +564,35 @@ export class TableView {
         sortable: false,
         render: (row) => (row.assetVersionId == null ? h('span.muted', { text: '—' }) : h('span.mono.muted', { text: `#${row.assetVersionId}` })),
       },
+      // Present only once something has been probed. Before that it would be
+      // a column of dashes explaining nothing; after `npm run probe` it fills
+      // in on the next load with no other change.
+      state.mediaProbed > 0 && {
+        key: 'resolution',
+        label: 'Resolution',
+        width: '116px',
+        align: 'right',
+        // Three states, and they are NOT the same thing: dimensions we read,
+        // a file we read that had none, and a file nobody has looked inside
+        // yet. Sorting is by pixel count -- 8996x2584 against 3976x3248 cannot
+        // be ordered on either axis alone.
+        render: (row) => {
+          if (row.width && row.height) return h('span.mono', { text: `${row.width}×${row.height}` });
+          // Probed and empty is not the same as unprobed. A .mov whose header
+          // atom was never written is an interrupted render — the bytes are
+          // there and nothing can open them — so it gets said out loud.
+          if (row.probed) return h('span.pill.broken', { text: 'no header' });
+          return h('span.muted', { text: '—' });
+        },
+        tooltip: (row) => {
+          if (row.width && row.height) return `${(row.width * row.height).toLocaleString()} pixels, read from this file's own header`;
+          if (row.probed) return 'Read cleanly, but the file carries no header atom — an interrupted render. Nothing can play this file.';
+          return 'Not probed yet. Run `npm run probe` to read dimensions from the file headers.';
+        },
+      },
       { key: 'size', label: 'Size', width: '108px', align: 'right', render: (row) => sizeCell(row.size) },
       { key: 'mtime', label: 'Modified', width: '150px', align: 'right', render: (row) => fmtDate(row.mtime) },
-    ];
+    ].filter(Boolean);
   }
 
   songColumns() {

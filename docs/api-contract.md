@@ -257,20 +257,55 @@ Group row:
 `members` are file rows (`{ fileId, relPath, songFolder, name, size, mtime,
 assetVersionId }`).
 
+### Resolution scan (extended pass)
+```
+POST /api/probe?snapshotId=          { concurrency?: 1..256 }   -> 202
+POST /api/probe/cancel                                          -> 200
+GET  /api/probe/status?snapshotId=                              -> 200
+```
+Reads pixel dimensions out of each file's own header — the only route that
+opens an archive file. It takes hours, so the POST returns as soon as the work
+list is known and the client polls `/status`.
+
+**Unlike a scan, this can be cancelled.** A scan is one atomic walk that is
+either a snapshot or nothing; a probe is tens of thousands of independent reads
+whose results are written in batches as they land, so stopping halfway loses
+none of the work already done and the next run resumes from it. A second POST
+while one is in flight is `409 probe_already_running`, never a queued job.
+
+```
+status: { running, done, total, withDimensions, noHeader, elapsedMs,
+          rate, etaMs, startedAt, finishedAt, snapshotId, error, cancelled,
+          coverage: { probed, withDimensions, total } }
+```
+`done`/`total` describe the CURRENT run; `coverage` describes the whole
+snapshot and outlives any single run. `rate` and `etaMs` are null until there
+is enough elapsed time to divide by — an ETA computed from noise is worse than
+no ETA.
+
 ### Anomalies
 ```
 GET /api/anomalies?severity=high|low&limit=
 ```
-`{ missingRegions[], orphanRegions[], unparsed[], zeroByte[],
-   excluded{}, counts{}, severity{}, severityFilter }`
+`{ missingRegions[], orphanRegions[], unparsed[], zeroByte[], noHeader[],
+   excluded{}, counts{}, severity{}, severityFilter, probeCoverage{} }`
 
 Include the excluded-file counts from `snapshot.excluded_*` so FreeFileSync
 bookkeeping files are visible rather than silently dropped.
 
 #### Severity
 
-Every row in `missingRegions`, `orphanRegions`, `unparsed` and `zeroByte`
-carries two extra fields:
+`noHeader` is a file that `npm run probe` read cleanly and found to carry no
+`moov` atom — a render interrupted before its header was written, so the bytes
+are on disk and no player can open them. It is the ONLY category that does not
+cover the whole archive: it covers what has been probed, which is why
+`probeCoverage: { probed, withDimensions, total }` is returned alongside it.
+**An empty `noHeader` on an unprobed snapshot is not a clean bill of health,**
+and a client must not present it as one. Zero-byte files stay in `zeroByte`
+rather than being reported twice.
+
+Every row in `missingRegions`, `orphanRegions`, `unparsed`, `zeroByte` and
+`noHeader` carries two extra fields:
 
 ```
 severity:     'high' | 'low'
@@ -300,11 +335,11 @@ prove anything supersedes it, so the conservative answer wins.
 #### Counts and filtering
 
 ```
-counts:   { missingRegions, orphanRegions, unparsed, zeroByte,
+counts:   { missingRegions, orphanRegions, unparsed, zeroByte, noHeader,
             unparsedRecordedBySnapshot, excluded, skippedDirs }
 severity: { high, low,
             byCategory: { missingRegions: {high, low}, orphanRegions: {…},
-                          unparsed: {…}, zeroByte: {…} } }
+                          unparsed: {…}, zeroByte: {…}, noHeader: {…} } }
 ```
 
 `?severity=high|low` filters which ROWS are emitted. **`counts` and `severity`
@@ -366,9 +401,22 @@ minSize=<bytes>             maxSize=<bytes>
 mtimeFrom=<epochMs>         mtimeTo=<epochMs>
 path=<glob>                 pathRe=<regex>
 family=<label>              status=kept|superseded   (ignored by /api/reclaim)
-isPatch=0|1                 hasProxy=0|1
+isPatch=0|1                 hasProxy=0|1|only
 q=<substring>
 ```
+
+A file row carries `width`, `height` and `probed`. Dimensions come from
+`npm run probe`, a separate pass that reads the file's own header; a scan never
+does. `probed: false` means nobody has looked. `probed: true` with null
+dimensions means the file was read and has NO header atom — an interrupted
+render, which is a different fact and must be shown as one. `sort=resolution`
+orders by pixel count (`width * height`), because 8996x2584 and 3976x3248
+cannot be ordered on either axis alone; unprobed rows sort as zero.
+`/api/summary` reports `media: { probed, withDimensions, total }`.
+
+`hasProxy=only` is the third state: `proxyBytes > 0` AND `regionCount = 0` — a
+version that is nothing but its preview. Those are not deliveries of the asset
+(see the proxy-only rule), which is why they are separately selectable.
 
 Build these with parameterised SQL. `pathRe` must be applied in JS over a
 bounded candidate set, never interpolated into SQL.

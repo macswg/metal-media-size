@@ -14,6 +14,8 @@ Target: `/Users/Shared/ObjectMount.noindex/show-archive/SHOW_2026/00_D3_Delivery
 two levels deep. A full walk takes ~12 s cold.
 
 Run it: `npm run scan` then `npm run serve`, then open `http://127.0.0.1:<port>/`.
+`npm run probe` is a separate, optional pass that reads pixel dimensions from
+the file headers — see "The one place that reads bytes" below.
 
 ## The safety invariants — do not weaken these
 
@@ -110,6 +112,14 @@ correction moved keep-1 from 52.87 → **49.69 TiB**. Do not reinstate the old
 figure. Reasoning is recorded in `src/scan/reclaim.ts` and pinned by
 `test/proxy-only-rule.test.ts`.
 
+### `noHeader` is the only anomaly that needs a probe
+Every other category is derived from names, sizes and counts, so it covers the
+whole archive by construction. `noHeader` covers only what `npm run probe` has
+read. `/api/anomalies` therefore returns `probeCoverage` alongside it, and the
+UI must say what was checked — **an empty list on an unprobed archive is not a
+clean bill of health, and must never be shown as one.** Zero-byte files stay in
+`zeroByte`; do not report them twice.
+
 ### Anomaly severity does not depend on keepN
 `high` = no newer full version exists (a defect on a live master).
 `low` = a newer full version exists and presumably fixes it — still reported,
@@ -123,8 +133,37 @@ next one down to "latest kept" — reporting a live master as reclaimable. There
 a test named for this: *hiding a successor does not make a version safe*.
 
 ### Duplicates are metadata-only
-Never read file bytes. The mount is object storage and reading means egress.
-Always label results "likely duplicate — content not verified".
+Never read file bytes to compare them. The mount is object storage and reading
+means egress. Always label results "likely duplicate — content not verified".
+
+### The one place that reads bytes: `npm run probe`
+A file's pixel dimensions are in neither its name nor its stat, so the only way
+to know them is to read the container header. That is a **measured, opt-in
+exception**, not a loosening of the rule above:
+
+- `src/scan/media.ts` walks the QuickTime atom table only. It **seeks over
+  `mdat`** and never touches sample data — a 293 GB master costs 8 positioned
+  reads totalling ~210 bytes. Measured on the real mount: ~6 MB for all 26,651
+  files. `test/media.test.ts` asserts no read lands inside `mdat`.
+- **A scan never does this.** `npm run probe` is a separate command the operator
+  runs on purpose — or the "Run resolution scan" button, which drives the same
+  pass through `POST /api/probe`. Do not fold it into `npm run scan`.
+- **It is cancellable, and a scan is not.** That difference is deliberate: a
+  scan is one atomic walk, a probe is thousands of independent reads written in
+  batches as they land. `POST /api/probe/cancel` stops it and keeps everything
+  already read. Only one probe at a time, in-process — do not run the CLI and
+  the server pass at once, or two writers will contend for the same SQLite file.
+- Results land in `file_media`, a table of its own, so the insert-only promise
+  on a scan's rows holds literally: the probe adds rows and edits none. It is
+  resumable, and `carryForwardMedia` re-uses results across a rescan for files
+  whose (path, size, mtime) did not change.
+- A file that reads cleanly but has **no `moov` atom** is a render interrupted
+  before its header was written — bytes on disk that nothing can play. Report
+  that as its own state; never merge it with "not probed yet". The archive has
+  at least one: `180_NIGHTLIGHT_LAYOUT_LL180_v003_region5.mov`, 140 GB.
+- Dimensions are display dimensions from `tkhd`. The coded size in `stsd` was
+  compared across a sample of this archive and agreed on every track, so the
+  cheaper of the two is read.
 
 ### `family` is a display label
 Never use it to classify anything as removable.

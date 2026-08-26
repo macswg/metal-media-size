@@ -62,6 +62,13 @@ export const state = {
   manifestView: null,
   /** Slated totals under the current filters, published by the reclaim strip. */
   slated: null,
+  /**
+   * How many files in this snapshot have had their pixel dimensions read.
+   * Published by /api/summary. Zero until `npm run probe` has been run, and
+   * the Files table leaves the Resolution column out entirely while it is --
+   * a column of dashes tells you nothing except that a column exists.
+   */
+  mediaProbed: 0,
 };
 
 const listeners = new Set();

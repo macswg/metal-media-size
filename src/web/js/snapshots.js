@@ -41,6 +41,12 @@ export class SnapshotBar {
       state.compareId = complete[complete.length - 2].id;
     }
     this.render();
+    // A probe started in another tab, or before this page was opened, is still
+    // running on the server; the strip has to show that rather than offering
+    // to start a second one.
+    this.refreshProbe().then((st) => {
+      if (st?.running) this.pollProbe();
+    });
     return this.snapshots;
   }
 
@@ -139,6 +145,136 @@ export class SnapshotBar {
       this.host.appendChild(
         h('div.snap-progress', h('span.spinner'), h('span', { text: this.scanNote || 'Walking the archive…' })),
       );
+    }
+
+    if (live) this.host.appendChild(this.probeStrip());
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Resolution scan                                                   */
+  /*                                                                   */
+  /* Deliberately a SEPARATE control from Rescan, and worded so the    */
+  /* difference is visible: a scan reads names and sizes, this one     */
+  /* opens each file's header. It is the only thing in the app that    */
+  /* reads bytes out of the archive, so it is never implicit and never */
+  /* automatic -- and unlike a scan it can be stopped, because its     */
+  /* results are written as they land and nothing is lost by halting.  */
+  /* ---------------------------------------------------------------- */
+
+  probeStrip() {
+    const p = this.probe;
+    const cov = p?.coverage;
+    const total = cov?.total ?? 0;
+    const done = cov?.probed ?? 0;
+    const pct = total ? Math.min(100, (done / total) * 100) : 0;
+    const running = !!p?.running;
+    const complete = total > 0 && done >= total;
+
+    // Terse on purpose: this sits in a 46px topbar next to the snapshot
+    // picker. The meter carries the proportion, so the text only has to carry
+    // what the meter cannot -- the rate and what is left.
+    const note = running
+      ? (p.rate ? `${p.rate.toFixed(1)}/s` : 'starting…') +
+        (p.etaMs ? ` · ${this.etaText(p.etaMs)} left` : '')
+      : total === 0
+        ? ''
+        : complete
+          ? 'all read'
+          : `${count(done)} / ${count(total)}`;
+
+    const meterTitle = running
+      ? `${count(p.done)} of ${count(p.total)} files this run · ${pct.toFixed(1)}% of the snapshot read in total`
+      : `${pct.toFixed(1)}% of this snapshot has had its resolutions read`;
+
+    return h(
+      'div.snap-probe',
+      h(`div.probe-meter${complete ? '.done' : ''}`, { title: meterTitle }, h('i', { style: { width: `${pct}%` } })),
+      note ? h('span.probe-note', { text: note, title: meterTitle }) : null,
+      p?.noHeader
+        ? h('span.pill.broken.tiny', {
+            text: `${count(p.noHeader)} broken`,
+            title: 'Files that read cleanly but carry no header atom — interrupted renders. Listed on the Anomalies tab.',
+          })
+        : null,
+      running
+        ? h('button.btn.sm', {
+            type: 'button',
+            text: 'Stop',
+            title: 'Stop reading headers. Everything read so far is kept — starting again resumes from here.',
+            onClick: () => this.cancelProbe(),
+          })
+        : h('button.btn.sm', {
+            type: 'button',
+            text: complete ? 'Resolutions read' : done > 0 ? 'Resume' : 'Resolutions',
+            disabled: total === 0 || complete,
+            title: complete
+              ? 'Every file in this snapshot has already had its resolution read.'
+              : (done > 0 ? 'Resume reading file headers. ' : 'Read each file’s pixel dimensions out of its own header. ') +
+                'A few hundred bytes per file, never the picture data, and nothing in the archive is modified. This takes about an hour.',
+            onClick: () => this.startProbe(),
+          }),
+    );
+  }
+
+  /** "58 min" / "1 h 04 m" — an ETA that reads at a glance. */
+  etaText(ms) {
+    const mins = Math.round(ms / 60000);
+    if (mins < 90) return `${mins} min`;
+    return `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, '0')} m`;
+  }
+
+  /** Poll the probe once and repaint. Safe to call when nothing is running. */
+  async refreshProbe() {
+    try {
+      this.probe = await api.probeStatus({ snapshotId: state.snapshotId ?? undefined });
+    } catch {
+      // A server without the route, or a fixture: leave the strip as it was.
+      this.probe = this.probe ?? null;
+    }
+    this.render();
+    return this.probe;
+  }
+
+  async startProbe() {
+    try {
+      this.probe = await api.startProbe({}, { snapshotId: state.snapshotId ?? undefined });
+      this.render();
+      this.pollProbe();
+    } catch (err) {
+      toast(`Resolution scan could not start: ${err.message}`, 'error');
+    }
+  }
+
+  async cancelProbe() {
+    try {
+      this.probe = await api.cancelProbe();
+      this.render();
+      toast('Stopping — everything read so far is kept.', 'ok');
+    } catch (err) {
+      toast(`Could not stop the resolution scan: ${err.message}`, 'error');
+    }
+  }
+
+  async pollProbe() {
+    if (this.probePolling) return;
+    this.probePolling = true;
+    try {
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const st = await this.refreshProbe();
+        if (!st?.running) {
+          if (st?.error) toast(`Resolution scan failed: ${st.error}`, 'error');
+          else if (st?.cancelled) toast(`Stopped. ${count(st.coverage?.probed ?? 0)} files read in total.`, 'ok');
+          else if (st?.done) toast(`Resolution scan finished — ${count(st.withDimensions)} files read.`, 'ok');
+          // The Resolution column and the anomalies list both depend on this.
+          this.onChange?.();
+          return;
+        }
+      }
+    } catch {
+      /* stop polling quietly; the strip keeps its last known state */
+    } finally {
+      this.probePolling = false;
     }
   }
 

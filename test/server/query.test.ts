@@ -64,6 +64,10 @@ describe('parseFilters', () => {
     });
   });
 
+  it("accepts hasProxy=only as a third state, not a boolean", () => {
+    expect(parseFilters({ hasProxy: 'only' })).toMatchObject({ hasProxy: 'only' });
+  });
+
   it('rejects a nonsense boolean', () => {
     expectHttp(() => parseFilters({ isPatch: 'maybe' }), 400, 'bad_param');
   });

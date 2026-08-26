@@ -66,6 +66,20 @@ export class FilterPanel {
     return `${row.count.toLocaleString()} file${row.count === 1 ? '' : 's'} · ${fmtBytes(row.bytes)}`;
   }
 
+  /** Show the clear button only when there is something to clear. */
+  paintQClear(value) {
+    if (this.qClear) this.qClear.hidden = !value;
+  }
+
+  clearQ() {
+    if (this.qInput) this.qInput.value = '';
+    this.paintQClear('');
+    this.set('q', '');
+    // Focus stays in the field: clearing is usually the start of typing
+    // something else, not the end of searching.
+    this.qInput?.focus();
+  }
+
   set(key, value) {
     this.pushSoon.cancel();
     update({ filters: { [key]: value } });
@@ -104,16 +118,37 @@ export class FilterPanel {
     this.host.appendChild(h('div.filter-head', h('h2', 'Filters'), h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } }, this.countEl, this.clearBtn)));
 
     /* ---- free text ------------------------------------------------- */
+    // The clear button is inside the field rather than beside it: a search you
+    // have to select-all-and-delete to undo is a search people leave on by
+    // accident and then wonder why the table is empty. Escape does it too.
+    this.qInput = h('input', {
+      type: 'text',
+      value: f.q,
+      placeholder: 'name or path contains…',
+      spellcheck: 'false',
+      onInput: (e) => {
+        this.paintQClear(e.target.value);
+        this.setDebounced('q', e.target.value.trim());
+      },
+      onKeyDown: (e) => {
+        if (e.key === 'Escape' && e.target.value) {
+          e.stopPropagation();
+          this.clearQ();
+        }
+      },
+    });
+    this.qClear = h('button.field-x', {
+      type: 'button',
+      text: '✕',
+      title: 'Clear the search (Esc)',
+      'aria-label': 'Clear the search',
+      hidden: !f.q,
+      onClick: () => this.clearQ(),
+    });
     this.host.appendChild(
       group(
         'Search',
-        h('input', {
-          type: 'text',
-          value: f.q,
-          placeholder: 'name or path contains…',
-          spellcheck: 'false',
-          onInput: (e) => this.setDebounced('q', e.target.value.trim()),
-        }),
+        h('div.field-wrap', this.qInput, this.qClear),
         hint('q= — plain substring, case-insensitive'),
       ),
     );
@@ -194,10 +229,13 @@ export class FilterPanel {
             ['', 'All'],
             ['1', 'Has proxy'],
             ['0', 'No proxy'],
+            ['only', 'Proxy only'],
           ],
           f.hasProxy,
           (v) => this.set('hasProxy', v),
+          'wrap',
         ),
+        hint('Proxy only = a preview with no regions behind it — not a playable delivery.'),
       ),
     );
 
