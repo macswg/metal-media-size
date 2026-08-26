@@ -1,0 +1,13 @@
+node_modules/
+data/*
+!data/.gitkeep
+exports/*
+!exports/.gitkeep
+dist/
+*.log
+.DS_Store
+src/web/mock/fixture.json
+
+# The scan root names a client's storage layout, so it is configured locally
+# and never committed. See config/local.example.json and src/config.ts.
+config/local.json

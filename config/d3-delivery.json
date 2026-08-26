@@ -1,0 +1,45 @@
+{
+  "dbPath": "data/index.db",
+  "dirTimeoutMs": 30000,
+  "parse": {
+    "pattern": "^(?<base>.+?)_[vV](?<ver>\\d+)(?<sub>[a-zA-Z])?(?<frame>_frame_?\\d+)?(?<proxy>_proxy\\d+)?(?:_region(?<region>\\d+))?\\.mov$",
+    "flags": "i"
+  },
+  "exclusions": {
+    "globs": [
+      ".sync.ffs_db",
+      "sync.ffs_db",
+      "sync.ffs_db.*.ffs_tmp",
+      "Delete.*.sync.ffs_lock",
+      "*.ffs_tmp",
+      "*.ffs_lock",
+      "*.ffs_db",
+      ".DS_Store",
+      "._*",
+      "*_diskspeedtesttemp*",
+      "*diskspeedtesttemp*"
+    ],
+    "caseInsensitive": true
+  },
+  "families": {
+    "ANIMATIC": [
+      "ANIMATIC"
+    ],
+    "FULL": [
+      "FULL",
+      "FULLRENDER",
+      "FINAL"
+    ],
+    "IMAG": [
+      "IMAG"
+    ],
+    "LL180": [
+      "LL180"
+    ],
+    "CHOR": [
+      "CHOR",
+      "CHOREO"
+    ]
+  },
+  "defaultFamily": "OTHER"
+}

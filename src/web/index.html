@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0e12" />
+    <!-- Added to the Home Screen on iOS this runs full-screen; the dark status
+         bar matches the topbar so the notch area does not flash white. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Archive" />
+    <title>Archive Analyser</title>
+    <link rel="stylesheet" href="./app.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d1014'/%3E%3Cg fill='none' stroke='%23e0a33a' stroke-width='2.4'%3E%3Cellipse cx='16' cy='9' rx='9' ry='3.6'/%3E%3Cpath d='M7 9v14c0 2 4 3.6 9 3.6s9-1.6 9-3.6V9'/%3E%3Cpath d='M7 16c0 2 4 3.6 9 3.6s9-1.6 9-3.6'/%3E%3C/g%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <header class="topbar">
+        <button
+          type="button"
+          class="filters-toggle"
+          id="filtersToggle"
+          aria-label="Filters"
+          aria-expanded="false"
+          aria-controls="filterPanel"
+        >
+          <span class="filters-toggle-glyph" aria-hidden="true"></span>
+          <span class="filters-toggle-count" id="filtersToggleCount" hidden></span>
+        </button>
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">Archive Analyser</span>
+          <span class="brand-sub" id="brandRoot">read-only</span>
+        </div>
+        <div class="topbar-mid" id="snapshotBar"></div>
+        <div class="topbar-right">
+          <div id="sourcePill"></div>
+        </div>
+      </header>
+
+      <section class="reclaim-strip" id="reclaimStrip"></section>
+
+      <div class="workspace">
+        <!-- Off-canvas scrim. Inert on desktop, where the sidebar is docked. -->
+        <div class="scrim" id="sidebarScrim" hidden></div>
+        <aside class="sidebar" id="filterPanel"></aside>
+        <main class="main">
+          <nav class="tabs" id="tabs"></nav>
+          <section class="panel" id="panelHost"></section>
+        </main>
+        <aside class="drawer" id="ladderPanel" hidden></aside>
+      </div>
+
+      <footer class="statusbar" id="statusBar"></footer>
+    </div>
+
+    <noscript>
+      <p style="padding: 2rem; font-family: system-ui">
+        Archive Analyser needs JavaScript. It is a read-only analysis tool: it never modifies the archive.
+      </p>
+    </noscript>
+
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>
