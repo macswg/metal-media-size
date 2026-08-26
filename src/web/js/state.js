@@ -46,14 +46,22 @@ export const state = {
    * exceptions". `meta` remembers the bytes/file counts of rows the user
    * actually clicked, so the running total is exact without a round trip.
    */
-  selection: { allMatched: false, ids: new Set(), except: new Set(), meta: new Map() },
+  selection: { vetoed: new Set(), meta: new Map() },
   /**
    * Show only the versions ticked for export. Not a FILTER_KEY: those are
    * archive predicates that also scope the reclaim figure, whereas this is a
    * view of your own selection and must never change what the policy says is
    * superseded.
    */
-  showSelectedOnly: false,
+  /**
+   * Which slice of the table to show: null = everything, 'manifest' = only
+   * what the export will cover, 'overrides' = only the rows you vetoed.
+   * Not a FILTER_KEY: those are archive predicates that also scope the reclaim
+   * figure, and this must never move the headline.
+   */
+  manifestView: null,
+  /** Slated totals under the current filters, published by the reclaim strip. */
+  slated: null,
 };
 
 const listeners = new Set();
@@ -96,7 +104,15 @@ export function update(patch, reason = 'state') {
     state.sort = d.sort;
     state.dir = d.dir;
   }
-  if (filtersChanged || patch.mode || patch.snapshotId || patch.keepN) clearSelection();
+  // Only a SNAPSHOT change drops your overrides. Under the old opt-in model a
+  // selection was tied to the view, so any filter change reset it. A veto is
+  // not that: it is a standing "keep this one anyway", and having it evaporate
+  // because you switched to Files or typed in the search box would put a
+  // version you had protected back into the manifest without saying so.
+  //
+  // A snapshot change is different in kind -- version ids belong to one
+  // snapshot, so a veto carried across would point at the wrong row.
+  if (patch.snapshotId) clearSelection();
   writeUrl();
   emit(filtersChanged ? 'filters' : reason);
 }
@@ -117,66 +133,121 @@ export function activeFilterCount() {
 }
 
 /* ---------------------------------------------------------------- */
-/* Selection                                                         */
+/* The manifest, and your overrides                                  */
 /* ---------------------------------------------------------------- */
 
+/**
+ * THE MANIFEST IS OPT-OUT.
+ *
+ * It used to be opt-in: nothing was in until you ticked it. That reads as
+ * careful, but at keep-1 there are hundreds of slated versions, so nobody
+ * ticked them one at a time -- everyone pressed "select all", and the ceremony
+ * made the outcome LESS considered rather than more.
+ *
+ * The real per-item judgement is not "should this go?" -- the keep-N policy
+ * answered that, and the slider and filters are where you actually decide. It
+ * is "the policy says go, but I know something it doesn't". That is a veto,
+ * and it is rare.
+ *
+ * So: the manifest is every version slated for removal under the current
+ * filters, MINUS the ones you vetoed. A tick box is that veto.
+ *
+ * Versions the policy says to KEEP cannot be added by hand. There is no
+ * gesture that puts a live master into a removal manifest, which is the one
+ * direction worth making impossible rather than merely discouraged.
+ */
 export function clearSelection() {
-  state.selection = { allMatched: false, ids: new Set(), except: new Set(), meta: new Map() };
+  state.selection = { vetoed: new Set(), meta: new Map() };
 }
 
-export function isSelected(id) {
+/**
+ * The version id a row refers to. A version row calls it `versionId`; a FILE
+ * row calls it `assetVersionId`, because a file belongs to a version rather
+ * than being one. Both must resolve to the same veto.
+ */
+function versionIdOf(row) {
+  return row.versionId ?? row.assetVersionId ?? null;
+}
+
+/** True when this version will appear in the manifest. */
+export function inManifest(row) {
+  if (row.status !== 'superseded') return false;
+  const id = versionIdOf(row);
+  return id !== null && !state.selection.vetoed.has(id);
+}
+
+/** True when the user has overridden the policy for this version. */
+export function isVetoed(id) {
+  return state.selection.vetoed.has(id);
+}
+
+/**
+ * What the Status column should say, given the policy AND any override. The
+ * point is that ticking visibly changes the outcome, so the box explains
+ * itself without a tooltip.
+ */
+export function effectiveStatus(row) {
+  if (row.status !== 'superseded') return row.status === 'unknown' ? 'unknown' : 'keep';
+  const id = versionIdOf(row);
+  return id !== null && state.selection.vetoed.has(id) ? 'kept-by-you' : 'superseded';
+}
+
+/** Veto or un-veto a slated version. `on` is "in the manifest". */
+export function setInManifest(row, on) {
+  if (row.status !== 'superseded') return;
+  const id = versionIdOf(row);
+  if (id === null) return;
   const s = state.selection;
-  return s.allMatched ? !s.except.has(id) : s.ids.has(id);
-}
-
-export function toggleSelected(id, on, meta) {
-  const s = state.selection;
-  const want = on == null ? !isSelected(id) : on;
-  if (meta) s.meta.set(id, meta);
-  if (s.allMatched) {
-    if (want) s.except.delete(id);
-    else s.except.add(id);
-  } else if (want) s.ids.add(id);
-  else s.ids.delete(id);
-  emit('selection');
-}
-
-export function selectAllMatched(on) {
-  state.selection = { allMatched: !!on, ids: new Set(), except: new Set(), meta: new Map() };
-  emit('selection');
-}
-
-/** How many versions are selected, and their summed bytes, where known. */
-export function selectionTotals(matched) {
-  const s = state.selection;
-  if (!s.allMatched) {
-    let bytes = 0;
-    let files = 0;
-    let known = 0;
-    for (const id of s.ids) {
-      const m = s.meta.get(id);
-      if (!m) continue;
-      bytes += m.bytes || 0;
-      files += m.fileCount || 0;
-      known += 1;
-    }
-    return { count: s.ids.size, bytes, files, exact: known === s.ids.size, allMatched: false };
+  if (on) s.vetoed.delete(id);
+  else {
+    s.vetoed.add(id);
+    s.meta.set(id, {
+      bytes: row.bytes,
+      fileCount: row.fileCount,
+      base: row.base,
+      songFolder: row.songFolder,
+      verLabel: row.verLabel,
+      status: row.status,
+    });
   }
-  let bytes = matched?.matchedBytes ?? null;
-  let files = null;
+  emit('selection');
+}
+
+/** Drop every override, putting the manifest back to exactly what the policy says. */
+export function clearOverrides() {
+  state.selection.vetoed.clear();
+  emit('selection');
+}
+
+/**
+ * What the manifest currently covers.
+ *
+ * `slated` comes from /api/reclaim under the SAME filters, so the count is
+ * exact rather than inferred from whatever page the table happens to show.
+ */
+export function selectionTotals(slated) {
+  const s = state.selection;
+  const baseCount = slated?.supersededCount ?? 0;
+  const baseBytes = slated?.reclaimBytes ?? null;
+  const baseFiles = slated?.supersededFiles ?? null;
+
+  let bytes = baseBytes;
+  let files = baseFiles;
   let known = 0;
-  for (const id of s.except) {
+  for (const id of s.vetoed) {
     const m = s.meta.get(id);
     if (!m) continue;
     if (bytes != null) bytes -= m.bytes || 0;
+    if (files != null) files -= m.fileCount || 0;
     known += 1;
   }
   return {
-    count: Math.max(0, (matched?.total ?? 0) - s.except.size),
+    count: Math.max(0, baseCount - s.vetoed.size),
     bytes,
     files,
-    exact: bytes != null && known === s.except.size,
-    allMatched: true,
+    vetoed: s.vetoed.size,
+    slated: baseCount,
+    exact: bytes != null && known === s.vetoed.size,
   };
 }
 
@@ -221,25 +292,28 @@ export function readUrl() {
 
 /** The filter set as plain query params, for handing to the API layer. */
 /**
- * Selection as query params, for the TABLE only.
+ * The manifest as query params, for the TABLE only.
  *
- * Two selection shapes to express:
- *   - explicit ticks           -> versionIds=<the ids>
- *   - select-all-matched       -> the current filters, minus excludeIds
+ * "In the manifest" is expressible as one query because the manifest is
+ * policy-driven: everything slated, minus the vetoes. "My overrides" is just
+ * the veto list.
  *
- * Returns null when the filter is off, and `{ empty: true }` when it is on but
- * nothing is ticked -- the caller renders an empty table rather than asking
- * the server, because an empty id list is indistinguishable from an omitted
- * one in a query string, and omitted means "no filter".
+ * Never sent to /api/reclaim. The headline answers "what does the POLICY say
+ * is reclaimable" -- it must not move because you vetoed a row.
  */
 export function selectionParams() {
-  if (!state.showSelectedOnly) return null;
-  const sel = state.selection;
-  if (sel.allMatched) {
-    return sel.except.size ? { excludeIds: [...sel.except].join(',') } : {};
+  const view = state.manifestView;
+  if (!view) return null;
+  const vetoed = [...state.selection.vetoed];
+
+  if (view === 'overrides') {
+    if (vetoed.length === 0) return { empty: true };
+    return { versionIds: vetoed.join(',') };
   }
-  if (sel.ids.size === 0) return { empty: true };
-  return { versionIds: [...sel.ids].join(',') };
+  // view === 'manifest'
+  const p = { status: 'superseded' };
+  if (vetoed.length) p.excludeIds = vetoed.join(',');
+  return p;
 }
 
 export function filterParams() {

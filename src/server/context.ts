@@ -79,6 +79,14 @@ export interface FileRow {
   parseOk: boolean;
   assetVersionId: number | null;
   /**
+   * The verdict on the version this file belongs to, at the requested keepN.
+   * A file has no fate of its own: it goes or stays with its version. Files
+   * that belong to no version -- unparsed ones -- are `unknown`, which is the
+   * honest answer rather than a guess in either direction.
+   */
+  status: 'kept' | 'superseded' | 'unknown';
+  keepReason: KeepReason | null;
+  /**
    * The asset this file belongs to, so a file row can open the version ladder
    * without a second lookup. NULL exactly when `parseOk` is false -- an
    * unparsed file has no asset-version and therefore no asset.
@@ -99,7 +107,10 @@ export interface FileDbRow {
   asset_id: number | null;
 }
 
-export function toFileRow(r: FileDbRow): FileRow {
+export function toFileRow(
+  r: FileDbRow,
+  verdict?: { keep: boolean; reason: KeepReason } | undefined,
+): FileRow {
   return {
     id: r.id,
     relPath: r.rel_path,
@@ -110,6 +121,8 @@ export function toFileRow(r: FileDbRow): FileRow {
     mtime: r.mtime,
     parseOk: r.parse_ok === 1,
     assetVersionId: r.asset_version_id,
+    status: verdict === undefined ? 'unknown' : verdict.keep ? 'kept' : 'superseded',
+    keepReason: verdict?.reason ?? null,
     assetId: r.asset_id,
   };
 }

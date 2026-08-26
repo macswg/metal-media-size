@@ -40,6 +40,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         ctx,
         snapshot.id,
         filters,
+        keepN,
         orderBy,
         paging.limit,
         paging.offset,

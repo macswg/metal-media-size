@@ -112,6 +112,7 @@ export function selectFilesPaged(
   ctx: AppContext,
   snapshotId: number,
   filters: FilterSpec,
+  keepN: number,
   orderBySql: string,
   limit: number,
   offset: number,
@@ -128,7 +129,14 @@ export function selectFilesPaged(
     .prepare(`SELECT ${FILE_COLUMNS} ${from} ${orderBySql} LIMIT ? OFFSET ?`)
     .all(...where.params, limit, offset) as FileDbRow[];
 
-  return { rows: rows.map(toFileRow), total: totals.n, matchedBytes: totals.b };
+  // A file inherits its version's verdict. Looked up from the same memoised
+  // whole-snapshot computation the version rows use, so the two can never
+  // disagree about the same version.
+  const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
+  const rowsOut = rows.map((r) =>
+    toFileRow(r, r.asset_version_id === null ? undefined : verdicts.get(r.asset_version_id)),
+  );
+  return { rows: rowsOut, total: totals.n, matchedBytes: totals.b };
 }
 
 /**
@@ -156,18 +164,19 @@ export function selectFilesFiltered(
     .all(...where.params) as FileDbRow[];
 
   const pathPredicate = makePathPredicate(filters);
-  const verdicts =
-    filters.status === undefined ? null : ctx.reclaim.get(snapshotId, keepN).byVersionId;
+  // Always loaded now, not only when filtering: every file row reports the
+  // verdict on its version, so the Files view can show it.
+  const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
 
   const out: FileRow[] = [];
   for (const r of dbRows) {
     if (pathPredicate !== null && !pathPredicate(r.rel_path)) continue;
-    if (verdicts !== null) {
-      const v = r.asset_version_id === null ? undefined : verdicts.get(r.asset_version_id);
+    const v = r.asset_version_id === null ? undefined : verdicts.get(r.asset_version_id);
+    if (filters.status !== undefined) {
       const status = v === undefined ? 'unknown' : v.keep ? 'kept' : 'superseded';
       if (status !== filters.status) continue;
     }
-    out.push(toFileRow(r));
+    out.push(toFileRow(r, v));
   }
   return out;
 }

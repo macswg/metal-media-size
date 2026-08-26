@@ -10,7 +10,7 @@
  */
 
 import { h, clear, debounce } from './dom.js';
-import { state, update, filterParams } from './state.js';
+import { state, update, emit, filterParams } from './state.js';
 import { api } from './api.js';
 import { bytesParts, tib, count, bytes as fmtBytes } from './format.js';
 
@@ -170,6 +170,15 @@ export class ReclaimStrip {
 
   paint(r) {
     this.last = r;
+    // The manifest is "everything slated under these filters, minus vetoes",
+    // so the count has to come from the policy, not from whichever page the
+    // table happens to be showing.
+    state.slated = {
+      supersededCount: r.supersededCount ?? 0,
+      supersededFiles: r.supersededFiles ?? null,
+      reclaimBytes: r.reclaimBytes ?? null,
+    };
+    emit('selection');
     this.headlineEl.classList.remove('stale');
     const [num, unit] = bytesParts(r.reclaimBytes);
     clear(this.numEl);

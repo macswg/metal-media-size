@@ -7,7 +7,7 @@
  */
 
 import { h, clear, pathCell } from './dom.js';
-import { state, update, isSelected, toggleSelected, selectAllMatched, filterParams, selectionParams, defaultSortFor } from './state.js';
+import { state, update, inManifest, setInManifest, effectiveStatus, selectionTotals, clearOverrides, filterParams, selectionParams, defaultSortFor } from './state.js';
 import { api } from './api.js';
 import { VirtualTable } from './vtable.js';
 import { isNarrow } from './viewport.js';
@@ -22,8 +22,12 @@ import {
 
 /** What ticking a row actually does. Shown on the column head and every box. */
 const TICK_TIP =
-  'Tick to add this version to an export manifest. Ticking never deletes ' +
-  'anything: it builds a FreeFileSync job that you review and run yourself.';
+  'Ticked means this version is IN the export manifest. Everything the policy ' +
+  'slates for removal starts ticked; un-tick to keep it anyway. Nothing is ' +
+  'deleted either way — the manifest is a FreeFileSync job you run yourself.';
+const TICK_TIP_KEPT =
+  'The policy is keeping this version at the current keep-N, so it is not in ' +
+  'the manifest. A version that is being kept cannot be added by hand.';
 
 const MODES = [
   ['versions', 'Asset-versions'],
@@ -180,26 +184,51 @@ export class TableView {
     this.paintSelectAll();
   }
 
+  /**
+   * The line above the table: what the manifest currently covers, repainted on
+   * every tick. This is the feedback the tick box needs -- you can see the
+   * number move as you veto a row, so what the box does is never in doubt.
+   */
   paintSelectAll() {
     if (state.mode !== 'versions') {
       this.selectAllEl.style.display = 'none';
       return;
     }
-    this.selectAllEl.style.display = '';
-    const sel = state.selection;
     clear(this.selectAllEl);
-    const cb = h('input', {
-      type: 'checkbox',
-      checked: sel.allMatched && sel.except.size === 0,
-      onChange: (e) => {
-        selectAllMatched(e.target.checked);
-      },
-    });
-    this.selectAllEl.append(cb, ' ', `Select all ${count(this.total)} matched`);
+    const t = selectionTotals(state.slated);
+
+    const parts = [
+      h('b', { text: count(t.count) }),
+      ` version${t.count === 1 ? '' : 's'} in the manifest`,
+    ];
+    if (t.bytes != null) parts.push(h('span.sep', '·'), h('b', { text: fmtBytes(t.bytes) }));
+    if (t.vetoed > 0) {
+      parts.push(
+        h('span.sep', '·'),
+        h('span', {
+          style: { color: 'var(--kept)' },
+          text: `${count(t.vetoed)} you chose to keep`,
+        }),
+        h('button.btn.sm.ghost', {
+          type: 'button',
+          text: 'Reset',
+          title: 'Drop your overrides and go back to exactly what the policy slates',
+          style: { marginLeft: '8px' },
+          onClick: () => clearOverrides(),
+        }),
+      );
+    } else {
+      parts.push(
+        h('span.muted', {
+          style: { marginLeft: '8px', fontSize: '11.5px' },
+          text: 'everything slated for removal under these filters · un-tick a row to keep it',
+        }),
+      );
+    }
+    this.selectAllEl.append(...parts);
     this.selectAllEl.style.display = 'flex';
     this.selectAllEl.style.alignItems = 'center';
     this.selectAllEl.style.gap = '6px';
-    this.selectAllEl.style.cursor = 'pointer';
   }
 
   /**
@@ -217,7 +246,10 @@ export class TableView {
     const cls = [];
     if (state.mode === 'versions') {
       if (row.status === 'superseded') cls.push('is-superseded');
-      if (isSelected(row.versionId)) cls.push('sel');
+      // No row tint for manifest membership. Under the opt-out model most rows
+      // ARE in the manifest, so tinting them washed out half the table and
+      // made the exceptions harder to spot -- the opposite of the point. The
+      // tick box and the status flag already say it, per row, without shouting.
       if (this.activeAssetId != null && row.assetId === this.activeAssetId) cls.push('active-row');
     }
     return cls.join(' ');
@@ -225,7 +257,7 @@ export class TableView {
 
   rowSignature(row) {
     if (state.mode !== 'versions') return null;
-    return `${row.versionId}|${row.status}|${isSelected(row.versionId) ? 1 : 0}|${row.assetId === this.activeAssetId ? 1 : 0}`;
+    return `${row.versionId}|${effectiveStatus(row)}|${inManifest(row) ? 1 : 0}|${row.assetId === this.activeAssetId ? 1 : 0}`;
   }
 
   openRow(row) {
@@ -305,12 +337,14 @@ export class TableView {
         width: '36px',
         sortable: false,
         render: (row) => {
+          const slated = row.status === 'superseded';
           const cb = h('input', {
             type: 'checkbox',
             'data-stop': '',
-            checked: isSelected(row.versionId),
-            title: TICK_TIP,
-            onChange: (e) => toggleSelected(row.versionId, e.target.checked, metaOf(row)),
+            checked: inManifest(row),
+            disabled: !slated,
+            title: slated ? TICK_TIP : TICK_TIP_KEPT,
+            onChange: (e) => setInManifest(row, e.target.checked),
           });
           return h('div.checkcell', { 'data-stop': '' }, cb);
         },
@@ -329,7 +363,7 @@ export class TableView {
               h('span.stack-dot', { text: '·' }),
               h('span.cell-ver', { text: row.verLabel }),
               row.isPatch ? h('span.pill.patch.tiny', { text: 'patch' }) : null,
-              h(`span.pill.${row.status}.tiny`, { text: statusLabel(row.status) }),
+              h(`span.pill.${effectiveStatus(row)}.tiny`, { text: statusLabel(effectiveStatus(row)) }),
             ),
           ),
         tooltip: (row) => `${row.songFolder}/${row.base} ${row.verLabel}`,
@@ -357,11 +391,10 @@ export class TableView {
           const cb = h('input', {
             type: 'checkbox',
             'data-stop': '',
-            checked: isSelected(row.versionId),
-            title: TICK_TIP,
-            onChange: (e) => {
-              toggleSelected(row.versionId, e.target.checked, metaOf(row));
-            },
+            checked: inManifest(row),
+            disabled: row.status !== 'superseded',
+            title: row.status === 'superseded' ? TICK_TIP : TICK_TIP_KEPT,
+            onChange: (e) => setInManifest(row, e.target.checked),
           });
           return h('div.checkcell', { 'data-stop': '' }, cb);
         },
@@ -398,7 +431,14 @@ export class TableView {
         key: 'status',
         label: 'Status',
         width: '152px',
-        render: (row) => h(`span.pill.${row.status}`, { text: statusLabel(row.status) }),
+        render: (row) =>
+          h(`span.pill.${effectiveStatus(row)}`, {
+            text: statusLabel(effectiveStatus(row)),
+            title:
+              effectiveStatus(row) === 'kept-by-you'
+                ? 'The policy slates this for removal; you un-ticked it, so it stays out of the manifest.'
+                : '',
+          }),
       },
       {
         key: 'keepReason',
@@ -425,7 +465,9 @@ export class TableView {
       {
         key: 'regionCount',
         label: 'Regions',
-        width: '58px',
+        // 58px fitted "Tiles" but clips "Regions" -- the header is uppercase
+        // with letter-spacing, so it is wider than the digits beneath it.
+        width: '78px',
         align: 'right',
         render: (row) => (row.regionCount ? count(row.regionCount) : h('span.muted', { text: '—' })),
         tooltip: (row) => `${row.regionCount} distinct regions (the proxy is not a region)`,
@@ -466,6 +508,34 @@ export class TableView {
         tooltip: (row) => row.relPath,
       },
       { key: 'ext', label: 'Ext', width: '58px', render: (row) => h('span.mono', { text: row.ext || '—' }) },
+      {
+        key: 'status',
+        label: 'Status',
+        width: '152px',
+        sortable: false,
+        // A file has no fate of its own: it goes or stays with its version.
+        render: (row) =>
+          row.status === 'unknown'
+            ? h('span.pill.muted', { text: 'no version', title: 'This file matched no version in the filename grammar, so no keep-N verdict applies to it.' })
+            : h(`span.pill.${effectiveStatus(row)}`, {
+                text: statusLabel(effectiveStatus(row)),
+                title:
+                  effectiveStatus(row) === 'kept-by-you'
+                    ? 'The policy slates this version for removal; you un-ticked it, so it stays out of the manifest.'
+                    : 'The verdict on the version this file belongs to.',
+              }),
+      },
+      {
+        key: 'keepReason',
+        label: 'Why',
+        width: 'minmax(160px, 1.4fr)',
+        sortable: false,
+        render: (row) =>
+          row.keepReason
+            ? h('span.reason', { text: keepReasonText(row.keepReason) })
+            : h('span.muted', { text: '—' }),
+        tooltip: (row) => (row.keepReason ? `${row.keepReason}\n\n${keepReasonDetail(row.keepReason)}` : ''),
+      },
       {
         key: 'parseOk',
         label: 'Parsed',

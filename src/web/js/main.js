@@ -7,7 +7,7 @@
  */
 
 import { h, clear, $, toast } from './dom.js';
-import { state, subscribe, update, readUrl, clearSelection, selectionTotals, emit, activeFilterCount } from './state.js';
+import { state, subscribe, update, readUrl, clearSelection, clearOverrides, selectionTotals, emit, activeFilterCount } from './state.js';
 import { isNarrow, onBreakpointChange } from './viewport.js';
 import { initApi, api, apiSource, apiNote, apiInfo } from './api.js';
 import { ReclaimStrip } from './reclaim.js';
@@ -57,6 +57,15 @@ async function boot() {
   await loadSummary();
 
   subscribe(handleStateChange);
+
+  api
+    .health()
+    .then((h_) => {
+      if (h_?.version) app.versionEl.textContent = `v${h_.version}`;
+    })
+    .catch(() => {
+      /* no version rather than a wrong one */
+    });
 
   // Debug hook, opt-in via ?debug — lets the table internals be profiled from
   // the console without shipping a global by default.
@@ -298,22 +307,24 @@ function showTab(id) {
 function buildStatusBar() {
   const host = $('#statusBar');
   clear(host);
-  app.selSummary = h('div.sel-summary', { text: 'Nothing marked — tick a row to start a manifest' });
+  app.selSummary = h('div.sel-summary', { text: 'Nothing is slated for removal at this keep-N' });
   app.exportBtn = h('button.btn.primary', {
     text: 'Export manifest…',
     disabled: true,
     onClick: () => startExport(),
   });
   app.clearSelBtn = h('button.btn.sm.ghost', {
-    text: 'Clear selection',
+    text: 'Reset my overrides',
+    title: 'Put the manifest back to exactly what the keep-N policy slates',
     hidden: true,
-    onClick: () => {
-      clearSelection();
-      emit('selection');
-    },
+    onClick: () => clearOverrides(),
   });
+  // Which build you are looking at. Filled in once /api/health answers; left
+  // blank rather than guessed if it does not.
+  app.versionEl = h('span.app-version', { title: 'Application version' });
   host.append(
     h('span.readonly-note', 'Archive mounted read-only · nothing here removes files · exports land in exports/'),
+    app.versionEl,
     h('span.spacer'),
     app.selSummary,
     app.clearSelBtn,
@@ -322,26 +333,37 @@ function buildStatusBar() {
 }
 
 function paintStatusBar() {
-  const totals = selectionTotals({ total: app.table?.total ?? 0, matchedBytes: app.table?.matchedBytes ?? null });
+  const totals = selectionTotals(state.slated);
   const has = totals.count > 0;
   app.exportBtn.disabled = !has;
-  app.clearSelBtn.hidden = !has;
+  // "Clear" now means "drop my overrides", which is only meaningful if there
+  // are any. It no longer empties the manifest -- the policy fills that.
+  app.clearSelBtn.hidden = totals.vetoed === 0;
   clear(app.selSummary);
   if (!has) {
-    app.selSummary.textContent = 'Nothing marked — tick a row to start a manifest';
+    app.selSummary.textContent =
+      totals.slated > 0
+        ? 'You have kept every slated version — the manifest is empty'
+        : 'Nothing is slated for removal at this keep-N';
     return;
   }
   app.selSummary.append(
     h('b', { text: count(totals.count) }),
-    ' versions marked for the manifest',
+    ` version${totals.count === 1 ? '' : 's'} in the manifest`,
     totals.bytes != null ? ' · ' : '',
     totals.bytes != null ? h('span.bytes', { text: `${totals.exact ? '' : '≈'}${fmtBytes(totals.bytes)}` }) : '',
-    totals.allMatched ? h('span.muted', { text: '  (everything matching the current filters)' }) : '',
+    totals.vetoed > 0 ? h('span.sep', '·') : '',
+    totals.vetoed > 0
+      ? h('span', {
+          style: { color: 'var(--kept)' },
+          text: `${count(totals.vetoed)} kept by you`,
+        })
+      : '',
   );
 }
 
 async function startExport() {
-  const totals = selectionTotals({ total: app.table?.total ?? 0, matchedBytes: app.table?.matchedBytes ?? null });
+  const totals = selectionTotals(state.slated);
   app.exportBtn.disabled = true;
   app.exportBtn.textContent = 'Resolving selection…';
   try {
@@ -367,7 +389,7 @@ function handleStateChange(reasons) {
     app.filters.paintSelectionHint();
     // While "Marked for removal" is on, the selection IS the row set, so
     // un-ticking has to remove the row rather than just un-highlight it.
-    if (state.showSelectedOnly) app.table.refresh();
+    if (state.manifestView) app.table.refresh();
     else app.table.repaintSelection();
     app.ladder.repaintSelection();
     return;

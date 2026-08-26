@@ -5,7 +5,7 @@
  */
 
 import { h, clear, debounce } from './dom.js';
-import { state, update, resetFilters, activeFilterCount, FILTER_KEYS } from './state.js';
+import { state, update, resetFilters, activeFilterCount, selectionTotals, FILTER_KEYS } from './state.js';
 import { parseSize, bytes as fmtBytes, parseDateInput, date as fmtDate } from './format.js';
 
 export class FilterPanel {
@@ -26,19 +26,11 @@ export class FilterPanel {
    */
   paintSelectionHint() {
     if (!this.selCountEl) return;
-    const sel = state.selection;
-    if (sel.allMatched) {
-      const minus = sel.except.size
-        ? ` — minus ${sel.except.size} you un-ticked`
-        : '';
-      this.selCountEl.textContent = `Everything matching the filters above is marked${minus}.`;
-      return;
-    }
-    const n = sel.ids.size;
+    const t = selectionTotals(state.slated);
     this.selCountEl.textContent =
-      n === 0
-        ? 'Nothing marked yet — tick rows in the table to build a manifest.'
-        : `${n.toLocaleString()} version${n === 1 ? '' : 's'} marked for the export manifest.`;
+      t.vetoed === 0
+        ? `${t.count.toLocaleString()} slated for removal — all of them in the manifest.`
+        : `${t.count.toLocaleString()} in the manifest · ${t.vetoed} you chose to keep.`;
   }
 
   /** The extension filter as a set, parsed from whatever the field holds. */
@@ -104,7 +96,7 @@ export class FilterPanel {
         // Clears the VIEW, including the selection filter. It does not clear
         // the selection itself -- losing ticks to a button labelled "Clear
         // filters" would be a nasty surprise.
-        state.showSelectedOnly = false;
+        state.manifestView = null;
         resetFilters();
         this.render();
       },
@@ -156,23 +148,23 @@ export class FilterPanel {
       ),
     );
 
-    /* ---- selection ---------------------------------------------------- */
-    // Kept separate from "Status at current keep-N" on purpose. Superseded is
-    // the tool's verdict about the archive; this is YOUR decision about what
-    // goes in the manifest. Merging them into one control would suggest the
-    // tool had marked something for removal, which it never does.
+    /* ---- manifest view ------------------------------------------------ */
+    // Separate from "Status at current keep-N" on purpose. That control is the
+    // policy's verdict about the archive; this is a view of the manifest and
+    // of the overrides you have made to it.
     this.selCountEl = h('span.fhint', { style: { marginTop: '4px' } });
     this.host.appendChild(
       group(
-        'Manually marked for export',
+        'Manifest',
         seg(
           [
-            ['', 'All'],
-            ['marked', 'Manually marked'],
+            ['', 'All rows'],
+            ['manifest', 'In the manifest'],
+            ['overrides', 'My overrides'],
           ],
-          state.showSelectedOnly ? 'marked' : '',
+          state.manifestView ?? '',
           (v) => {
-            state.showSelectedOnly = v === 'marked';
+            state.manifestView = v || null;
             this.paintSelectionHint();
             update({}, 'filters');
           },

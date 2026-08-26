@@ -142,6 +142,7 @@ const KEEP_REASON = {
 export function statusLabel(status) {
   if (status === 'superseded') return 'slated for removal';
   if (status === 'kept') return 'keep';
+  if (status === 'kept-by-you') return 'keeping';
   return status || '—';
 }
 

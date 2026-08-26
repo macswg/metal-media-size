@@ -9,7 +9,7 @@
  */
 
 import { h, clear } from './dom.js';
-import { state, isSelected, toggleSelected } from './state.js';
+import { state, inManifest, setInManifest, effectiveStatus } from './state.js';
 import { api } from './api.js';
 import {
   bytes as fmtBytes,
@@ -81,10 +81,14 @@ export class LadderPanel {
   repaintSelection() {
     if (!this.itemNodes) return;
     for (const [versionId, node] of this.itemNodes) {
-      const on = isSelected(versionId);
-      node.classList.toggle('selected', on);
+      const row = this.rowsById?.get(versionId);
+      if (!row) continue;
+      // No ring for manifest membership -- same reason as the table: under the
+      // opt-out model most items are in it, so the highlight said nothing.
+      // The item already carries its effective status as a class.
+      node.className = `lad-item ${effectiveStatus(row)}`;
       const cb = node.querySelector('input[type="checkbox"]');
-      if (cb) cb.checked = on;
+      if (cb) cb.checked = inManifest(row);
     }
   }
 
@@ -119,17 +123,18 @@ export class LadderPanel {
         h(
           'div',
           { style: { display: 'flex', gap: '8px' } },
-          h('button.btn.sm', {
-            text: `Tick all ${supers.length} slated for removal`,
+          h('button.btn.sm.ghost', {
+            text: `Keep all ${supers.length} anyway`,
+            title: 'Veto every slated version of this asset, so none of them enter the manifest',
             onClick: () => {
-              for (const v of supers) toggleSelected(v.versionId, true, ladderMeta(asset, v));
+              for (const v of supers) setInManifest(v, false);
               this.onSelectionChange?.();
             },
           }),
           h('button.btn.sm.ghost', {
-            text: 'Untick this asset',
+            text: 'Undo my overrides here',
             onClick: () => {
-              for (const v of versions) toggleSelected(v.versionId, false, ladderMeta(asset, v));
+              for (const v of supers) setInManifest(v, true);
               this.onSelectionChange?.();
             },
           }),
@@ -139,16 +144,21 @@ export class LadderPanel {
 
     // Oldest first — the order the renders actually happened in.
     for (const v of versions) {
-      const item = h(`div.lad-item.${v.status}`);
+      const item = h(`div.lad-item.${effectiveStatus(v)}`);
       if (v.versionId === this.highlightVersionId) item.style.outline = '1px solid var(--accent-dim)';
       this.itemNodes.set(v.versionId, item);
+      (this.rowsById ??= new Map()).set(v.versionId, v);
 
       const cb = h('input', {
         type: 'checkbox',
-        checked: isSelected(v.versionId),
-        title: 'Include this version in an export manifest',
+        checked: inManifest(v),
+        disabled: v.status !== 'superseded',
+        title:
+          v.status === 'superseded'
+            ? 'In the export manifest. Un-tick to keep this version anyway.'
+            : 'The policy is keeping this version, so it is not in the manifest.',
         onChange: (e) => {
-          toggleSelected(v.versionId, e.target.checked, ladderMeta(asset, v));
+          setInManifest(v, e.target.checked);
           this.onSelectionChange?.();
         },
       });
@@ -192,17 +202,6 @@ export class LadderPanel {
       ),
     );
   }
-}
-
-function ladderMeta(asset, v) {
-  return {
-    bytes: v.bytes,
-    fileCount: v.fileCount,
-    base: asset.base,
-    songFolder: asset.songFolder,
-    verLabel: v.verLabel,
-    status: v.status,
-  };
 }
 
 function cell(label, value) {

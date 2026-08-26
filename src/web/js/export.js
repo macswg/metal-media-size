@@ -18,7 +18,7 @@
  */
 
 import { h, clear, modal, toast } from './dom.js';
-import { state, filterParams, clearSelection, emit } from './state.js';
+import { state, filterParams } from './state.js';
 import { api, apiSource } from './api.js';
 import { bytes as fmtBytes, count } from './format.js';
 
@@ -33,31 +33,33 @@ const FORMATS = [
  * "Select all matched" is stored as a predicate, so it is expanded here by
  * paging /api/versions — the contract caps a page at 2000.
  */
+/**
+ * Expand the manifest into explicit version ids for the export request.
+ *
+ * The manifest is "everything slated for removal under the current filters,
+ * minus the ones you vetoed", so this pages the slated set and drops the
+ * vetoes. Paging is stable because snapshots are insert-only and snapshotId
+ * is pinned, so the set cannot shift underneath it.
+ */
 export async function resolveSelectedVersionIds(onProgress) {
-  const sel = state.selection;
-  if (!sel.allMatched) {
-    let bytes = 0;
-    let files = 0;
-    let known = 0;
-    for (const id of sel.ids) {
-      const m = sel.meta.get(id);
-      if (!m) continue;
-      bytes += m.bytes || 0;
-      files += m.fileCount || 0;
-      known += 1;
-    }
-    return { ids: [...sel.ids], bytes, files, exact: known === sel.ids.size };
-  }
-
+  const vetoed = state.selection.vetoed;
   const ids = [];
   let bytes = 0;
   let files = 0;
   const limit = 2000;
   let offset = 0;
   for (;;) {
-    const res = await api.versions({ ...filterParams(), keepN: state.keepN, sort: 'bytes', dir: 'desc', limit, offset });
+    const res = await api.versions({
+      ...filterParams(),
+      status: 'superseded',
+      keepN: state.keepN,
+      sort: 'bytes',
+      dir: 'desc',
+      limit,
+      offset,
+    });
     for (const row of res.rows) {
-      if (sel.except.has(row.versionId)) continue;
+      if (vetoed.has(row.versionId)) continue;
       ids.push(row.versionId);
       bytes += row.bytes || 0;
       files += row.fileCount || 0;
@@ -66,7 +68,7 @@ export async function resolveSelectedVersionIds(onProgress) {
     onProgress?.(offset, res.total);
     if (res.rows.length === 0 || offset >= res.total) break;
   }
-  // Paging the whole matched set gives an exact file and byte count, so the
+  // Paging the whole slated set gives an exact file and byte count, so the
   // confirmation can state precisely what the manifest covers.
   return { ids, bytes, files, exact: true };
 }
@@ -264,8 +266,9 @@ function openConfirm({ versionIds, summary, policy, versioningFolder, formats, n
       if (policy === 'Versioning') localStorage.setItem('aa.versioningFolder', versioningFolder);
       dlg.close();
       showResult(res);
-      clearSelection();
-      emit('selection');
+      // Overrides deliberately survive an export. They are standing decisions
+      // -- "keep this one anyway" -- and silently dropping them would put
+      // those versions back into the NEXT manifest without anyone saying so.
     } catch (err) {
       goBtn.disabled = false;
       goBtn.textContent = 'Produce manifest';

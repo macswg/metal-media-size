@@ -390,8 +390,6 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .vt-row.odd { background: rgba(255, 255, 255, 0.014); }
 .vt-row.clickable { cursor: pointer; }
 .vt-row:hover { background: #1a212b; }
-.vt-row.sel { background: rgba(88, 183, 240, 0.1); }
-.vt-row.sel:hover { background: rgba(88, 183, 240, 0.16); }
 .vt-row.active-row { box-shadow: inset 2px 0 0 var(--accent); }
 .vt-row.is-superseded .cell-base { color: var(--text-2); }
 
@@ -431,6 +429,13 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .pill.kept { color: var(--kept); background: var(--kept-bg); }
 .pill.superseded { color: var(--superseded); background: var(--superseded-bg); }
 .pill.patch { color: var(--patch); background: var(--patch-bg); }
+/* An override: the policy slated it, you kept it. Reads as kept, but marked
+   as a decision rather than a verdict, so the two are never confused. */
+.pill.kept-by-you {
+  color: var(--kept); background: var(--kept-bg);
+  border: 1px dashed var(--kept);
+}
+.lad-item.kept-by-you { border-left-color: var(--kept); }
 .pill.family { color: var(--text-2); background: var(--panel-3); }
 .pill.muted { color: var(--dim); background: var(--panel-2); }
 .reason { color: var(--dim); font-size: 11.5px; }
@@ -447,6 +452,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 13px; height: 13px;
   font-size: 12px;
 }
 .statusbar .spacer { flex: 1; }
+.app-version {
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  margin-left: 10px; white-space: nowrap;
+}
 .sel-summary { font-family: var(--mono); color: var(--text-2); }
 .sel-summary b { color: var(--accent); }
 .sel-summary .bytes { color: var(--superseded); }
@@ -470,7 +479,6 @@ input[type="checkbox"] { accent-color: var(--accent); width: 13px; height: 13px;
 }
 .lad-item.superseded { border-left: 3px solid var(--superseded); }
 .lad-item.kept { border-left: 3px solid var(--kept); }
-.lad-item.selected { box-shadow: 0 0 0 1px var(--accent) inset; }
 .lad-top { display: flex; align-items: center; gap: 8px; }
 .lad-ver { font-family: var(--mono); font-weight: 600; font-size: 13px; }
 .lad-top .spacer { flex: 1; }
@@ -1008,7 +1016,6 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
    :hover sticks after a tap until you tap elsewhere. */
 @media (hover: none) {
   .vt-row:hover { background: transparent; }
-  .vt-row.sel:hover { background: rgba(88, 183, 240, 0.1); }
   .btn:hover { background: var(--panel-3); border-color: var(--line); }
   .btn.primary:hover { background: var(--accent-dim); }
   .tab:hover { color: var(--dim); }

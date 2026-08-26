@@ -649,6 +649,54 @@ describe('GET /api/summary', () => {
 });
 
 // ===========================================================================
+describe('a file row carries its version\'s verdict', () => {
+  // A file has no fate of its own: it goes or stays with its version. The
+  // Files view shows the same keep/slated flag the versions view does, so the
+  // two must come from the same computation and can never disagree.
+
+  it('reports status and keepReason on every file that belongs to a version', async () => {
+    const { body } = await get('/api/files?keepN=1&limit=50');
+    const parsed = body.rows.filter((r: any) => r.assetVersionId !== null);
+    expect(parsed.length).toBeGreaterThan(0);
+    for (const r of parsed) {
+      expect(['kept', 'superseded'], r.name).toContain(r.status);
+      expect(r.keepReason, r.name).toBeTruthy();
+    }
+  });
+
+  it('says unknown — not kept — for a file that belongs to no version', async () => {
+    // Guessing either way would be wrong: an unparsed file has no verdict,
+    // and calling it "kept" would imply the policy had considered it.
+    const { body } = await get('/api/files?keepN=1&limit=200');
+    const orphans = body.rows.filter((r: any) => r.assetVersionId === null);
+    if (orphans.length === 0) return;
+    for (const r of orphans) {
+      expect(r.status, r.name).toBe('unknown');
+      expect(r.keepReason, r.name).toBeNull();
+    }
+  });
+
+  it('agrees with the versions view about the same version', async () => {
+    const v = (await get('/api/versions?keepN=1&status=superseded&limit=1')).body.rows[0];
+    const { body } = await get(`/api/files?keepN=1&limit=2000`);
+    const mine = body.rows.filter((r: any) => r.assetVersionId === v.versionId);
+    expect(mine.length).toBeGreaterThan(0);
+    for (const r of mine) {
+      expect(r.status).toBe(v.status);
+      expect(r.keepReason).toBe(v.keepReason);
+    }
+  });
+
+  it('moves with keepN, like the version verdict it mirrors', async () => {
+    const at1 = (await get('/api/files?keepN=1&limit=200')).body.rows as any[];
+    const at9 = (await get('/api/files?keepN=9&limit=200')).body.rows as any[];
+    const slated1 = at1.filter((r) => r.status === 'superseded').length;
+    const slated9 = at9.filter((r) => r.status === 'superseded').length;
+    expect(slated9).toBeLessThanOrEqual(slated1);
+  });
+});
+
+// ===========================================================================
 describe('versionIds / excludeIds -- the "only what I marked" filter', () => {
   // A selection lives in the browser, so the server has to be told which rows
   // it is. Two shapes: explicit ticks (versionIds), and select-all-matched

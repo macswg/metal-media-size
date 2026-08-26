@@ -36,10 +36,18 @@ import { registerSnapshotRoutes } from './routes/snapshots.ts';
 import { registerSongRoutes } from './routes/songs.ts';
 import { registerSummaryRoutes } from './routes/summary.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
+import pkg from '../../package.json' with { type: 'json' };
 
 /** The only host this server may ever bind. */
 export const BIND_HOST = '127.0.0.1';
 export const DEFAULT_PORT = 8787;
+
+/**
+ * Shown at the bottom of the app window, so a person can say which build they
+ * are looking at. Read from package.json rather than duplicated here -- one
+ * place to bump, and it cannot drift from what npm reports.
+ */
+export const APP_VERSION: string = pkg.version;
 
 /**
  * The browser app, served at `/`. It is a plain ES-module frontend with no
@@ -123,6 +131,7 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
 
   app.get('/api/health', () => ({
     ok: true,
+    version: APP_VERSION,
     root: ctx.cfg.root,
     scanRunning: ctx.scans.isRunning(),
   }));

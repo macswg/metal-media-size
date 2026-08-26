@@ -129,6 +129,7 @@ function normaliseList(r) {
 export const api = {
   snapshots: () => impl.get('/api/snapshots').then((r) => (Array.isArray(r) ? r : r?.rows || [])),
   snapshot: (id) => impl.get(`/api/snapshots/${id}`),
+  health: () => impl.get('/api/health'),
   scanStatus: () => impl.get('/api/scan/status'),
   startScan: (name) => impl.post('/api/scan', name ? { name } : {}),
   // Removes an index entry, never a file. See the route docblock.
