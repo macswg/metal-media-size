@@ -2,6 +2,53 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — give the phone screen back to the asset list
+
+The chrome above the table was 621px of an 844px screen; the list you came for
+got 248px, about seven rows. Now 441px of chrome and **403px of table — 48% of
+the screen**, roughly double what it was. Measured, not eyeballed:
+
+                before   after
+    topbar        141px    124px
+    reclaim       233px    135px
+    tabs           44px     40px
+    toolbar       107px     71px
+    TABLE         248px    403px
+
+The rule throughout: **cut what is said twice, never what is said once.**
+
+- `headline-sub` ("795 versions slated for removal · 8,061 files · 37.2% of
+  what is in view") wrapped to two lines, and the status bar carries the same
+  count and byte figure along the bottom. Gone on narrow.
+- The manifest line in the toolbar repeats the status bar too -- except when
+  you have overrides, when it carries the Reset button, which lives nowhere
+  else. So it is hidden only when there is no button in it. This had to be
+  decided in JS: `paintSelectAll` sets `style.display` inline, and an inline
+  style beats any stylesheet rule trying to hide it. A `:has()` selector
+  looked right, matched correctly, and lost anyway -- worth remembering.
+- Control heights come down where the control is a secondary action. Text
+  fields keep 40px and their 16px font, because a smaller font makes iOS zoom
+  the page on focus and never zoom back.
+
+### The keep-N slider is a stepper on a phone (the user's idea, and a good one)
+
+A 7-stop range input, dragged with a thumb that covers three stops, costing two
+rows -- the track and the tick numbers. It is now one row: the label on the left and `[−][+]` joined as a pair on the
+right, so one thumb nudges N in both directions without crossing the screen.
+Exact on the first tap, and 40px cheaper than a track plus its tick numbers.
+The slider stays on desktop, where a drag across seven stops is precise and the
+ticks are readable. Crossing the breakpoint rebuilds the control, so a rotated
+phone does not keep whichever one it booted with.
+
+Verified with real touch events: tapping + reads "keep latest 2", tapping −
+returns to 1, and the bounds disable themselves at each end. Neither the slider
+nor the ticks exist in the narrow DOM at all.
+
+Desktop confirmed unchanged at 1440x900 -- slider and ticks present, stepper
+absent, every hidden line still shown, topbar still 46px, no overflow. Every
+changed CSS line is inside the narrow query; the JS changes are all behind
+`isNarrow()`.
+
 ## 2026-08-26 — the phone layout was inert, and had been since day one
 
 Reported from a real iPhone: no button worked and the page would not scroll.

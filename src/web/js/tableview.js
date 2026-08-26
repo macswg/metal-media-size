@@ -234,7 +234,13 @@ export class TableView {
       );
     }
     this.selectAllEl.append(...parts);
-    this.selectAllEl.style.display = 'flex';
+    // On a phone this line repeats what the status bar already shows along the
+    // bottom of the screen -- EXCEPT when you have overrides, because then it
+    // carries the Reset button, which lives nowhere else. Decided here rather
+    // than in CSS because the display below is an inline style, and an inline
+    // style beats any stylesheet rule that tries to hide it.
+    const duplicatesStatusBar = isNarrow() && t.vetoed === 0;
+    this.selectAllEl.style.display = duplicatesStatusBar ? 'none' : 'flex';
     this.selectAllEl.style.alignItems = 'center';
     this.selectAllEl.style.gap = '6px';
   }

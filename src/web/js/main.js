@@ -96,6 +96,10 @@ async function boot() {
   onBreakpointChange((narrow) => {
     if (!narrow) closeSidebar();
     app.table.refresh();
+    // The keep-N control is a slider on a wide screen and a stepper on a
+    // phone, so crossing the breakpoint has to rebuild it -- otherwise a
+    // rotated phone keeps whichever one it booted with.
+    app.reclaim.repaint();
   });
 }
 

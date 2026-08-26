@@ -13,6 +13,7 @@ import { h, clear, debounce } from './dom.js';
 import { state, update, emit, filterParams } from './state.js';
 import { api } from './api.js';
 import { bytesParts, tib, count, bytes as fmtBytes } from './format.js';
+import { isNarrow } from './viewport.js';
 
 const MAX_N_FALLBACK = 8;
 
@@ -81,14 +82,39 @@ export class ReclaimStrip {
     this.factKept = fact('Retained', 'kept');
     this.factMatched = fact('In view', '');
 
+    // On a phone the slider is a 7-stop track you drag with a thumb that
+    // covers three of the stops, and it costs two rows -- the track and the
+    // tick numbers -- out of a screen that has about eight. A stepper says the
+    // same thing in one row and is exact on the first tap.
+    this.stepDown = h('button.btn.sm.step', {
+      type: 'button',
+      text: '−',
+      'aria-label': 'Keep one fewer version',
+      onClick: () => this.onSlide(Math.max(1, state.keepN - 1), true),
+    });
+    this.stepUp = h('button.btn.sm.step', {
+      type: 'button',
+      text: '+',
+      'aria-label': 'Keep one more version',
+      onClick: () => this.onSlide(Math.min(this.maxN, state.keepN + 1), true),
+    });
+
     this.host.append(
       this.headlineEl,
-      h(
-        'div.slider-block',
-        h('div.slider-head', h('span.label', 'Keep latest N versions of each asset'), this.sliderValue),
-        this.slider,
-        this.ticks,
-      ),
+      isNarrow()
+        ? h(
+            'div.slider-block.stepper',
+            this.sliderValue,
+            // Adjacent, not one at each edge: a pair you nudge with one thumb
+            // without moving your hand across the screen.
+            h('div.step-group', this.stepDown, this.stepUp),
+          )
+        : h(
+            'div.slider-block',
+            h('div.slider-head', h('span.label', 'Keep latest N versions of each asset'), this.sliderValue),
+            this.slider,
+            this.ticks,
+          ),
       h('div.reclaim-facts', this.factMatched.node, this.factProtected.node, this.factKept.node),
     );
 
@@ -100,6 +126,10 @@ export class ReclaimStrip {
     const pct = this.maxN > 1 ? ((state.keepN - 1) / (this.maxN - 1)) * 100 : 0;
     this.slider.style.setProperty('--fill', `${pct}%`);
     for (const [i, node] of [...this.ticks.children].entries()) node.classList.toggle('on', i + 1 === state.keepN);
+    // The stepper's own bounds. The slider gets these from min/max; buttons
+    // have to be told, or you can tap past the end of the range.
+    if (this.stepDown) this.stepDown.disabled = state.keepN <= 1;
+    if (this.stepUp) this.stepUp.disabled = state.keepN >= this.maxN;
   }
 
   paintSliderLabel() {
@@ -166,6 +196,16 @@ export class ReclaimStrip {
       }
       return null;
     }
+  }
+
+  /**
+   * Rebuild the control and put the last known figures back on it. Used when
+   * the layout crosses the breakpoint, where the keep-N control changes shape
+   * between a slider and a stepper.
+   */
+  repaint() {
+    this.render();
+    if (this.last) this.paint(this.last);
   }
 
   paint(r) {
