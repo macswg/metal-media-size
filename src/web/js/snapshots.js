@@ -169,6 +169,10 @@ export class SnapshotBar {
     const pct = total ? Math.min(100, (done / total) * 100) : 0;
     const running = !!p?.running;
     const complete = total > 0 && done >= total;
+    // Snapshot-wide, not this run's tally: the anomalies panel counts every
+    // headerless file found so far, and a topbar pill saying "1 broken" beside
+    // a panel saying 4 is just two different questions answered in one screen.
+    const broken = Math.max(0, (cov?.probed ?? 0) - (cov?.withDimensions ?? 0));
 
     // Terse on purpose: this sits in a 46px topbar next to the snapshot
     // picker. The meter carries the proportion, so the text only has to carry
@@ -190,9 +194,9 @@ export class SnapshotBar {
       'div.snap-probe',
       h(`div.probe-meter${complete ? '.done' : ''}`, { title: meterTitle }, h('i', { style: { width: `${pct}%` } })),
       note ? h('span.probe-note', { text: note, title: meterTitle }) : null,
-      p?.noHeader
+      broken > 0
         ? h('span.pill.broken.tiny', {
-            text: `${count(p.noHeader)} broken`,
+            text: `${count(broken)} broken`,
             title: 'Files that read cleanly but carry no header atom — interrupted renders. Listed on the Anomalies tab.',
           })
         : null,

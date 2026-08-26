@@ -762,6 +762,14 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
     padding-top: env(safe-area-inset-top);
   }
 
+  /* `.app` is a grid, so every row is a grid item with `min-width: auto` --
+     it refuses to shrink below its own min-content. The topbar's min-content
+     is wider than a phone, so the header blew out to 475px inside a 390px
+     viewport and dragged the whole document with it: that, not any one
+     control, is why every row looked clipped on the right. Everything inside
+     already knows how to shrink; this just lets it. */
+  .app > * { min-width: 0; }
+
   .topbar {
     flex-wrap: wrap;
     gap: 8px 10px;
@@ -784,6 +792,29 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   .topbar-mid > * { min-width: 0; max-width: 100%; }
   .topbar-mid select { width: 100%; }
   .topbar-right { order: 2; }
+
+  /* The snapshot row cannot also carry the resolution control: together they
+     overflowed the viewport, and because the shell sizes to its widest child
+     that pushed EVERY row off-screen -- the reclaim headline, the toolbar and
+     the status bar were all being clipped by this one line. Each control gets
+     its own row, and the probe strip gets its meter and note back, because a
+     full row has the space a topbar slot did not. */
+  .topbar-mid { flex-wrap: wrap; gap: 6px; }
+  /* Ellipsised down to "103 f…" it is decoration taking width the snapshot
+     picker needs to be readable. The same facts are in Manage. */
+  .snap-meta { display: none; }
+  .topbar-mid > .snap { flex: 1 1 100%; }
+  .snap-probe {
+    flex: 1 1 100%;
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  .snap-probe .probe-note { display: inline; font-size: 12px; }
+  .snap-probe .probe-meter { display: block; flex: 1 1 auto; }
+  .snap-probe .btn.sm { flex: none; }
 
   /* ------------------------------------------------- filters toggle */
 
@@ -988,7 +1019,15 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   .vt-td { font-size: 13px; padding: 0 8px; }
   .vt-td.mono { font-size: 12.5px; }
   .vt-row { align-content: center; }
-  .checkcell input[type='checkbox'] { width: 20px; height: 20px; }
+  /* `width` alone lost here: the box is a flex item, so its automatic minimum
+     size let it collapse back to the UA's 13px while the height took. The
+     manifest tick is the one control on this screen that changes what gets
+     exported -- it does not get to be a 13px target. */
+  .checkcell input[type='checkbox'] {
+    width: 20px; min-width: 20px; height: 20px; min-height: 20px; flex: none;
+  }
+  /* And the cell it sits in is the real tap target -- give it the whole row. */
+  .checkcell { min-height: 36px; }
 
   /* Two-line row: identity on top, the rest underneath in a quieter line. */
   .stack { display: grid; gap: 1px; min-width: 0; }
@@ -1068,6 +1107,18 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   .frow { gap: 8px; }
   .chips { gap: 7px; }
   .chip { min-height: 36px; padding: 6px 14px; font-size: 13px; }
+
+  /* A 24px x is a mouse target. Match the 36px the chips already use, and
+     give the field enough right padding that text never runs under it. */
+  .field-wrap input { padding-right: 42px; }
+  .field-x { min-width: 36px; min-height: 36px; font-size: 14px; right: 2px; }
+
+  /* Column resizing is a pointer affordance. On a phone the grips are 6px
+     targets sitting on the edge of every header cell, and `touch-action: none`
+     means a swipe that starts on one does not scroll the table -- so a missed
+     tap becomes a stuck gesture. The narrow layout also picks its own columns,
+     so there is nothing worth resizing. */
+  .vt-grip { display: none; }
 
   /* ------------------------------------------------------ status bar */
 

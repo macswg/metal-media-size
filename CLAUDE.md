@@ -148,6 +148,13 @@ exception**, not a loosening of the rule above:
 - **A scan never does this.** `npm run probe` is a separate command the operator
   runs on purpose — or the "Run resolution scan" button, which drives the same
   pass through `POST /api/probe`. Do not fold it into `npm run scan`.
+- **It needs `UV_THREADPOOL_SIZE`.** Node's libuv pool is **4 threads** by
+  default, and every header read goes through it. At the default, asking for 64
+  lanes gets you four: the archive probes at ~4.7 files/s instead of ~10, and
+  worse, the web UI starves — `index.html` took **4.1 s** to serve while a probe
+  ran, because static reads queue behind ~1 s archive reads. `npm run probe` and
+  `npm run serve` both set `UV_THREADPOOL_SIZE=64`. If you launch either with a
+  bare `node` command, expect both symptoms back.
 - **It is cancellable, and a scan is not.** That difference is deliberate: a
   scan is one atomic walk, a probe is thousands of independent reads written in
   batches as they land. `POST /api/probe/cancel` stops it and keeps everything

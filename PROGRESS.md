@@ -2,6 +2,88 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — the probe was starving the web server (and itself)
+
+The user reported the page taking a long time to load while a resolution scan
+ran. It was not bandwidth and it was not the database: **Node's libuv pool is 4
+threads**, every header read goes through it, and each one is a ~1 s round trip
+to object storage. Static assets queued behind them. Measured: `index.html`
+took **4.14 s** to serve while the API answered in 11 ms — the giveaway, since
+the API is pure SQLite and never touches the pool.
+
+The same bug was throttling the probe itself. "Concurrency 64" was fiction: with
+four threads the effective concurrency was four, which is exactly the 4.7
+files/s that had been confusing me since the first benchmark. Measured on 120
+cold files each, distinct offsets so nothing was served from cache:
+
+    UV_THREADPOOL_SIZE=(default 4)  conc=32   4.7 files/s
+    UV_THREADPOOL_SIZE=64           conc=32  11.3 files/s
+    UV_THREADPOOL_SIZE=128          conc=64   9.0 files/s
+
+`npm run probe` and `npm run serve` now set `UV_THREADPOOL_SIZE=64`. After the
+fix: `index.html` 4.14 s -> **0.017 s**, probe 4.7 -> **9.5 files/s**, ETA for
+the remaining archive 74 min -> 27 min.
+
+Worth remembering as a shape, not just a fix: a slow *page* whose *API* is fast
+is not a database problem. Anything that shares the threadpool with a thousand
+slow file reads will look broken while those reads are in flight.
+
+One note for whoever runs the tests next: **do not run the integration suite
+while a probe is in flight.** It walks the real archive, the probe was holding
+the mount, and 16 of its 26 tests timed out. With the probe finished the same
+suite passes in 3.2 s. Contention, not regression -- but it looks exactly like
+a regression if you do not know why.
+
+### The probe finished: 26,651 of 26,651 .mov files
+
+**Five files carry no header at all — 151.1 GB that nothing can play:**
+
+    141.0 GB  high  180_NIGHTLIGHT_LAYOUT_LL180_v003_region5.mov
+      4.7 GB  low   210_GRADIENTS_VERSE_G_LL180_v002_region13.mov
+      4.4 GB  low   210_GRADIENTS_VERSE_G_LL180_v002_region14.mov
+      1.0 GB  low   140_ONE_SOLDIERS_LL180_v007_region6.mov
+      1.2 MB  high  360_PYRAMID_MATTE3A_LL180_v002_region6.mov
+
+Two sit on live masters. 180_NIGHTLIGHT_LAYOUT has exactly one version (v003,
+14 regions, 1.66 TB) and 141 GB of it is unopenable. 360_PYRAMID_MATTE3A v002
+is the newest full version of its asset, and region 6 of its 14 is broken --
+tiny, but it is a hole in a current delivery.
+
+The other three are `low`: a newer full render already exists above them.
+
+Everything else read cleanly: 26,646 files with dimensions, from 1000x1000
+previews up to 8996x2584 masters.
+
+## 2026-08-26 — a mobile pass, with the desktop page provably untouched
+
+The phone layout already existed; this fixed what was actually broken in it,
+and nothing else. Verified by driving headless Chrome over CDP at a real
+390x844 emulated viewport — the first attempt lied, because `--window-size` on
+headless Chrome clamps to a 500px minimum, so a "390px screenshot" was a 500px
+layout clipped to 390 and everything looked cut off.
+
+**The one real bug: `.app` is a grid.** Grid items carry `min-width: auto` and
+refuse to shrink below their own min-content, so the topbar blew out to 475px
+inside a 390px viewport and dragged the whole document with it — every row
+looked clipped on the right, and none of them were at fault. `.app > * {
+min-width: 0 }` inside the narrow query fixes all of it: `doc.scrollWidth` is
+now exactly the viewport width on every tab.
+
+Also, narrow-only: the resolution strip gets its own row (with its meter and
+note back, since a full row has the space a topbar slot did not); `.snap-meta`
+is dropped, being ellipsised to "103 f…"; the search ✕ becomes a 36px target;
+column-resize grips are hidden, since a 6px grip with `touch-action: none` on
+every header edge turns a missed tap into a stuck gesture; and the manifest
+tick box is 20px again — `width` alone had lost to the flex automatic minimum,
+leaving a 13px target on the one control that changes what gets exported.
+
+**Every changed CSS line is inside `@media (max-width: 760px)`** — checked
+mechanically against the diff, not by eye. The desktop page cannot have moved.
+
+One non-mobile fix along the way: the topbar's "N broken" pill counted only the
+current run, so it read "1 broken" beside an anomalies panel saying 4. It now
+derives the count from snapshot-wide coverage.
+
 ## 2026-08-25 — the probe control was the wrong shape for where it lives
 
 It rendered as a bordered banner appended to `#snapshotBar` — which is
