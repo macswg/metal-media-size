@@ -135,11 +135,12 @@ const KEEP_REASON = {
  * and the reclaim vocabulary, and renaming it would ripple through every
  * keepReason. Only what a person reads changes.
  *
- * Note this label says the POLICY marked it, at the current keep-N. What the
- * user ticked is a different thing, labelled "manually marked".
+ * "Slated" is the policy's word, at the current keep-N. What the USER ticked
+ * is a different thing, labelled "manually marked" -- keeping the two verbs
+ * apart is the whole point, because only one of them is a decision.
  */
 export function statusLabel(status) {
-  if (status === 'superseded') return 'marked for removal';
+  if (status === 'superseded') return 'slated for removal';
   if (status === 'kept') return 'keep';
   return status || '—';
 }

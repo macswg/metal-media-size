@@ -146,7 +146,7 @@ export class FilterPanel {
           [
             ['', 'All'],
             ['kept', 'Keep'],
-            ['superseded', 'Marked for removal'],
+            ['superseded', 'Slated for removal'],
           ],
           f.status,
           (v) => this.set('status', v),

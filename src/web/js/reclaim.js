@@ -186,7 +186,7 @@ export class ReclaimStrip {
 
     clear(this.subEl);
     this.subEl.append(
-      `${count(r.supersededCount)} versions marked for removal`,
+      `${count(r.supersededCount)} versions slated for removal`,
       r.supersededFiles != null ? `  ·  ${count(r.supersededFiles)} files` : '',
       r.totalBytes ? `  ·  ${((r.reclaimBytes / r.totalBytes) * 100).toFixed(1)}% of what is in view` : '',
     );
