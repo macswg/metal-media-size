@@ -34,7 +34,8 @@ that **fails the build**. If a change requires weakening one, stop and ask.
    Exports may only land inside `exports/`.
 4. **`DeletionPolicy: 'Permanent'` is unreachable.** Not in the type union, the
    builder asserts against it, and the string appears nowhere in emitted XML.
-   Only `Versioning` (default, reversible) and `RecycleBin` are permitted.
+   Only `RecycleBin` (the default, and what the UI recommends) and `Versioning`
+   are permitted. Both are reversible; that is the property being enforced.
 5. **The app never deletes.** It emits a manifest; the human runs FreeFileSync.
    No UI copy may imply otherwise.
 

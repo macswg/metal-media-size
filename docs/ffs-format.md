@@ -214,11 +214,19 @@ have been **moved off it**: both are confirmed in the 14.10 binary.
    FreeFileSync so the user reviews the file list and presses Compare before
    anything moves. The human-in-the-loop step is deliberate.
 2. **Deletion policy is chosen per export**, surfaced in the UI:
-   - `Versioning` + `Style="TimeStamp-Folder"` — the **default**, and the option
-     the UI should visibly recommend. Requires a versioning folder path from the user.
-   - `RecycleBin` — offered, matches their existing jobs.
+   - `RecycleBin` — the **default**, listed first and visibly recommended.
+     It is what the operator's existing FreeFileSync jobs already do, it needs
+     no extra path typed in, and recovery is a gesture everyone already knows.
+   - `Versioning` + `Style="TimeStamp-Folder"` — offered second. Requires a
+     versioning folder path from the user, and is the better choice when a run
+     is too large for the Bin.
    - `Permanent` — **never offered, never emitted.** Not a UI option, not reachable
      by config. Assert against it in the exporter and cover it with a unit test.
+
+   *(Changed on 2026-08-26 at the user's request. Versioning was previously the
+   default. Both remain reversible, which is the property that actually
+   matters and which the exporter still enforces; the swap is about which
+   reversible option the operator meets first.)*
 3. Always emit the companion manifest (JSON + Markdown) of literal resolved paths
    alongside the `.ffs_gui`. The human reviews the concrete list, not the filter.
 4. Always emit the standard macOS excludes from the verified real file.

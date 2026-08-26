@@ -74,12 +74,12 @@ export async function resolveSelectedVersionIds(onProgress) {
 }
 
 export function openExportDialog({ versionIds, summary }) {
-  let policy = 'Versioning';
+  let policy = 'RecycleBin';
   let versioningFolder = localStorage.getItem('aa.versioningFolder') || '';
   let note = '';
   const formats = new Set(['ffs_gui', 'json', 'markdown']);
 
-  const folderField = h('div.field', { hidden: false });
+  const folderField = h('div.field', { hidden: true });
   const folderInput = h('input', {
     type: 'text',
     class: 'mono',
@@ -99,9 +99,13 @@ export function openExportDialog({ versionIds, summary }) {
 
   const policyOpts = h('fieldset.policy', h('legend', 'Deletion policy — required'));
   const optNodes = new Map();
+  // Recycle Bin first and recommended: it is what the operator's existing
+  // FreeFileSync jobs already do, it needs no extra path to be typed, and
+  // recovery is a gesture everyone already knows. Versioning stays available
+  // below for a run big enough that the Bin is the wrong place for it.
   for (const [value, title, desc, recommended] of [
-    ['Versioning', 'Versioning → timestamped folder', 'Files are moved into a dated folder rather than removed. Fully reversible.', true],
-    ['RecycleBin', 'Recycle Bin', "Files go to the system Recycle Bin. Matches your existing FreeFileSync jobs.", false],
+    ['RecycleBin', 'Recycle Bin', 'Files go to the system Recycle Bin, where you can put them back. Matches your existing FreeFileSync jobs.', true],
+    ['Versioning', 'Versioning → timestamped folder', 'Files are moved into a dated folder you nominate, rather than to the Bin. Also fully reversible; useful when the set is too large for the Bin.', false],
   ]) {
     const radio = h('input', { type: 'radio', name: 'delpolicy', value, checked: value === policy });
     const opt = h(
