@@ -110,7 +110,7 @@ export class LadderPanel {
         { style: { display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '2px' } },
         miniStat('Versions', count(versions.length)),
         miniStat('Total', fmtBytes(totalBytes)),
-        miniStat(`Superseded at keep-${state.keepN}`, fmtBytes(supersededBytes), supers.length ? 'var(--superseded)' : null),
+        miniStat(`Marked for removal at keep-${state.keepN}`, fmtBytes(supersededBytes), supers.length ? 'var(--superseded)' : null),
       ),
     );
 
@@ -120,7 +120,7 @@ export class LadderPanel {
           'div',
           { style: { display: 'flex', gap: '8px' } },
           h('button.btn.sm', {
-            text: `Tick all ${supers.length} superseded`,
+            text: `Tick all ${supers.length} marked for removal`,
             onClick: () => {
               for (const v of supers) toggleSelected(v.versionId, true, ladderMeta(asset, v));
               this.onSelectionChange?.();

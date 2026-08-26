@@ -79,6 +79,14 @@ export interface FilterSpec {
   isPatch?: 0 | 1;
   hasProxy?: 0 | 1;
   q?: string;
+  /**
+   * Restrict to these version ids. Exists so the UI can show "only what I have
+   * ticked" -- a selection lives in the browser, so the server has to be told
+   * which rows it is. Version domain only; ignored for files and songs.
+   */
+  versionIds?: number[];
+  /** Exclude these version ids. The un-ticked rows of a select-all-matched. */
+  excludeIds?: number[];
 }
 
 export interface Paging {
@@ -182,6 +190,36 @@ export function parseSort(
 // Filters
 // ---------------------------------------------------------------------------
 
+/**
+ * Ceiling on an id list. A selection is built by a human ticking rows, so this
+ * is far above any real use; it exists so a malformed request cannot ask SQLite
+ * to bind a hundred thousand parameters.
+ */
+export const MAX_ID_LIST = 5000;
+
+/** Comma-separated positive integers, deduplicated. */
+function idListParam(q: Query, key: string): number[] | undefined {
+  const raw = q[key];
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const parts = String(raw)
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => x !== '');
+  const out: number[] = [];
+  for (const part of parts) {
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 1) {
+      throw badRequest('bad_param', `${key} must be a comma-separated list of positive integers`);
+    }
+    out.push(n);
+  }
+  const unique = [...new Set(out)];
+  if (unique.length > MAX_ID_LIST) {
+    throw badRequest('bad_param', `${key} may hold at most ${MAX_ID_LIST} ids, got ${unique.length}`);
+  }
+  return unique;
+}
+
 export function parseFilters(q: Query): FilterSpec {
   const f: FilterSpec = {};
 
@@ -197,6 +235,11 @@ export function parseFilters(q: Query): FilterSpec {
     if (list.length === 0) throw badRequest('bad_param', 'ext must list at least one extension');
     f.ext = [...new Set(list)];
   }
+
+  const versionIds = idListParam(q, 'versionIds');
+  if (versionIds !== undefined) f.versionIds = versionIds;
+  const excludeIds = idListParam(q, 'excludeIds');
+  if (excludeIds !== undefined) f.excludeIds = excludeIds;
 
   const minSize = intParam(q, 'minSize');
   if (minSize !== undefined) f.minSize = minSize;
@@ -421,6 +464,19 @@ export function versionWhere(snapshotId: number, f: FilterSpec): SqlWhere {
                  AND f2.ext IN (${placeholders(f.ext.length)}))`,
     );
     params.push(...f.ext);
+  }
+  if (f.versionIds !== undefined) {
+    // An empty list means "nothing is selected", which must match no rows --
+    // NOT every row, which is what an omitted clause would do.
+    if (f.versionIds.length === 0) parts.push('1 = 0');
+    else {
+      parts.push(`av.version_id IN (${placeholders(f.versionIds.length)})`);
+      params.push(...f.versionIds);
+    }
+  }
+  if (f.excludeIds !== undefined && f.excludeIds.length > 0) {
+    parts.push(`av.version_id NOT IN (${placeholders(f.excludeIds.length)})`);
+    params.push(...f.excludeIds);
   }
   if (f.minSize !== undefined) {
     parts.push('av.bytes >= ?');

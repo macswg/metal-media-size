@@ -128,6 +128,22 @@ const KEEP_REASON = {
   },
 };
 
+/**
+ * The keep/supersede verdict, in the words the user asked for.
+ *
+ * The WIRE VALUE stays `superseded` -- it is the API contract, the CSS class
+ * and the reclaim vocabulary, and renaming it would ripple through every
+ * keepReason. Only what a person reads changes.
+ *
+ * Note this label says the POLICY marked it, at the current keep-N. What the
+ * user ticked is a different thing, labelled "manually marked".
+ */
+export function statusLabel(status) {
+  if (status === 'superseded') return 'marked for removal';
+  if (status === 'kept') return 'keep';
+  return status || '—';
+}
+
 export function keepReasonText(reason) {
   return KEEP_REASON[reason]?.short ?? reason ?? '—';
 }

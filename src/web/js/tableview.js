@@ -7,7 +7,7 @@
  */
 
 import { h, clear, pathCell } from './dom.js';
-import { state, update, isSelected, toggleSelected, selectAllMatched, filterParams, defaultSortFor } from './state.js';
+import { state, update, isSelected, toggleSelected, selectAllMatched, filterParams, selectionParams, defaultSortFor } from './state.js';
 import { api } from './api.js';
 import { VirtualTable } from './vtable.js';
 import { isNarrow } from './viewport.js';
@@ -17,7 +17,13 @@ import {
   date as fmtDate,
   keepReasonText,
   keepReasonDetail,
+  statusLabel,
 } from './format.js';
+
+/** What ticking a row actually does. Shown on the column head and every box. */
+const TICK_TIP =
+  'Tick to add this version to an export manifest. Ticking never deletes ' +
+  'anything: it builds a FreeFileSync job that you review and run yourself.';
 
 const MODES = [
   ['versions', 'Asset-versions'],
@@ -117,6 +123,18 @@ export class TableView {
 
   async fetchPage(offset, limit) {
     const params = { ...filterParams(), sort: state.sort, dir: state.dir, limit, offset, keepN: state.keepN };
+
+    // "Only what I've ticked" applies to asset-versions alone: a selection is
+    // a set of VERSION ids, so it has no meaning in the file or song domains.
+    const sel = state.mode === 'versions' ? selectionParams() : null;
+    if (sel?.empty) {
+      // Nothing ticked. Answer locally: an empty id list and an omitted one
+      // look identical in a query string, and omitted means "no filter" --
+      // which would show everything, the exact opposite of what was asked.
+      return { rows: [], total: 0, matchedBytes: 0, limit, offset };
+    }
+    if (sel) Object.assign(params, sel);
+
     if (state.mode === 'versions') return api.versions(params);
     if (state.mode === 'files') return api.files(params);
     return api.songs(params);
@@ -291,7 +309,7 @@ export class TableView {
             type: 'checkbox',
             'data-stop': '',
             checked: isSelected(row.versionId),
-            title: 'Include in export manifest',
+            title: TICK_TIP,
             onChange: (e) => toggleSelected(row.versionId, e.target.checked, metaOf(row)),
           });
           return h('div.checkcell', { 'data-stop': '' }, cb);
@@ -311,7 +329,7 @@ export class TableView {
               h('span.stack-dot', { text: '·' }),
               h('span.cell-ver', { text: row.verLabel }),
               row.isPatch ? h('span.pill.patch.tiny', { text: 'patch' }) : null,
-              h(`span.pill.${row.status}.tiny`, { text: row.status }),
+              h(`span.pill.${row.status}.tiny`, { text: statusLabel(row.status) }),
             ),
           ),
         tooltip: (row) => `${row.songFolder}/${row.base} ${row.verLabel}`,
@@ -331,15 +349,16 @@ export class TableView {
       {
         key: 'sel',
         label: '',
-        width: '34px',
+        width: '58px',
         sortable: false,
-        head: () => h('span', { title: 'Tick versions to include in an export manifest', text: '' }),
+        // An unlabelled checkbox column is a guess. Say what ticking does.
+        head: () => h('span', { title: TICK_TIP, text: 'Mark' }),
         render: (row) => {
           const cb = h('input', {
             type: 'checkbox',
             'data-stop': '',
             checked: isSelected(row.versionId),
-            title: 'Include in export manifest',
+            title: TICK_TIP,
             onChange: (e) => {
               toggleSelected(row.versionId, e.target.checked, metaOf(row));
             },
@@ -378,8 +397,8 @@ export class TableView {
       {
         key: 'status',
         label: 'Status',
-        width: '104px',
-        render: (row) => h(`span.pill.${row.status}`, { text: row.status }),
+        width: '152px',
+        render: (row) => h(`span.pill.${row.status}`, { text: statusLabel(row.status) }),
       },
       {
         key: 'keepReason',

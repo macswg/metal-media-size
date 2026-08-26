@@ -20,6 +20,27 @@ export class FilterPanel {
     this.render();
   }
 
+  /**
+   * The line under the Selection control. Says what is ticked, and says so in
+   * the language of a decision the user made -- never "the tool marked these".
+   */
+  paintSelectionHint() {
+    if (!this.selCountEl) return;
+    const sel = state.selection;
+    if (sel.allMatched) {
+      const minus = sel.except.size
+        ? ` — minus ${sel.except.size} you un-ticked`
+        : '';
+      this.selCountEl.textContent = `Everything matching the filters above is marked${minus}.`;
+      return;
+    }
+    const n = sel.ids.size;
+    this.selCountEl.textContent =
+      n === 0
+        ? 'Nothing marked yet — tick rows in the table to build a manifest.'
+        : `${n.toLocaleString()} version${n === 1 ? '' : 's'} marked for the export manifest.`;
+  }
+
   /** The extension filter as a set, parsed from whatever the field holds. */
   chosenExts(raw = state.filters.ext) {
     return new Set(
@@ -80,6 +101,10 @@ export class FilterPanel {
     this.clearBtn = h('button.btn.sm.ghost', {
       text: 'Clear',
       onClick: () => {
+        // Clears the VIEW, including the selection filter. It does not clear
+        // the selection itself -- losing ticks to a button labelled "Clear
+        // filters" would be a nasty surprise.
+        state.showSelectedOnly = false;
         resetFilters();
         this.render();
       },
@@ -120,8 +145,8 @@ export class FilterPanel {
         seg(
           [
             ['', 'All'],
-            ['kept', 'Kept'],
-            ['superseded', 'Superseded'],
+            ['kept', 'Keep'],
+            ['superseded', 'Marked for removal'],
           ],
           f.status,
           (v) => this.set('status', v),
@@ -130,6 +155,32 @@ export class FilterPanel {
         hint('status= — recomputed whenever the keep-latest-N slider moves'),
       ),
     );
+
+    /* ---- selection ---------------------------------------------------- */
+    // Kept separate from "Status at current keep-N" on purpose. Superseded is
+    // the tool's verdict about the archive; this is YOUR decision about what
+    // goes in the manifest. Merging them into one control would suggest the
+    // tool had marked something for removal, which it never does.
+    this.selCountEl = h('span.fhint', { style: { marginTop: '4px' } });
+    this.host.appendChild(
+      group(
+        'Manually marked for export',
+        seg(
+          [
+            ['', 'All'],
+            ['marked', 'Manually marked'],
+          ],
+          state.showSelectedOnly ? 'marked' : '',
+          (v) => {
+            state.showSelectedOnly = v === 'marked';
+            this.paintSelectionHint();
+            update({}, 'filters');
+          },
+        ),
+        this.selCountEl,
+      ),
+    );
+    this.paintSelectionHint();
 
     /* ---- patch / proxy ---------------------------------------------- */
     this.host.appendChild(

@@ -47,6 +47,13 @@ export const state = {
    * actually clicked, so the running total is exact without a round trip.
    */
   selection: { allMatched: false, ids: new Set(), except: new Set(), meta: new Map() },
+  /**
+   * Show only the versions ticked for export. Not a FILTER_KEY: those are
+   * archive predicates that also scope the reclaim figure, whereas this is a
+   * view of your own selection and must never change what the policy says is
+   * superseded.
+   */
+  showSelectedOnly: false,
 };
 
 const listeners = new Set();
@@ -213,6 +220,28 @@ export function readUrl() {
 }
 
 /** The filter set as plain query params, for handing to the API layer. */
+/**
+ * Selection as query params, for the TABLE only.
+ *
+ * Two selection shapes to express:
+ *   - explicit ticks           -> versionIds=<the ids>
+ *   - select-all-matched       -> the current filters, minus excludeIds
+ *
+ * Returns null when the filter is off, and `{ empty: true }` when it is on but
+ * nothing is ticked -- the caller renders an empty table rather than asking
+ * the server, because an empty id list is indistinguishable from an omitted
+ * one in a query string, and omitted means "no filter".
+ */
+export function selectionParams() {
+  if (!state.showSelectedOnly) return null;
+  const sel = state.selection;
+  if (sel.allMatched) {
+    return sel.except.size ? { excludeIds: [...sel.except].join(',') } : {};
+  }
+  if (sel.ids.size === 0) return { empty: true };
+  return { versionIds: [...sel.ids].join(',') };
+}
+
 export function filterParams() {
   const out = {};
   for (const k of FILTER_KEYS) {

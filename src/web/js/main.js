@@ -298,7 +298,7 @@ function showTab(id) {
 function buildStatusBar() {
   const host = $('#statusBar');
   clear(host);
-  app.selSummary = h('div.sel-summary', { text: 'Nothing selected' });
+  app.selSummary = h('div.sel-summary', { text: 'Nothing marked — tick a row to start a manifest' });
   app.exportBtn = h('button.btn.primary', {
     text: 'Export manifest…',
     disabled: true,
@@ -328,12 +328,12 @@ function paintStatusBar() {
   app.clearSelBtn.hidden = !has;
   clear(app.selSummary);
   if (!has) {
-    app.selSummary.textContent = 'Nothing selected';
+    app.selSummary.textContent = 'Nothing marked — tick a row to start a manifest';
     return;
   }
   app.selSummary.append(
     h('b', { text: count(totals.count) }),
-    ' versions selected',
+    ' versions marked for the manifest',
     totals.bytes != null ? ' · ' : '',
     totals.bytes != null ? h('span.bytes', { text: `${totals.exact ? '' : '≈'}${fmtBytes(totals.bytes)}` }) : '',
     totals.allMatched ? h('span.muted', { text: '  (everything matching the current filters)' }) : '',
@@ -364,7 +364,11 @@ let reloading = false;
 function handleStateChange(reasons) {
   paintStatusBar();
   if (reasons.has('selection') && reasons.size === 1) {
-    app.table.repaintSelection();
+    app.filters.paintSelectionHint();
+    // While "Marked for removal" is on, the selection IS the row set, so
+    // un-ticking has to remove the row rather than just un-highlight it.
+    if (state.showSelectedOnly) app.table.refresh();
+    else app.table.repaintSelection();
     app.ladder.repaintSelection();
     return;
   }

@@ -21,6 +21,7 @@ import { buildServer } from '../../src/server/app.ts';
 import type { AppContext } from '../../src/server/context.ts';
 import { ReadOnlyFs } from '../../src/fs/readonly.ts';
 import { makeFixture, type Fixture } from './fixture.ts';
+import { MAX_ID_LIST } from '../../src/server/query.ts';
 
 let fx: Fixture;
 let app: FastifyInstance;
@@ -644,6 +645,89 @@ describe('GET /api/summary', () => {
     for (let i = 1; i < values.length; i++) {
       expect(values[i]).toBeLessThanOrEqual(values[i - 1]);
     }
+  });
+});
+
+// ===========================================================================
+describe('versionIds / excludeIds -- the "only what I marked" filter', () => {
+  // A selection lives in the browser, so the server has to be told which rows
+  // it is. Two shapes: explicit ticks (versionIds), and select-all-matched
+  // with un-ticked exceptions (excludeIds).
+
+  it('restricts to exactly the ids given', async () => {
+    const all = (await get('/api/versions?keepN=1&limit=5')).body.rows as { versionId: number }[];
+    const picked = all.slice(0, 3).map((r) => r.versionId);
+
+    const { status, body } = await get(`/api/versions?keepN=1&versionIds=${picked.join(',')}`);
+    expect(status).toBe(200);
+    expect(body.total).toBe(3);
+    expect(body.rows.map((r: any) => r.versionId).sort()).toEqual([...picked].sort());
+  });
+
+  it('excludeIds removes rows from whatever else matched', async () => {
+    const all = (await get('/api/versions?keepN=1&limit=5')).body.rows as { versionId: number }[];
+    const picked = all.slice(0, 3).map((r) => r.versionId);
+    const dropped = picked[0] as number;
+
+    const { body } = await get(
+      `/api/versions?keepN=1&versionIds=${picked.join(',')}&excludeIds=${dropped}`,
+    );
+    expect(body.total).toBe(2);
+    expect(body.rows.map((r: any) => r.versionId)).not.toContain(dropped);
+  });
+
+  it('composes with the other filters rather than overriding them', async () => {
+    const kept = (await get('/api/versions?keepN=1&status=kept&limit=3')).body.rows as {
+      versionId: number;
+    }[];
+    const ids = kept.map((r) => r.versionId).join(',');
+    // Same ids, opposite status: the two must intersect, not replace.
+    const { body } = await get(`/api/versions?keepN=1&status=superseded&versionIds=${ids}`);
+    expect(body.total).toBe(0);
+  });
+
+  it('an unknown id simply matches nothing', async () => {
+    const { status, body } = await get('/api/versions?keepN=1&versionIds=999999');
+    expect(status).toBe(200);
+    expect(body.total).toBe(0);
+  });
+
+  it('rejects non-numeric or non-positive ids', async () => {
+    for (const bad of ['abc', '1,abc', '0', '-3', '1.5']) {
+      const { status, body } = await get(`/api/versions?versionIds=${encodeURIComponent(bad)}`);
+      expect(status, bad).toBe(400);
+      expect(body.error.code, bad).toBe('bad_param');
+    }
+  });
+
+  it('caps the id list so a malformed request cannot bind a huge statement', async () => {
+    const tooMany = Array.from({ length: MAX_ID_LIST + 1 }, (_, i) => i + 1).join(',');
+    const { status, body } = await get(`/api/versions?versionIds=${tooMany}`);
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('bad_param');
+  });
+
+  it('scopes /api/reclaim like any other filter, without changing a verdict', async () => {
+    // versionIds filters the OUTPUT, exactly as songFolder does: computeReclaim
+    // still runs over the whole snapshot and only the counted rows change. So
+    // this is safe, and "what do my ticked rows reclaim" is a fair question to
+    // be able to ask.
+    //
+    // The UI nonetheless never sends it to this route -- the headline must
+    // answer "what does the POLICY say is reclaimable", not "what have I
+    // ticked" -- which is why selectionParams() is kept out of filterParams().
+    const whole = (await get('/api/reclaim?keepN=1')).body.reclaimBytes;
+    const superseded = (await get('/api/versions?keepN=1&status=superseded&limit=1')).body
+      .rows as { versionId: number; bytes: number }[];
+    const one = superseded[0] as (typeof superseded)[number];
+
+    const scoped = (await get(`/api/reclaim?keepN=1&versionIds=${one.versionId}`)).body;
+    expect(scoped.reclaimBytes).toBe(one.bytes);
+    expect(scoped.reclaimBytes).toBeLessThan(whole);
+    // The verdict itself is unchanged: still superseded, still the same bytes.
+    const row = (await get(`/api/versions?keepN=1&versionIds=${one.versionId}`)).body.rows[0];
+    expect(row.status).toBe('superseded');
+    expect(row.bytes).toBe(one.bytes);
   });
 });
 
