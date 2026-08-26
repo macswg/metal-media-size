@@ -2,6 +2,45 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — snapshot 8, and the integration ground truth re-pinned
+
+The five failing integration tests were archive drift, so the fix was a fresh
+scan and a deliberate re-measure rather than widening bands until they passed.
+
+    snapshot 7 (2026-08-25): 26,655 files  133.568 TiB  keep-1 49.69 TiB / 795
+    snapshot 8 (2026-08-26): 26,685 files  133.771 TiB  keep-1 49.87 TiB / 797
+
+Re-pinned together, not one at a time: the reclaim figures move with the bytes,
+and re-pinning them piecemeal is how a real regression gets absorbed into a
+band nobody re-derived. New values: keep 1/2/3 -> 49.87 / 18.26 / 5.71 TiB and
+797 / 401 / 305 versions; total 133.6-134.1 TiB; walked 26,600-26,800.
+
+**The structural invariants did not move, which is the reassuring part.** 28
+assets still carry two sub-letters under one version number, protected patch
+bytes are still 530.8 GiB at every keep-N, and the asset_version lower bound
+still sits above the letter-folded figure (2,405 measured, 2,377 if folded,
+guard at 2,403).
+
+### The excluded-files guard was asserting the wrong thing
+
+`excluded.count >= 30` was the assertion that broke hardest, and it deserved
+to. FreeFileSync creates its bookkeeping files and clears them again — 37 at
+snapshot 7, 2 at snapshot 8 — so that guard was really asserting *FFS has run
+recently*, which is not a fact about this codebase.
+
+Replaced with the invariant that actually matters and cannot drift: **nothing
+matching an exclusion pattern may reach the analysed set.** The walk's own
+output is checked against a fresh `ExclusionMatcher`, with the byte ceiling
+kept. `test/exclude.test.ts` still covers the matcher exhaustively; this is the
+end-to-end half. 27 integration tests now, up from 26.
+
+### Snapshot 8 inherited its resolutions for free
+
+`carryForwardMedia` matched 26,651 files by (path, size, mtime) and moved their
+dimensions across without a single read; only the 30 genuinely new files were
+opened. Snapshot 8 is at 100% coverage, and it is the same 5 headerless files —
+no new interrupted renders in this delivery.
+
 ## 2026-08-26 — give the phone screen back to the asset list
 
 The chrome above the table was 621px of an 844px screen; the list you came for

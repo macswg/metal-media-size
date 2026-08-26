@@ -13,6 +13,19 @@
  * bit-exact equality, and every bound is annotated with the measured value it
  * is protecting. A real regression in the grammar or the patch rule moves these
  * numbers by far more than the tolerance.
+ *
+ * RE-PINNED 2026-08-26 against snapshot 8. A delivery landed during the
+ * resolution work: +30 files and +0.20 TiB against snapshot 7, which pushed
+ * four bands out. The reclaim figures move with the bytes, so they were
+ * re-measured together rather than one at a time -- re-pinning them piecemeal
+ * is how a real regression gets absorbed into a band nobody re-derived.
+ *
+ *   snapshot 7 (2026-08-25): 26,655 files  133.57 TiB  keep-1 49.69 TiB / 795
+ *   snapshot 8 (2026-08-26): 26,685 files  133.77 TiB  keep-1 49.87 TiB / 797
+ *
+ * The structural invariants did NOT move, which is the reassuring part: 28
+ * assets still carry two sub-letters under one version number, and protected
+ * patch bytes are still 530.8 GiB at every keep-N.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -22,6 +35,7 @@ import { openDb, loadReclaimInput } from '../src/db/index.ts';
 import { runScan } from '../src/scan/run.ts';
 import { computeReclaim, toTiB, toGiB } from '../src/scan/reclaim.ts';
 import { compareVersions } from '../src/scan/derive.ts';
+import { ExclusionMatcher } from '../src/scan/exclude.ts';
 import type { ScanResult } from '../src/scan/run.ts';
 import type { Database as Db } from 'better-sqlite3';
 
@@ -64,30 +78,47 @@ describe.skipIf(!haveArchive)('integration: scan of the real archive', () => {
   });
 
   it('walks the ground-truth number of files', () => {
-    // Ground truth: 26,661 files walked. That total INCLUDES the 37 FreeFileSync
-    // and AppleDouble bookkeeping entries we exclude from analysis, which is why
-    // the analysed count is 37 lower.
+    // Ground truth at snapshot 8: 26,687 walked = 26,685 analysed + 2 excluded.
     const walked = result.walk.files.length + result.walk.excluded.count;
     expect(walked).toBeGreaterThanOrEqual(26_600);
-    expect(walked).toBeLessThanOrEqual(26_720);
+    expect(walked).toBeLessThanOrEqual(26_800);
+  });
 
-    // The exclusions must actually be finding the bookkeeping files.
-    expect(result.walk.excluded.count).toBeGreaterThanOrEqual(30);
-    // ...and they must be negligible in size (they are a few hundred KB).
+  /**
+   * The bookkeeping population is TRANSIENT. FreeFileSync creates these files
+   * and clears them again: between snapshot 7 and snapshot 8 they went from 37
+   * to 2. The old assertion here demanded at least 30, which was really
+   * asserting that FFS had run recently -- it failed for a reason that had
+   * nothing to do with this codebase.
+   *
+   * What must hold whatever FFS is doing: nothing matching an exclusion
+   * pattern may reach the analysed set, and whatever was excluded must be
+   * negligible in size. The matcher's own behaviour is covered exhaustively by
+   * test/exclude.test.ts; this is the end-to-end half of it.
+   */
+  it('lets nothing excluded reach the analysed set', () => {
+    const matcher = new ExclusionMatcher(cfg.exclusions.globs, cfg.exclusions.caseInsensitive);
+    const leaked = result.walk.files.filter((f) => matcher.match(f.name) !== null);
+    expect(leaked.map((f) => f.relPath)).toEqual([]);
+    // A few hundred KB of bookkeeping, never megabytes of real media.
     expect(result.walk.excluded.bytes).toBeLessThan(10 * 1024 * 1024);
   });
 
-  it('totals the ground-truth 133.55 TiB', () => {
+  it('totals the ground-truth 133.77 TiB', () => {
+    // 133.771 TiB at snapshot 8, up from 133.568 at snapshot 7 as deliveries
+    // land. The band is 0.2% wide; a grammar or walk regression moves this by
+    // whole TiB, not by hundredths.
     const tib = toTiB(result.walk.totalBytes);
-    expect(tib).toBeGreaterThan(133.4);
-    expect(tib).toBeLessThan(133.7);
+    expect(tib).toBeGreaterThan(133.6);
+    expect(tib).toBeLessThan(134.1);
   });
 
   it('is almost entirely .mov', () => {
-    // Ground truth: 26,620 of 26,661 are .mov.
+    // Ground truth at snapshot 8: 26,681 of 26,685 are .mov. The four that are
+    // not are two .tif QC stills and two zero-byte render logs.
     const mov = result.walk.files.filter((f) => f.ext === 'mov').length;
-    expect(mov).toBeGreaterThanOrEqual(26_560);
-    expect(mov).toBeLessThanOrEqual(26_680);
+    expect(mov).toBeGreaterThanOrEqual(26_600);
+    expect(mov).toBeLessThanOrEqual(26_800);
   });
 
   it('derives the ground-truth 1,532 assets', () => {
@@ -149,12 +180,17 @@ describe.skipIf(!haveArchive)('integration: scan of the real archive', () => {
     // Superseded COUNTS rise at keep 2 and 3 while bytes fall: previews no
     // longer occupy kept slots, so more of them fall out of the window -- but
     // they are tiny, and the masters they were displacing are now retained.
-    //   keep 1 -> 49.69 TiB / 795      keep 2 -> 18.19 TiB / 400
-    //   keep 3 ->  5.63 TiB / 304
+    // Re-pinned against snapshot 8 (2026-08-26). Snapshot 7 read 49.69 / 18.19
+    // / 5.63 TiB (795 / 400 / 304); the archive gained 30 files and 0.20 TiB,
+    // and the figures moved with it. The SHAPE is what matters and it is
+    // unchanged: bytes fall steeply as N rises, and protected patch bytes stay
+    // flat at 530.8 GiB throughout.
+    //   keep 1 -> 49.87 TiB / 797      keep 2 -> 18.26 TiB / 401
+    //   keep 3 ->  5.71 TiB / 305
     const cases: [number, number, number][] = [
-      [1, 49.69, 795],
-      [2, 18.19, 400],
-      [3, 5.63, 304],
+      [1, 49.87, 797],
+      [2, 18.26, 401],
+      [3, 5.71, 305],
     ];
 
     for (const [keepN, wantTiB, wantVersions] of cases) {
@@ -168,9 +204,11 @@ describe.skipIf(!haveArchive)('integration: scan of the real archive', () => {
     }
 
     it('counts one asset_version row per (number, letter, patch)', () => {
-      // Measured 2,403 rows: 2,397 full + 6 patch, of which 234 carry a letter.
-      // Folding the letters would collapse this to 2,375. Banded upward for
-      // archive drift; a regression that re-folds would drop it by ~28.
+      // Measured 2,405 rows at snapshot 8: 2,399 full + 6 patch, of which 234
+      // carry a letter. Folding the letters would collapse this to 2,377. The
+      // lower bound stays at 2,403 -- it only has to sit above the folded
+      // figure, and raising it on every scan would make the guard brittle as
+      // the archive grows.
       const rows = db
         .prepare(
           `SELECT COUNT(*) c FROM asset_version av

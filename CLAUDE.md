@@ -10,7 +10,7 @@ instrument**. It scans, indexes, filters and exports. It never modifies the
 archive.
 
 Target: `/Users/Shared/ObjectMount.noindex/show-archive/SHOW_2026/00_D3_Delivery`
-— a read-only macFUSE object mount. ~26.6k files, ~133.6 TiB, 65 song folders,
+— a read-only macFUSE object mount. ~26.7k files, ~133.8 TiB, 65 song folders,
 two levels deep. A full walk takes ~12 s cold.
 
 Run it: `npm run scan` then `npm run serve`, then open `http://127.0.0.1:<port>/`.
@@ -111,6 +111,11 @@ masters, v003 is a single 1.5 GiB proxy, and keep-1 proposed deleting v002. The
 correction moved keep-1 from 52.87 → **49.69 TiB**. Do not reinstate the old
 figure. Reasoning is recorded in `src/scan/reclaim.ts` and pinned by
 `test/proxy-only-rule.test.ts`.
+
+Those two numbers are a record of what the fix did on the archive as it stood
+that day, not a live reading — the archive grows, and keep-1 measures 49.87 TiB
+at snapshot 8. What must never come back is the 3.17 TiB of last-copy masters
+the rule protects; the headline figure is expected to drift.
 
 ### `noHeader` is the only anomaly that needs a probe
 Every other category is derived from names, sizes and counts, so it covers the
