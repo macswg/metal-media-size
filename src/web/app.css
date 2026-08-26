@@ -442,6 +442,15 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .reason { color: var(--dim); font-size: 11.5px; }
 
 .checkcell { display: flex; align-items: center; justify-content: center; }
+
+/* A version the policy is keeping cannot enter the manifest, so its box is
+   disabled. Fade it almost out: the row's business is the green keep flag,
+   and a crisp empty box reads as "untick me", which is not on offer here. */
+.checkcell input[type='checkbox']:disabled {
+  opacity: 0.13;
+  filter: grayscale(1);
+  cursor: default;
+}
 input[type="checkbox"] { accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; }
 
 /* ------------------------------------------------------------ status bar */
