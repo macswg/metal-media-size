@@ -120,11 +120,11 @@ const KEEP_REASON = {
   },
   'kept-proxy-only-newer-than-latest-full': {
     short: 'preview above the current master',
-    long: 'This version is a low-res preview and nothing else — it has no LED region files. It sits above the newest region-bearing version, so it is most likely the preview of a render still in progress. A preview can never supersede a master, so this is protected at every keep-N.',
+    long: 'This version is a low-res preview and nothing else — it has no region files. It sits above the newest region-bearing version, so it is most likely the preview of a render still in progress. A preview can never supersede a master, so this is protected at every keep-N.',
   },
   'superseded-proxy-only': {
     short: 'a newer full render replaces this preview',
-    long: 'A low-res preview with no LED region files, sitting below a kept region-bearing version that supersedes it.',
+    long: 'A low-res preview with no region files, sitting below a kept region-bearing version that supersedes it.',
   },
 };
 
@@ -157,7 +157,7 @@ export function isPatchReason(reason) {
   return reason === 'kept-patch-newer-than-latest-full' || reason === 'kept-patch-of-latest-full' || reason === 'superseded-patch';
 }
 
-/* A version that carries a preview and no LED region files at all. */
+/* A version that carries a preview and no region files at all. */
 export function isProxyOnlyReason(reason) {
   return reason === 'kept-proxy-only-newer-than-latest-full' || reason === 'superseded-proxy-only';
 }
