@@ -427,6 +427,7 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
   border-radius: 3px; font-family: var(--mono); letter-spacing: 0.2px; white-space: nowrap;
 }
 .pill.kept { color: var(--kept); background: var(--kept-bg); }
+.pill.unknown { color: var(--dim); background: var(--panel-2); }
 .pill.superseded { color: var(--superseded); background: var(--superseded-bg); }
 .pill.patch { color: var(--patch); background: var(--patch-bg); }
 /* An override: the policy slated it, you kept it. Reads as kept, but marked

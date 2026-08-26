@@ -187,7 +187,11 @@ export function isVetoed(id) {
  * itself without a tooltip.
  */
 export function effectiveStatus(row) {
-  if (row.status !== 'superseded') return row.status === 'unknown' ? 'unknown' : 'keep';
+  // Returns WIRE values, not labels: the result is used as a CSS class as well
+  // as a lookup key, and `.pill.kept` is what the stylesheet defines. Returning
+  // the label 'keep' here silently dropped the green styling, because
+  // `.pill.keep` matches nothing. statusLabel() does the display mapping.
+  if (row.status !== 'superseded') return row.status === 'unknown' ? 'unknown' : 'kept';
   const id = versionIdOf(row);
   return id !== null && state.selection.vetoed.has(id) ? 'kept-by-you' : 'superseded';
 }
