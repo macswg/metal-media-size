@@ -35,6 +35,7 @@ the filename grammar per request.
 | `src/scan/derive.ts` | Files → assets → versions. `compareVersions` lives here |
 | `src/scan/reclaim.ts` | `computeReclaim` — keep-latest-N and the patch rule |
 | `src/db/schema.ts` | The 4-table schema + two views. The cross-agent contract |
+| `src/machines.ts` | Region -> playback machine allocation. NOT a partition |
 | `src/server/` | Fastify app, query layer, routes, static mount |
 | `src/export/writer.ts` | Sole write path. The export jail |
 | `src/export/{json,markdown,ffs}.ts` | Pure renderers |

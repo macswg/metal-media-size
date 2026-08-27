@@ -150,6 +150,7 @@ export const api = {
   files: (params) => impl.get('/api/files', params).then(normaliseList),
   versions: (params) => impl.get('/api/versions', params).then(normaliseList),
   songs: (params) => impl.get('/api/songs', params).then(normaliseList),
+  machines: (params) => impl.get('/api/machines', params).then(normaliseList),
 
   assetVersions: (assetId, params) => impl.get(`/api/assets/${assetId}/versions`, params),
 

@@ -2,6 +2,69 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — a fourth Browse mode: what each machine has to hold
+
+> *"we'll need to understand the file size allocation across multiple machines
+> ... a new tab next to Asset-versions, Files, and Song Folders that is
+> Per-machine breakdown"* — the user
+
+Keyed by **region**, confirmed with the user: the rig divides the canvas slices
+between machines, so "how much does machine 3 hold" is a question about
+region1-region14 and not about songs. Against the real index, at keep-3:
+
+    Machine 04   regions 7,8      27.16 TiB   3,468 files   superseded 1.06 TiB
+    Machine 06   regions 11,12    24.59 TiB   3,468 files   superseded 0.97 TiB
+    ...
+    Machine 01   regions 1,2       6.62 TiB   3,468 files   superseded 0.33 TiB
+    Editorial    region 0          2.17 TiB   2,151 files   superseded 0.28 TiB
+
+Which makes the point CLAUDE.md has always made in prose visible for the first
+time: the slices are wildly unequal. Same file count on every machine, a
+four-fold spread in bytes. The Editorial row landing on 2.17 TiB — the region 0
+figure the board already shows — is a free cross-check that the keying is right.
+
+### Region is parsed at query time, not stored
+
+The `file` table has the name but not the region; the scanner parses it only to
+roll versions up. Adding a column would have meant a migration and a rescan of
+every existing snapshot, so the route parses `file.name` with THE SAME PARSER
+the scan used, built from the same config pattern. The saved migration is the
+lesser reason: a second, hand-rolled way of reading a region out of a filename
+would be a divergent source of truth for the one thing this view keys on. 47 ms
+for 26,685 names.
+
+### The totals do not add up, and must not be made to
+
+Also confirmed with the user: a region can be held by more than one machine. So
+per-machine bytes sum to MORE than the archive holds, and the difference is real
+redundancy. `/api/machines` returns a `reconcile` block that puts every byte in
+view into exactly one of four categories — allocated, unallocated, regionless,
+unparsed — and a test asserts the four sum to the matched total. The table says
+the overlap out loud rather than leaving someone to notice their figures do not
+tie out. Each row also carries `sharedBytes`: how much of its load somebody else
+holds too, which reads zero when the allocation happens to be a partition and
+stops being zero the moment it is not.
+
+**regionless** and **unparsed** are kept apart. One is a legal deliverable
+covering the whole canvas, the other is a name nothing here understands, and
+merging them would hide the second inside the first. The shared fixture has no
+regionless file — all six of its non-region names fail the grammar outright — so
+the test builds a snapshot that does rather than leaving the branch unproven.
+
+### The allocation is a placeholder and says so
+
+`DEFAULT_MACHINES` is invented: eight machines, two slices each, plus editorial
+on region 0. `allocationSource: 'placeholder'` rides all the way out to the
+browser and the table prints a warning above itself. Real byte totals under
+plausible-looking machine names would be the worst thing this view could be.
+
+It is shaped exactly like the `config/machines.json` it will read one day, so
+that becomes a loader in `resolveMachines` and no change anywhere else.
+
+Machine rows are deliberately NOT clickable: there is no region filter, so a
+click-through would land on an unfiltered version list and look like it had done
+something.
+
 ## 2026-08-27 — the report is named for when it was produced
 
 > *"name the report with the current date and time like this

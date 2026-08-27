@@ -144,6 +144,12 @@ superseded. That is what this tool works out.
   fixed by a newer version is reported but de-emphasised.
 - **Duplicates** — metadata only, never reads file bytes (the mount is object
   storage; reading means egress). Always labelled "content not verified".
+- **Per-machine** — a fourth Browse mode: how much media each playback machine
+  has to hold, keyed by the canvas regions allocated to it, and how much of that
+  is superseded. A region can be held by several machines, so the rows overlap
+  by design and the view states the duplication rather than presenting them as
+  shares of a total. The allocation is currently a hard-coded placeholder in
+  `src/machines.ts` and is labelled as one on screen.
 - **Snapshots** — every scan is retained and two can be diffed. The archive is
   live, so this matters. Old snapshots can be removed from the index.
 - **Exports** — a shareable HTML report, JSON, Markdown, and a FreeFileSync

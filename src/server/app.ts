@@ -30,6 +30,7 @@ import { registerAnomalyRoutes } from './routes/anomalies.ts';
 import { registerDuplicateRoutes } from './routes/duplicates.ts';
 import { registerExportRoutes } from './routes/export.ts';
 import { registerFileRoutes } from './routes/files.ts';
+import { registerMachineRoutes } from './routes/machines.ts';
 import { registerReclaimRoutes } from './routes/reclaim.ts';
 import { registerProbeRoutes } from './routes/probe.ts';
 import { registerScanRoutes } from './routes/scan.ts';
@@ -165,6 +166,7 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
   registerVersionRoutes(app, ctx);
   registerReclaimRoutes(app, ctx);
   registerSongRoutes(app, ctx);
+  registerMachineRoutes(app, ctx);
   registerSummaryRoutes(app, ctx);
   registerDuplicateRoutes(app, ctx);
   registerAnomalyRoutes(app, ctx);

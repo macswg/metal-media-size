@@ -203,6 +203,34 @@ exception**, not a loosening of the rule above:
   compared across a sample of this archive and agreed on every track, so the
   cheaper of the two is read.
 
+### The machine allocation is NOT a partition
+
+`src/machines.ts` maps canvas regions to playback machines. The same region may
+be held by several machines — a redundant pair, a spare, an editorial box — so
+per-machine bytes **sum to more than the archive holds**, and the difference is
+real duplicated media rather than an arithmetic slip.
+
+Nothing may present those totals as shares of a whole. `/api/machines` returns a
+`reconcile` block putting every byte in view into exactly one of four
+categories — allocated (counted once, however many machines hold it),
+unallocated (a region no machine claims), regionless (a valid name with no
+region token), unparsed (a name the grammar cannot read) — and the UI states the
+overlap as a number. `test/server/machines.test.ts` asserts the four sum to the
+matched total.
+
+Two things that look alike and are not: **regionless** is a legal deliverable
+covering the whole canvas; **unparsed** is a name nothing here understands.
+Merging them hides the second inside the first.
+
+The allocation is a statement about the RIG, never about the archive. Nothing in
+that module decides what is superseded; the verdict arrives on each file row
+from the usual whole-snapshot `computeReclaim`.
+
+`DEFAULT_MACHINES` is currently a **placeholder** — invented names, invented
+regions — and `allocationSource: 'placeholder'` carries that fact to the browser,
+which must say so. Real byte totals under plausible machine names would be the
+worst thing this view could be.
+
 ### `family` is a display label
 Never use it to classify anything as removable.
 

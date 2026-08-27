@@ -35,6 +35,7 @@ const MODES = [
   ['versions', 'Asset-versions'],
   ['files', 'Files'],
   ['songs', 'Song folders'],
+  ['machines', 'Per-machine'],
 ];
 
 export class TableView {
@@ -146,7 +147,18 @@ export class TableView {
 
     if (state.mode === 'versions') return api.versions(params);
     if (state.mode === 'files') return api.files(params);
-    return api.songs(params);
+    if (state.mode === 'songs') return api.songs(params);
+
+    // The machine rollup carries two things no other mode has: where the
+    // allocation came from, and how the bytes reconcile. Both are stashed for
+    // paintTotals, which runs after this resolves.
+    const res = await api.machines(params);
+    this.machineMeta = {
+      allocationSource: res.allocationSource ?? null,
+      reconcile: res.reconcile ?? null,
+      machineCount: res.machineCount ?? 0,
+    };
+    return res;
   }
 
   showError(err) {
@@ -165,18 +177,13 @@ export class TableView {
     // common enough -- one patch, one anomaly -- that "1 versions" shows up
     // regularly.
     const one = this.total === 1;
-    const noun =
-      state.mode === 'versions'
-        ? one
-          ? 'version'
-          : 'versions'
-        : state.mode === 'files'
-          ? one
-            ? 'file'
-            : 'files'
-          : one
-            ? 'song folder'
-            : 'song folders';
+    const NOUNS = {
+      versions: ['version', 'versions'],
+      files: ['file', 'files'],
+      songs: ['song folder', 'song folders'],
+      machines: ['machine', 'machines'],
+    };
+    const noun = (NOUNS[state.mode] ?? NOUNS.versions)[one ? 0 : 1];
     clear(this.totalsEl);
     this.hintEl.className = 'muted';
     this.totalsEl.append(
@@ -186,7 +193,63 @@ export class TableView {
       h('b', { text: this.matchedBytes == null ? '—' : fmtBytes(this.matchedBytes) }),
       ' matched',
     );
+    if (state.mode === 'machines') this.paintMachineNote();
     this.paintSelectAll();
+  }
+
+  /**
+   * The two things a per-machine table would otherwise mislead about.
+   *
+   * FIRST, whether the allocation is real. While it is a placeholder the
+   * machine names are invented, and a table of plausible-looking names with
+   * real byte totals beside them is the single worst thing this view could be.
+   *
+   * SECOND, that the column does not sum to the archive. A region can be held
+   * by more than one machine, so bytes appear in more than one row by design.
+   * The note states the overlap as a number rather than leaving someone to
+   * discover their totals do not tie out.
+   */
+  paintMachineNote() {
+    const meta = this.machineMeta;
+    if (!meta) return;
+    clear(this.hintEl);
+    this.hintEl.className = 'muted';
+
+    if (meta.allocationSource === 'placeholder') {
+      this.hintEl.append(
+        h('b', { style: { color: 'var(--warn, #c2410c)' }, text: 'Placeholder allocation. ' }),
+        'These machine names and their regions are invented — the byte totals are real, ' +
+          'but the rig they describe is not. Replace DEFAULT_MACHINES in src/machines.ts. ',
+      );
+    }
+
+    const r = meta.reconcile;
+    if (!r) return;
+    const bits = [];
+    if (r.duplicatedBytes > 0) {
+      bits.push(
+        `${fmtBytes(r.duplicatedBytes)} is held by more than one machine, so these rows ` +
+          'overlap and do not sum to the archive',
+      );
+    } else {
+      bits.push('no region is held by two machines, so these rows happen not to overlap');
+    }
+    if (r.unallocatedBytes > 0) {
+      bits.push(
+        `${fmtBytes(r.unallocatedBytes)} in region${r.unallocatedRegions.length === 1 ? '' : 's'} ` +
+          `${r.unallocatedRegions.join(', ')} reaches NO machine`,
+      );
+    }
+    if (r.regionlessBytes > 0) {
+      bits.push(`${fmtBytes(r.regionlessBytes)} carries no region and is not allocatable`);
+    }
+    if (r.unparsedBytes > 0) {
+      bits.push(`${fmtBytes(r.unparsedBytes)} has a name the grammar cannot read`);
+    }
+    // The placeholder warning may precede this, so the first clause starts a
+    // new sentence rather than trailing off the end of that one.
+    const joined = bits.join(' · ');
+    this.hintEl.append(`${joined.charAt(0).toUpperCase()}${joined.slice(1)}.`);
   }
 
   /**
@@ -253,6 +316,10 @@ export class TableView {
    */
   rowIsClickable(row) {
     if (state.mode === 'files') return row.assetId != null;
+    // A machine row has nowhere to drill to: there is no region filter, so
+    // clicking through would land on an unfiltered version list and look like
+    // it had done something.
+    if (state.mode === 'machines') return false;
     return true;
   }
 
@@ -317,12 +384,18 @@ export class TableView {
   static NARROW_KEYS = {
     files: ['relPath', 'size'],
     songs: ['songFolder', 'versionCount', 'totalBytes'],
+    machines: ['name', 'totalBytes', 'supersededBytes'],
   };
 
   columns() {
     if (isNarrow()) {
       if (state.mode === 'versions') return this.narrowVersionColumns();
-      const all = state.mode === 'files' ? this.fileColumns() : this.songColumns();
+      const all =
+        state.mode === 'files'
+          ? this.fileColumns()
+          : state.mode === 'machines'
+            ? this.machineColumns()
+            : this.songColumns();
       const keep = new Set(TableView.NARROW_KEYS[state.mode] ?? []);
       const narrow = all.filter((c) => keep.has(c.key));
       // Never return an empty header: if a mode grows a new key set and this
@@ -331,6 +404,7 @@ export class TableView {
     }
     if (state.mode === 'files') return this.fileColumns();
     if (state.mode === 'songs') return this.songColumns();
+    if (state.mode === 'machines') return this.machineColumns();
     return this.versionColumns();
   }
 
@@ -636,6 +710,83 @@ export class TableView {
       { key: 'latestMtime', label: 'Latest', width: '96px', align: 'right', render: (row) => fmtDate(row.latestMtime) },
     ];
     void maxBytes;
+  }
+
+  /**
+   * One row per playback machine.
+   *
+   * `Total` is what that machine has to hold, and it is NOT a share of the
+   * archive -- see paintMachineNote. `Shared` is the part of it some other
+   * machine also holds, which is the only honest way to show redundancy in a
+   * column of overlapping totals: it reads as zero when the allocation happens
+   * to be a partition, and stops being zero the moment it is not.
+   */
+  machineColumns() {
+    return [
+      {
+        key: 'name',
+        label: 'Machine',
+        width: 'minmax(150px, 1.2fr)',
+        render: (row) =>
+          h(
+            'div',
+            { title: row.note || undefined },
+            h('div.cell-base', { text: row.name }),
+            row.note ? h('div.muted', { style: { fontSize: '11px' }, text: row.note }) : null,
+          ),
+      },
+      {
+        key: 'regions',
+        label: 'Regions',
+        width: 'minmax(90px, 0.7fr)',
+        sortable: false,
+        render: (row) =>
+          row.regions.length
+            ? h('span.mono', { style: { fontSize: '11.5px' }, text: row.regions.join(', ') })
+            : h('span.muted', { text: 'none assigned' }),
+      },
+      { key: 'fileCount', label: 'Files', width: '84px', align: 'right', render: (row) => count(row.fileCount) },
+      { key: 'totalBytes', label: 'Total', width: '112px', align: 'right', render: (row) => sizeCell(row.totalBytes) },
+      {
+        key: 'supersededBytes',
+        label: 'Superseded',
+        width: '112px',
+        align: 'right',
+        render: (row) =>
+          row.supersededBytes
+            ? h('span', { style: { color: 'var(--superseded)' } }, sizeCell(row.supersededBytes))
+            : h('span.muted', { text: '—' }),
+      },
+      {
+        key: 'share',
+        label: 'Share superseded',
+        width: 'minmax(120px, 1fr)',
+        sortable: false,
+        render: (row) => {
+          const pct = row.totalBytes ? (row.supersededBytes / row.totalBytes) * 100 : 0;
+          return h(
+            'div',
+            {
+              style: { display: 'flex', alignItems: 'center', gap: '7px', width: '100%' },
+              title: `${pct.toFixed(1)}% of what this machine holds is superseded at keep-${state.keepN}`,
+            },
+            h('div.bar', { style: { flex: '1' } }, h('i', { style: { width: `${Math.min(100, pct)}%` } })),
+            h('span.mono.muted', { style: { fontSize: '11px', minWidth: '38px', textAlign: 'right' }, text: `${pct.toFixed(0)}%` }),
+          );
+        },
+      },
+      {
+        key: 'sharedBytes',
+        label: 'Also elsewhere',
+        width: '112px',
+        align: 'right',
+        render: (row) =>
+          row.sharedBytes
+            ? h('span', { title: 'Held by at least one other machine as well' }, sizeCell(row.sharedBytes))
+            : h('span.muted', { text: '—' }),
+      },
+      { key: 'latestMtime', label: 'Latest', width: '96px', align: 'right', render: (row) => fmtDate(row.latestMtime) },
+    ];
   }
 }
 
