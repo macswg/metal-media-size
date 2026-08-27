@@ -2,6 +2,25 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — the Region 0 figure was reaching the browser as an em dash
+
+Shipped in v0.5.5 and immediately invisible. The server returned
+`region0Bytes`, the strip rendered the fact, and the value read `—`.
+
+`normaliseReclaim` in `web/js/api.js` rebuilds the reclaim response from an
+explicit allowlist of fields — it exists so that a server calling the figure
+`reclaimableBytes` instead of `reclaimBytes` degrades to a cosmetic problem
+rather than a blank headline. The cost of that shape is that a field nobody
+adds to the list is silently dropped between the fetch and the paint. Six
+files were plumbed; the seventh was the one that mattered.
+
+Worth remembering as a class, not an incident: **adding a field to a reclaim
+response means adding it to the normaliser too.** Nothing fails, nothing logs,
+and the UI shows the em dash it shows for "the server did not tell us".
+
+Caught by rendering the real page headless and reading the DOM rather than by
+trusting the curl of the endpoint, which was correct all along.
+
 ## 2026-08-26 — region0 counted in its own right
 
 The board gained a **Region 0** figure beside Retained, and the proxy filter

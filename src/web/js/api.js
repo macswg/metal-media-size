@@ -115,6 +115,9 @@ function normaliseReclaim(r) {
     protectedPatchVersions: r.protectedPatchVersions ?? null,
     totalBytes: r.totalBytes ?? 0,
     keptBytes: r.keptBytes ?? (r.totalBytes != null ? r.totalBytes - (r.reclaimBytes ?? r.reclaimableBytes ?? 0) : null),
+    // Null, not 0: a server that does not report this has not told us there is
+    // no offline-edit material, and the strip shows an em dash for that.
+    region0Bytes: r.region0Bytes ?? null,
     bySong: r.bySong || [],
   };
 }
