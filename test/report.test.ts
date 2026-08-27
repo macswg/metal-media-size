@@ -45,6 +45,11 @@ const BASE_B = '020_FADE_ANIMATIC';
 
 const GIB = 1024 ** 3;
 
+/** Same grouping the renderer uses, so assertions match what is on the page. */
+function n(x: number): string {
+  return x.toLocaleString('en-GB');
+}
+
 let sandbox: string;
 let exportsDir: string;
 let db: Db;
@@ -80,8 +85,8 @@ function seed(): void {
   const insVersion = db.prepare(
     `INSERT INTO asset_version
        (asset_id, ver_num, sub_letter, is_patch, patch_frame, bytes, file_count,
-        proxy_bytes, region_count, latest_mtime, ver_label)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        proxy_bytes, region0_bytes, region_count, latest_mtime, ver_label)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insFile = db.prepare(
     `INSERT INTO file
@@ -97,6 +102,9 @@ function seed(): void {
     for (const s of specs) {
       const bytes = s.files.reduce((a, f) => a + f.size, 0);
       const proxyBytes = s.files.filter((f) => f.proxy).reduce((a, f) => a + f.size, 0);
+      // Counted separately from proxyBytes and never derived from it: region0
+      // says WHICH part of the canvas, a proxy token says what resolution.
+      const region0Bytes = s.files.filter((f) => f.region0).reduce((a, f) => a + f.size, 0);
       // region0 is never a slice, with or without the proxy token on the name.
       const regionCount = s.files.filter((f) => !f.region0).length;
       const versionId = Number(
@@ -109,6 +117,7 @@ function seed(): void {
           bytes,
           s.files.length,
           proxyBytes,
+          region0Bytes,
           regionCount,
           now,
           s.label.replace(/^B-/, ''),
@@ -295,6 +304,23 @@ describe('the four keep-N scenarios', () => {
     expect(marked[0]?.keepN).toBe(3);
   });
 
+  it('reports the storage location as it stands, independent of the selection', () => {
+    const wide = dataset();
+    const narrow = dataset({ versionIds: [id('v002')] });
+    // The tiles describe the storage, not the proposal, so they cannot move
+    // when the proposal does.
+    expect(narrow.storage).toEqual(wide.storage);
+    expect(wide.storage.totalBytes).toBe(wide.snapshot.totalBytes);
+    expect(wide.storage.fileCount).toBe(wide.snapshot.fileCount);
+    expect(wide.storage.songCount).toBe(2);
+    // Two whole-canvas copies in the fixture: 2 GiB on v004, 1 GiB on v006.
+    expect(wide.storage.region0Bytes).toBe(3 * GIB);
+    // Counted separately from the proxy subtotal and never derived from it.
+    // They coincide here, as they do on the real archive, and are not required
+    // to -- so the two numbers are summed independently.
+    expect(wide.storage.proxyBytes).toBe(3 * GIB);
+  });
+
   it('counts the snapshot bytes that belong to no version', () => {
     const d = dataset();
     expect(d.scenarioBasis.unversionedBytes).toBe(4 * GIB);
@@ -349,6 +375,17 @@ describe('the rendered report', () => {
     const detail = html.indexOf('Every affected asset');
     expect(options).toBeGreaterThan(-1);
     expect(detail).toBeGreaterThan(options);
+  });
+
+  it('opens with what is on the storage and how much of it is region 0', () => {
+    const tiles = html.slice(html.indexOf('<div class="stats">'), html.indexOf('<div class="banner">'));
+    expect(tiles).toContain('On the storage today');
+    expect(tiles).toContain(esc(formatBytes(d.storage.totalBytes).split(' ')[0] as string));
+    expect(tiles).toContain('Region 0');
+    expect(tiles).toContain(esc(formatBytes(d.storage.region0Bytes).split(' ')[0] as string));
+    expect(tiles).toContain(`${n(d.storage.fileCount)} files`);
+    // Above the options, which is the point of putting them there.
+    expect(html.indexOf('<div class="stats">')).toBeLessThan(html.indexOf('The options'));
   });
 
   it('is titled as a media cleanup', () => {

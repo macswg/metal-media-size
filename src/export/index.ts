@@ -511,6 +511,18 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
   // the operator had applied. See `scenarios.ts`.
   const scenarios = buildScenarios(reclaimInput, REPORT_KEEP_NS, keepN);
 
+  // The storage location as it stands. Summed straight out of the index rather
+  // than off `reclaimInput`, because region0 is not part of what the reclaim
+  // policy needs to rank a version and has no business on that input.
+  const storageRow = db
+    .prepare(
+      `SELECT COALESCE(SUM(region0_bytes), 0) AS region0_bytes,
+              COALESCE(SUM(proxy_bytes), 0)   AS proxy_bytes
+         FROM v_asset_version
+        WHERE snapshot_id = ?`,
+    )
+    .get(snapshotId) as { region0_bytes: number; proxy_bytes: number };
+
   // --- literal files ----------------------------------------------------
   const fileRows = db
     .prepare(
@@ -729,6 +741,13 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
     keepN,
     scenarios,
     scenarioBasis: scenarioBasis(reclaimInput, snap.total_bytes),
+    storage: {
+      totalBytes: snap.total_bytes,
+      fileCount: snap.file_count,
+      songCount: new Set(reclaimInput.map((a) => a.songFolder)).size,
+      region0Bytes: storageRow.region0_bytes,
+      proxyBytes: storageRow.proxy_bytes,
+    },
     deletionPolicy: policy,
     versioningFolder,
     note: opts.note?.trim() || null,

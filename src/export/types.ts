@@ -189,6 +189,29 @@ export interface ExportScenarioBasis {
   unversionedBytes: number;
 }
 
+/**
+ * The storage location as it stands today, before any option is chosen.
+ *
+ * Deliberately NOT derived from the scenario table: these are the figures a
+ * reader wants before they look at the options at all -- how much is there, and
+ * how much of it is the whole-canvas copy the offline edit needs.
+ *
+ * `region0Bytes` and `proxyBytes` are counted SEPARATELY and neither is derived
+ * from the other. region0 says which part of the canvas a file covers; a proxy
+ * token says what resolution it is. They coincide on this archive and are not
+ * required to -- see CLAUDE.md.
+ */
+export interface ExportStorageTotals {
+  /** Everything the scan found, bookkeeping files excluded. */
+  totalBytes: number;
+  fileCount: number;
+  songCount: number;
+  /** Bytes in files whose region is 0: the whole canvas, kept for offline editing. */
+  region0Bytes: number;
+  /** Bytes in files carrying a `_proxyN` token. */
+  proxyBytes: number;
+}
+
 export interface ExportSnapshotProvenance {
   snapshotId: number;
   /** Absolute scan root the relative paths are relative to. */
@@ -231,6 +254,8 @@ export interface ExportDataset {
   scenarios: ExportScenario[];
   /** What `scenarios` was computed over. */
   scenarioBasis: ExportScenarioBasis;
+  /** The storage location as it stands, independent of every option. */
+  storage: ExportStorageTotals;
   deletionPolicy: DeletionPolicy;
   versioningFolder: string | null;
   note: string | null;

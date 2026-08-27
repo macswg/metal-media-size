@@ -149,16 +149,18 @@ superseded. That is what this tool works out.
 - **Exports** — a shareable HTML report, JSON, Markdown, and a FreeFileSync
   `.ffs_gui` removal job with a literal-path manifest beside it.
 - **The report** (`report.html`) is the one meant to leave this machine. Page
-  one is the options and nothing else: what comes back if only the current
-  version is kept, and what each extra version of insurance costs, at keep-1
-  through keep-4 over the whole archive. It does not mark which option the
-  attached job uses — the person it is written for does not know an export was
-  ever selected. The pages after it are the detail: which option the job is and
-  what it contains, where the numbers come from, the per-song split, every
-  affected asset showing what goes next to what stays, and the file list. One
-  self-contained file, no scripts and no external references, so it opens
-  offline on any machine. Dark on screen; the print stylesheet inverts the whole
-  palette, so *Save as PDF* still gives ink on paper.
+  one opens with two figures — what is on the storage today, and how much of it
+  is region 0 — and is otherwise the options and nothing else: what comes back
+  if only the current version is kept, and what each extra version of insurance
+  costs, at keep-1 through keep-4 over the whole archive. It does not mark
+  which option the attached job uses — the person it is written for does not
+  know an export was ever selected. The pages after it are the detail: which
+  option the job is and what it contains, where the numbers come from, the
+  per-song split, every affected asset showing what goes next to what stays,
+  and the file list. One self-contained file, no scripts and no external
+  references, so it opens offline on any machine. Dark on screen; the print
+  stylesheet inverts the whole palette, so *Save as PDF* still gives ink on
+  paper.
 
 ## Safety
 

@@ -2,6 +2,37 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the summary opens with the storage, not with the options
+
+> *"at the top of the summary i want these stats (current size of everything in
+> the storage location, current size of region 0 assets)"* — the user
+
+Two stat tiles above the safety banner: **133.77 TiB** on the storage today
+(26,685 files across 65 song folders), and **2.17 TiB** of region 0 — 1.6% of
+it. The reader now has the size of the thing before being asked what to do
+about it.
+
+`region0_bytes` is summed straight out of `v_asset_version` rather than off
+`reclaimInput`, because region 0 is not something the reclaim policy needs in
+order to rank a version and has no business on that input. It also stays
+summed independently of `proxy_bytes`: the two coincide on this archive and are
+not required to, which is exactly the rule that would rot if one were derived
+from the other. Both are on the dataset as `storage`, which is archive-wide by
+construction — a test proves the tiles do not move when the proposal shrinks.
+
+The fixture had been writing `region0_bytes` as the column default, 0, so the
+figure was untestable until the seed started inserting it. It now carries 3 GiB
+across two whole-canvas copies, and the assertions are real.
+
+Built as stat tiles rather than a chart, and the values wear text tokens rather
+than the accent — the accent belongs to the bars, where it carries meaning.
+They also take the font's proportional figures on purpose: `tabular-nums` gives
+every digit the width of a zero, which reads loose at 26px, and these are
+standalone numbers rather than a column that has to line up.
+
+Also, at the user's word: the banner reads *"No file on the storage has been
+touched"*, and the column is **Left on the drive(s)**.
+
 ## 2026-08-27 — the summary stopped pointing at a row nobody asked about
 
 > *"the this export flag is confusing. i want a summary that just presents the
@@ -50,14 +81,14 @@ HTML, so it has to come out of a printer legible. A test asserts both palettes.
 New export format, `report`, producing `report.html` beside the existing
 artefacts. Page one is the decision and nothing else:
 
-    If we keep…                       Recovered   Cost of one more   Left on the archive
+    If we keep…                       Recovered   Cost of one more   Left on the drive(s)
     Current version only               49.87 TiB              —              83.89 TiB
     Current + 1 previous version       18.26 TiB      −31.61 TiB             115.50 TiB
     Current + 2 previous  THIS EXPORT   5.71 TiB      −12.56 TiB             128.06 TiB
     Current + 3 previous                1.49 TiB       −4.22 TiB             132.28 TiB
 
 Measured on snapshot 11. The third column was "Archive after" until the user
-asked what it meant, which was answer enough: it is now "Left on the archive",
+asked what it meant, which was answer enough: it is now "Left on the drive(s)",
 and a "Reading the columns" line under the table defines all three and says the
 two figures on each row add back up to the 133.77 TiB the folder holds today. The pages after it are what the Markdown review
 already carried, re-cut for someone reading it cold: what this export contains

@@ -209,6 +209,20 @@ code { background: var(--tint); padding: 0 2px; border-radius: 3px; word-break: 
 .alert { border-left-color: var(--warn); background: var(--warn-soft); }
 .alert strong { color: var(--warn); }
 
+/*
+ * Stat tiles. Sentence-case label, value in TEXT tokens rather than the accent
+ * -- the accent belongs to the bars, where it carries meaning. Values use the
+ * font's proportional figures on purpose: tabular-nums gives every digit the
+ * width of a zero, which reads loose at this size, and these are standalone
+ * numbers rather than a column that has to align.
+ */
+.stats { display: flex; gap: 10px; margin: 16px 0 4px; }
+.stat { flex: 1; border: 1px solid var(--rule); border-left: 3px solid var(--rule); background: var(--tint); padding: 10px 12px; }
+.stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-faint); font-weight: 600; }
+.stat .v { font-size: 26px; font-weight: 600; letter-spacing: -.5px; margin-top: 4px; line-height: 1.1; }
+.stat .v small { font-size: 15px; font-weight: 600; color: var(--ink-soft); margin-left: 3px; }
+.stat .n { font-size: 11.5px; color: var(--ink-faint); margin-top: 4px; }
+
 .headline { display: flex; align-items: baseline; gap: 10px; margin: 4px 0 2px; }
 .headline .num { font-size: 46px; font-weight: 700; letter-spacing: -1.5px; line-height: 1; }
 .headline .unit { font-size: 20px; font-weight: 600; color: var(--ink-soft); }
@@ -290,7 +304,7 @@ ul.warn li { margin-bottom: 6px; }
   .page:last-child { break-after: auto; }
   .page + .page { margin-top: 0; padding-top: 0; border-top: none; }
   .pill.move { color: #ffffff; }
-  table, .ladder, .banner { break-inside: avoid; }
+  table, .ladder, .banner, .stats { break-inside: avoid; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; }
   h2, h3, h4 { break-after: avoid; }
@@ -339,7 +353,7 @@ function choiceTable(scenarios: readonly ExportScenario[]): string {
         <th class="num">Recovered</th>
         <th></th>
         <th class="num">Cost of<br>one more</th>
-        <th class="num">Left on<br>the archive</th>
+        <th class="num">Left on<br>the drive(s)</th>
         <th class="num">Versions<br>removed</th>
       </tr>
     </thead>
@@ -353,6 +367,8 @@ function decisionPage(d: ExportDataset): string {
   const bottom = scenarios[scenarios.length - 1] as ExportScenario;
   const basis = d.scenarioBasis;
   const archive = basis.versionedBytes;
+  const store = bigBytes(d.storage.totalBytes);
+  const r0 = bigBytes(d.storage.region0Bytes);
 
   const spread =
     scenarios.length > 1
@@ -381,9 +397,26 @@ function decisionPage(d: ExportDataset): string {
       </div>
     </div>
 
+    <div class="stats">
+      <div class="stat">
+        <div class="k">On the storage today</div>
+        <div class="v">${esc(store.value)}<small>${esc(store.unit)}</small></div>
+        <div class="n">${n(d.storage.fileCount)} files across ${n(d.storage.songCount)} song folders</div>
+      </div>
+      <div class="stat">
+        <div class="k">Region 0 — offline-edit copies</div>
+        <div class="v">${esc(r0.value)}<small>${esc(r0.unit)}</small></div>
+        <div class="n">${
+          d.storage.totalBytes > 0
+            ? `${pct1(d.storage.region0Bytes, d.storage.totalBytes)} of the above`
+            : 'no material scanned'
+        } — the whole canvas, kept so the offline edit has something to cut with</div>
+      </div>
+    </div>
+
     <div class="banner">
       <strong>Nothing has been moved.</strong> This is a proposal produced by a read-only
-      analyser. No file on the archive has been touched and none will be until a person opens a
+      analyser. No file on the storage has been touched and none will be until a person opens a
       FreeFileSync job, presses <em>Compare</em>, reads the list and presses <em>Synchronize</em>.
       The tool cannot delete anything, and the only removal it can propose is a reversible one.
     </div>
@@ -400,9 +433,9 @@ function decisionPage(d: ExportDataset): string {
     <p class="small muted">
       <strong>Reading the columns.</strong> <em>Recovered</em> is what that option frees.
       <em>Cost of one more</em> is what the next version of insurance is worth in storage — the
-      gap between that row and the one above it. <em>Left on the archive</em> is what the
-      delivery folder would still hold once that option had been carried out: today it holds
-      ${esc(formatBytes(archive))}, so the two figures on each row add back up to it.
+      gap between that row and the one above it. <em>Left on the drive(s)</em> is what is still
+      there once that option has been carried out: the delivery folder holds
+      ${esc(formatBytes(archive))} today, so the two figures on each row add back up to it.
     </p>
     <p class="small muted">
       ${spread}
