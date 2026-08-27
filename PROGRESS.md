@@ -2,6 +2,24 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the summary names the folder it is talking about
+
+> *"change 'on the storage today' to 'total assets today' then just below these
+> stats put the storage path scanned so it is very clear what directory we're
+> scanning"* — the user
+
+The first tile is **TOTAL ASSETS TODAY**, and under the pair of them the scan
+root, in full and in mono:
+
+    FOLDER SCANNED — EVERY FIGURE IN THIS REPORT COMES FROM HERE AND NOWHERE ELSE
+    /Users/Shared/ObjectMount.noindex/.../00_D3_Delivery
+
+The path was already in the report, on page three under provenance. That is too
+late for the reader this page exists for, who may never turn it: a headline
+figure with no folder attached is a number about nothing, and the archive has
+sibling delivery folders that would produce a different one. Naming it beside
+the figures is what makes them checkable.
+
 ## 2026-08-27 — the summary opens with the storage, not with the options
 
 > *"at the top of the summary i want these stats (current size of everything in

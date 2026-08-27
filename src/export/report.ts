@@ -222,6 +222,10 @@ code { background: var(--tint); padding: 0 2px; border-radius: 3px; word-break: 
 .stat .v { font-size: 26px; font-weight: 600; letter-spacing: -.5px; margin-top: 4px; line-height: 1.1; }
 .stat .v small { font-size: 15px; font-weight: 600; color: var(--ink-soft); margin-left: 3px; }
 .stat .n { font-size: 11.5px; color: var(--ink-faint); margin-top: 4px; }
+/* The folder those figures were taken from, said plainly and once. */
+.scanned { border: 1px solid var(--rule); background: var(--tint); padding: 8px 12px; margin-top: 10px; font-size: 12px; }
+.scanned .k { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-faint); font-weight: 600; }
+.scanned .p { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; margin-top: 3px; word-break: break-all; }
 
 .headline { display: flex; align-items: baseline; gap: 10px; margin: 4px 0 2px; }
 .headline .num { font-size: 46px; font-weight: 700; letter-spacing: -1.5px; line-height: 1; }
@@ -304,7 +308,7 @@ ul.warn li { margin-bottom: 6px; }
   .page:last-child { break-after: auto; }
   .page + .page { margin-top: 0; padding-top: 0; border-top: none; }
   .pill.move { color: #ffffff; }
-  table, .ladder, .banner, .stats { break-inside: avoid; }
+  table, .ladder, .banner, .stats, .scanned { break-inside: avoid; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; }
   h2, h3, h4 { break-after: avoid; }
@@ -399,7 +403,7 @@ function decisionPage(d: ExportDataset): string {
 
     <div class="stats">
       <div class="stat">
-        <div class="k">On the storage today</div>
+        <div class="k">Total assets today</div>
         <div class="v">${esc(store.value)}<small>${esc(store.unit)}</small></div>
         <div class="n">${n(d.storage.fileCount)} files across ${n(d.storage.songCount)} song folders</div>
       </div>
@@ -412,6 +416,11 @@ function decisionPage(d: ExportDataset): string {
             : 'no material scanned'
         } — the whole canvas, kept so the offline edit has something to cut with</div>
       </div>
+    </div>
+
+    <div class="scanned">
+      <div class="k">Folder scanned — every figure in this report comes from here and nowhere else</div>
+      <div class="p">${esc(d.snapshot.root)}</div>
     </div>
 
     <div class="banner">

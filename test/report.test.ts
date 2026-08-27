@@ -335,10 +335,13 @@ describe('the four keep-N scenarios', () => {
 describe('the rendered report', () => {
   let html: string;
   let d: ExportDataset;
+  /** Everything from the stat tiles down to the safety banner. */
+  let tiles: string;
 
   beforeAll(() => {
     d = dataset({ note: 'Reviewed with production on 2026-08-27.' });
     html = renderReport(d);
+    tiles = html.slice(html.indexOf('<div class="stats">'), html.indexOf('<div class="banner">'));
   });
 
   it('is a complete HTML document', () => {
@@ -378,14 +381,23 @@ describe('the rendered report', () => {
   });
 
   it('opens with what is on the storage and how much of it is region 0', () => {
-    const tiles = html.slice(html.indexOf('<div class="stats">'), html.indexOf('<div class="banner">'));
-    expect(tiles).toContain('On the storage today');
+    expect(tiles).toContain('Total assets today');
     expect(tiles).toContain(esc(formatBytes(d.storage.totalBytes).split(' ')[0] as string));
     expect(tiles).toContain('Region 0');
     expect(tiles).toContain(esc(formatBytes(d.storage.region0Bytes).split(' ')[0] as string));
     expect(tiles).toContain(`${n(d.storage.fileCount)} files`);
     // Above the options, which is the point of putting them there.
     expect(html.indexOf('<div class="stats">')).toBeLessThan(html.indexOf('The options'));
+  });
+
+  it('names the folder it scanned, right under those figures', () => {
+    // The figures are meaningless without the folder they came from, and page
+    // three is too late for someone who reads only the summary.
+    expect(tiles).toContain('Folder scanned');
+    const strip = html.slice(html.indexOf('<div class="scanned">'), html.indexOf('<div class="banner">'));
+    expect(strip).toContain(esc(ROOT));
+    expect(html.indexOf('<div class="stats">')).toBeLessThan(html.indexOf('<div class="scanned">'));
+    expect(html.indexOf('<div class="scanned">')).toBeLessThan(html.indexOf('The options'));
   });
 
   it('is titled as a media cleanup', () => {
