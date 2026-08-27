@@ -148,7 +148,8 @@ superseded. That is what this tool works out.
   live, so this matters. Old snapshots can be removed from the index.
 - **Exports** — a shareable HTML report, JSON, Markdown, and a FreeFileSync
   `.ffs_gui` removal job with a literal-path manifest beside it.
-- **The report** (`report.html`) is the one meant to leave this machine. Page
+- **The report** (`media_cleanup_report_27Aug2026_1112.html`, named for the local
+  date and time it was produced) is the one meant to leave this machine. Page
   one opens with two figures — what is on the storage today, and how much of it
   is region 0 — and is otherwise the options and nothing else: what comes back
   if only the current version is kept, and what each extra version of insurance

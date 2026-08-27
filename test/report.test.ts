@@ -32,7 +32,7 @@ import type { Database as Db } from 'better-sqlite3';
 
 import { openDb, loadReclaimInput } from '../src/db/index.ts';
 import { buildDataset, writeExport, buildScenarios, scenarioLabel } from '../src/export/index.ts';
-import { MAX_REPORT_PATHS, renderReport, esc } from '../src/export/report.ts';
+import { MAX_REPORT_PATHS, renderReport, reportFileName, esc } from '../src/export/report.ts';
 import { formatBytes } from '../src/export/markdown.ts';
 import type { ExportDataset } from '../src/export/types.ts';
 
@@ -502,7 +502,9 @@ describe('writeExport emits the report', () => {
     });
     const report = res.files.filter((f) => f.format === 'report');
     expect(report).toHaveLength(1);
-    expect(report[0]?.path.endsWith('/report.html')).toBe(true);
+    expect(report[0]?.path).toMatch(
+      /\/media_cleanup_report_\d{2}(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\d{4}_\d{4}\.html$/,
+    );
     expect(existsSync(report[0]?.path as string)).toBe(true);
     expect(readFileSync(report[0]?.path as string, 'utf8').startsWith('<!doctype html>')).toBe(true);
     // The .ffs_gui was not requested, so no job and no empty left-hand folder.
@@ -529,6 +531,33 @@ describe('writeExport emits the report', () => {
 });
 
 // ---------------------------------------------------------------------------
+
+describe('the report is named for when it was produced', () => {
+  it('stamps the local day and time into the file name', () => {
+    // Built from LOCAL components on purpose, so the expectation holds in any
+    // time zone -- the name is local time, and a UTC fixture here would assert
+    // one thing on this machine and another in CI.
+    expect(reportFileName(new Date(2026, 7, 27, 11, 12))).toBe(
+      'media_cleanup_report_27Aug2026_1112.html',
+    );
+  });
+
+  it('pads the day and the time so a folder of them sorts', () => {
+    expect(reportFileName(new Date(2026, 0, 5, 9, 4))).toBe(
+      'media_cleanup_report_05Jan2026_0904.html',
+    );
+    expect(reportFileName(new Date(2026, 11, 31, 23, 59))).toBe(
+      'media_cleanup_report_31Dec2026_2359.html',
+    );
+  });
+
+  it('uses fixed month literals rather than anything locale-dependent', () => {
+    const months = Array.from({ length: 12 }, (_, m) => reportFileName(new Date(2026, m, 1, 0, 0)));
+    expect(months.map((f) => f.slice('media_cleanup_report_01'.length, -'2026_0000.html'.length))).toEqual(
+      ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    );
+  });
+});
 
 describe('the path list never truncates silently', () => {
   it('says how many paths it is not printing, and where the full list is', () => {

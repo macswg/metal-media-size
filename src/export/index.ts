@@ -56,7 +56,7 @@ import {
 } from './ffs.ts';
 import { renderJsonExport } from './json.ts';
 import { renderMarkdown } from './markdown.ts';
-import { renderReport } from './report.ts';
+import { renderReport, reportFileName } from './report.ts';
 import { buildScenarios, REPORT_KEEP_NS, scenarioBasis } from './scenarios.ts';
 import type {
   DeletionPolicy,
@@ -96,7 +96,7 @@ export {
 } from './ffs.ts';
 export { buildJsonExport, renderJsonExport } from './json.ts';
 export { renderMarkdown, formatBytes } from './markdown.ts';
-export { renderReport, MAX_REPORT_PATHS, MAX_REPORT_LADDERS } from './report.ts';
+export { renderReport, reportFileName, MAX_REPORT_PATHS, MAX_REPORT_LADDERS } from './report.ts';
 export {
   buildScenarios,
   scenarioBasis,
@@ -880,7 +880,14 @@ export async function writeExport(opts: WriteExportOptions): Promise<ExportResul
     // artefact intended to leave this machine, so it has to render identically
     // on one that has never seen this project. `Cmd-P -> Save as PDF` is how it
     // becomes a PDF; the print stylesheet is what makes that paginate.
-    const f = await writeExportText(join(exportDir, 'report.html'), renderReport(dataset), jail);
+    // Named for when it was produced, because this is the artefact that leaves
+    // the machine and gets forwarded -- `report.html` in a mail thread is
+    // indistinguishable from last month's `report.html`.
+    const f = await writeExportText(
+      join(exportDir, reportFileName(new Date(dataset.generatedAt))),
+      renderReport(dataset),
+      jail,
+    );
     artifacts.push({ format: 'report', ...f });
   }
 

@@ -63,6 +63,32 @@ export const MAX_REPORT_PATHS = 2000;
 /** Assets given a full ladder table before the report switches to a summary. */
 export const MAX_REPORT_LADDERS = 400;
 
+/** Three-letter month names. Fixed here so the file name never depends on locale. */
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+] as const;
+
+/**
+ * `media_cleanup_report_27Aug2026_1112.html`.
+ *
+ * LOCAL time, not UTC, and deliberately: the name is read by the person who
+ * produced the report, on the machine that produced it, and a stamp seven hours
+ * off the clock on their wall is worse than useless for telling two runs apart.
+ * The UTC instant is still printed inside the document, so nothing is lost.
+ *
+ * Day and time are zero-padded so a folder of these sorts correctly within a
+ * month, and the month is one of the twelve literals above rather than anything
+ * locale-dependent -- a report named `27ago2026` would be a different file name
+ * on a different machine for the same run.
+ */
+export function reportFileName(when: Date): string {
+  const p2 = (x: number): string => String(x).padStart(2, '0');
+  const stampedDay = `${p2(when.getDate())}${MONTHS[when.getMonth()]}${when.getFullYear()}`;
+  const stampedTime = `${p2(when.getHours())}${p2(when.getMinutes())}`;
+  return `media_cleanup_report_${stampedDay}_${stampedTime}.html`;
+}
+
 const REASON_TEXT: Record<string, string> = {
   'kept-full-latest': 'inside the kept window',
   'kept-patch-newer-than-latest-full': 'patch above the current master — protected',

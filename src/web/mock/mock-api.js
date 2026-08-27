@@ -541,7 +541,7 @@ export async function createMockApi() {
           format,
           path:
             format === 'report'
-              ? `exports/export_${stamp}/report.html`
+              ? `exports/export_${stamp}/media_cleanup_report_${stamp}.html`
               : `exports/manifest_${stamp}.${format === 'ffs_gui' ? 'ffs_gui' : format === 'markdown' ? 'md' : 'json'}`,
           bytes: 0,
         })),

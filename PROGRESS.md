@@ -2,6 +2,31 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the report is named for when it was produced
+
+> *"name the report with the current date and time like this
+> media_cleanup_report_27Aug2026_1112"* — the user
+
+`report.html` in a mail thread is indistinguishable from last month's
+`report.html`, which is a real hazard for the one artefact here designed to be
+forwarded. It is now
+`media_cleanup_report_27Aug2026_1131.html`.
+
+Two decisions inside that:
+
+**LOCAL time, not UTC.** The name is read by the person who produced the report,
+on the machine that produced it, and a stamp seven hours off the clock on their
+wall is worse than useless for telling two runs apart. The UTC instant is still
+printed inside the document, so the precise fact is not lost.
+
+**Fixed month literals, not the platform's.** A locale-aware month would name
+the same run `27ago2026` on another machine. The twelve strings are in the
+source. Day and time are zero-padded so a folder of these sorts within a month.
+
+Tested against Dates built from LOCAL components rather than `Date.UTC`, so the
+expectations hold in any time zone — a UTC fixture would have asserted one thing
+here and another in CI.
+
 ## 2026-08-27 — the summary names the folder it is talking about
 
 > *"change 'on the storage today' to 'total assets today' then just below these
