@@ -11,10 +11,22 @@
  * the table holds a sparse page cache and paints skeleton rows for windows it
  * has not fetched yet. Jumping the scrollbar to the far end fetches exactly one
  * page, never the whole table.
+ *
+ * TWO SCROLL CONTAINERS, ONE VIRTUALIZER. On desktop the table owns a scroller
+ * of its own inside a fixed shell. On a phone the whole document scrolls, so
+ * the chrome above can be pushed off-screen and the list gets the glass -- and
+ * there the scroller is `overflow: visible` and the PAGE is what moves. The
+ * Which one is in force comes from `viewport.js`, the one place the breakpoint
+ * is written down for both the stylesheet and the JS. Reading it back off the
+ * scroller's computed overflow was tried first and is a trap: at construction
+ * the answer came back `auto` and the table then ignored the page scroll
+ * entirely. Everything else -- the pool, the page cache, the spacer -- is
+ * identical either way.
  * ============================================================================
  */
 
 import { h, clear } from './dom.js';
+import { isNarrow, onBreakpointChange } from './viewport.js';
 
 const PAGE_SIZE = 500;
 const OVERSCAN = 12;
@@ -70,17 +82,54 @@ export class VirtualTable {
       },
       { passive: true },
     );
+    // In page-scroll mode the scroller above never fires: it does not scroll.
+    // The document does, and the paint reads the canvas position instead of a
+    // scrollTop, so there is no offset to capture here.
+    this._onPageScroll = () => {
+      if (!this.pageScrolled) return;
+      if (this.rafPending) return;
+      this.rafPending = true;
+      requestAnimationFrame(() => {
+        this.rafPending = false;
+        this.paint();
+      });
+    };
+    window.addEventListener('scroll', this._onPageScroll, { passive: true });
+
     if (!VirtualTable._resizeHooked) VirtualTable._resizeHooked = true;
     this._onResize = () => {
       this.viewH = 0;
+      // A resize is also how the layout crosses the breakpoint, which is the
+      // one thing that changes which container scrolls.
+      this.syncScrollMode();
       this.paint();
     };
     window.addEventListener('resize', this._onResize);
+    // Crossing the breakpoint swaps the scroll container under us. Resize
+    // usually catches it, but the media query is the precise signal.
+    this._unwatchBreakpoint = onBreakpointChange(() => {
+      this.viewH = 0;
+      this.syncScrollMode();
+      this.paint();
+    });
+    this.syncScrollMode();
     this.renderHead();
   }
 
   destroy() {
     window.removeEventListener('resize', this._onResize);
+    window.removeEventListener('scroll', this._onPageScroll);
+    this._unwatchBreakpoint?.();
+  }
+
+  /**
+   * Which container scrolls. The narrow layout hands the job to the page (see
+   * THE PAGE SCROLLS in app.css) and this must agree with it -- which is what
+   * `viewport.js` is for: one breakpoint, quoted by the stylesheet and by the
+   * JS that has to know the same thing.
+   */
+  syncScrollMode() {
+    this.pageScrolled = isNarrow();
   }
 
   setColumns(columns) {
@@ -232,6 +281,14 @@ export class VirtualTable {
     this.viewH = 0;
     this.scrollTopHint = null;
     this.scroller.scrollTop = 0;
+    // A new query means a new first row, so put it back in view. On a phone
+    // that means scrolling the PAGE back to the top of the list -- but only if
+    // the list has already been scrolled past, or every filter change would
+    // yank the chrome off-screen while the user is still using it.
+    if (this.pageScrolled) {
+      const dy = this.canvas.getBoundingClientRect().top;
+      if (dy < 0) window.scrollBy(0, dy);
+    }
     this.total = 0;
     this.canvas.style.height = '0px';
     this.loading = true;
@@ -285,10 +342,22 @@ export class VirtualTable {
 
   paint() {
     const { rowHeight } = this;
-    if (!this.viewH) this.viewH = this.scroller.clientHeight || 600;
-    const view = this.viewH;
-    const top = this.scrollTopHint ?? this.scroller.scrollTop;
-    this.scrollTopHint = null;
+    let view;
+    let top;
+    if (this.pageScrolled) {
+      // How far the top of the spacer has travelled above the top of the
+      // window IS the scroll offset into the list -- no cached page offset to
+      // go stale when the chrome above changes height. One rect read, taken
+      // inside the frame before any write, which is where layout is clean.
+      view = window.innerHeight || 600;
+      top = Math.max(0, -this.canvas.getBoundingClientRect().top);
+      this.scrollTopHint = null;
+    } else {
+      if (!this.viewH) this.viewH = this.scroller.clientHeight || 600;
+      view = this.viewH;
+      top = this.scrollTopHint ?? this.scroller.scrollTop;
+      this.scrollTopHint = null;
+    }
     const first = Math.max(0, Math.floor(top / rowHeight) - OVERSCAN);
     const last = Math.min(this.total - 1, Math.ceil((top + view) / rowHeight) + OVERSCAN);
 

@@ -768,6 +768,105 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
     --row-h: 44px;
   }
 
+  /* ------------------------------------------------- THE PAGE SCROLLS
+
+     The desktop shell is 100dvh with `overflow: hidden`, and the table owns
+     the only scroller on the screen. On a phone that is the wrong trade: the
+     topbar, the reclaim strip, the tabs and the toolbar are pinned there
+     forever, spending a third of the glass on chrome you have already read,
+     and the only way to get it back is to not need it.
+
+     So on a phone the DOCUMENT scrolls. Every fixed row above becomes
+     something you can push off the top, the list keeps the whole screen once
+     you have, and the header row and the status bar stay put by being sticky
+     rather than by being a grid row nobody can move.
+
+     Every container between `body` and the table spacer has to stop clipping
+     and stop being sized to `1fr` of a fixed height for that to work, which
+     is what the rest of this block is. `vtable.js` reads the scroller's
+     computed overflow back and virtualizes against the window instead -- the
+     stylesheet is the source of truth for which container scrolls. */
+
+  html,
+  body {
+    height: auto;
+    overflow: visible;
+    /* `none` was stopping the rubber band from dragging a fixed shell around.
+       There is no fixed shell here any more, and the bounce is what a phone
+       is supposed to do; `contain` keeps it while still refusing to hand the
+       gesture to the browser's own pull-to-refresh. */
+    overscroll-behavior-y: contain;
+  }
+
+  .app {
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .workspace,
+  .workspace.with-drawer {
+    overflow: visible;
+    min-height: 0;
+  }
+
+  .main {
+    grid-template-rows: auto auto;
+    min-height: 0;
+  }
+
+  .panel {
+    grid-template-rows: auto;
+    overflow: visible;
+  }
+
+  .tab-pane.on { grid-template-rows: auto auto; }
+
+  /* These panes carried their own scrollbar. In a scrolling page that is a
+     box inside a box: the content flows into the document instead. */
+  .tab-pane.scrollpane.on {
+    overflow: visible;
+  }
+
+  .vt { grid-template-rows: auto auto; }
+
+  /* The table hands the scrolling to the page. Its spacer still carries the
+     full height of the result set, so the document is as tall as the list --
+     which is the point: one gesture, from the first row to the last. */
+  .vt-scroller {
+    overflow: visible;
+  }
+
+  /* Sticky against the viewport now rather than against the scroller, so the
+     column names stay legible once the chrome above has been pushed away. */
+  .vt-head { top: 0; }
+
+  /* The counts belong on screen whatever row you have scrolled to; as the last
+     grid row of a document this tall it would otherwise be a mile down.
+     `sticky` was the obvious answer and the wrong one: a bottom-stuck LAST
+     child has its displacement counted into the scrollable overflow, which
+     added 81px of dead document under it -- and in those last 81px the bar
+     drifted up off the bottom edge, which reads as a bug. Fixed, and the space
+     it would have occupied is reserved by hand: `--statusbar-h` is measured
+     from the bar itself in main.js, because it wraps to two lines when the
+     numbers are long and a hard-coded 40px would be wrong exactly then. */
+  .app {
+    padding-bottom: var(--statusbar-h, 48px);
+  }
+  .statusbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+  }
+
+  /* An open sheet is modal: the page behind it must not scroll under the
+     scrim. Set by main.js while the filter sheet or the ladder is open. */
+  html.sheet-open,
+  html.sheet-open body {
+    overflow: hidden;
+  }
+
   /* ----------------------------------------------------------- shell */
 
   .app {

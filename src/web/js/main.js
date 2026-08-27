@@ -44,12 +44,14 @@ async function boot() {
   buildTabs();
   buildPanes();
   buildStatusBar();
+  trackStatusBarHeight();
   buildMobileChrome();
 
   app.ladder = new LadderPanel($('#ladderPanel'), {
     onClose: () => {
       $('.workspace').classList.remove('with-drawer');
       app.table.setActiveAsset(null);
+      setSheetOpen(false);
     },
     onSelectionChange: () => emit('selection'),
   });
@@ -111,6 +113,21 @@ function isSidebarOpen() {
   return $('#filterPanel').classList.contains('open');
 }
 
+/**
+ * Freeze the page behind an open sheet.
+ *
+ * On a phone the document itself scrolls (see THE PAGE SCROLLS in app.css), so
+ * a sheet that covers the screen would otherwise let 26k rows slide past
+ * underneath it. Both sheets are `position: fixed` and unaffected; only what
+ * is behind them is locked. A no-op on desktop, where the shell never scrolled.
+ */
+function setSheetOpen(open) {
+  document.documentElement.classList.toggle(
+    'sheet-open',
+    open || isSidebarOpen() || !$('#ladderPanel').hidden,
+  );
+}
+
 function openSidebar() {
   if (!isNarrow()) return;
   $('#filterPanel').classList.add('open');
@@ -120,6 +137,7 @@ function openSidebar() {
   // fades it in, or the transition is skipped and it pops.
   requestAnimationFrame(() => scrim.classList.add('open'));
   $('#filtersToggle').setAttribute('aria-expanded', 'true');
+  setSheetOpen(true);
 }
 
 function closeSidebar() {
@@ -128,6 +146,26 @@ function closeSidebar() {
   scrim.classList.remove('open');
   scrim.hidden = true;
   $('#filtersToggle').setAttribute('aria-expanded', 'false');
+  setSheetOpen(false);
+}
+
+/**
+ * Publish the status bar's height as `--statusbar-h`.
+ *
+ * On a phone the bar is fixed to the bottom of the viewport (see THE PAGE
+ * SCROLLS in app.css) and the shell reserves its height as padding. It wraps to
+ * two lines when the figures are long, so the reservation is measured rather
+ * than assumed -- guessing 40px would hide the last row of the list precisely
+ * when there is most to say about it.
+ */
+function trackStatusBarHeight() {
+  const bar = $('#statusBar');
+  const publish = () => {
+    document.documentElement.style.setProperty('--statusbar-h', `${bar.offsetHeight}px`);
+  };
+  publish();
+  if (typeof ResizeObserver === 'function') new ResizeObserver(publish).observe(bar);
+  else window.addEventListener('resize', publish);
 }
 
 function buildMobileChrome() {
@@ -273,6 +311,7 @@ function buildPanes() {
       if (assetId == null) return;
       $('.workspace').classList.add('with-drawer');
       app.ladder.open(assetId, versionId);
+      setSheetOpen(true);
     },
     onSelectionChange: () => paintStatusBar(),
   });

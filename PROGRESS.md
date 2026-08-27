@@ -2,6 +2,57 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — on a phone, the page scrolls
+
+The desktop shell is 100dvh with `overflow: hidden` and one scroller, inside
+the table. On a phone that pins the topbar, the reclaim strip, the tabs and the
+toolbar to the glass forever: chrome you have already read, taking a third of
+the screen, with no way to push it out of the way.
+
+Below 760px the DOCUMENT scrolls now. The chrome scrolls off the top, the list
+gets the whole screen once it has, the column header stays legible by being
+sticky, and the status bar is pinned to the bottom edge.
+
+### The virtualizer had to learn a second scroll container
+
+`vtable.js` measured `scroller.scrollTop` against `scroller.clientHeight`. In
+page mode the scroller does not scroll at all, so it reads the spacer instead:
+how far `.vt-canvas` has travelled above the top of the window IS the offset
+into the list. One `getBoundingClientRect` per frame, taken before any write,
+and no cached page offset to go stale when the chrome above changes height.
+
+Which mode is in force comes from `viewport.js` — the one place the breakpoint
+is written for both the stylesheet and the JS. **Reading it back off the
+scroller's computed `overflow-y` was tried first and is a trap:** at
+construction the answer came back `auto`, so the table ignored the page scroll
+entirely and only came right when something forced a resize. The breakpoint is
+a media query; ask the media query.
+
+### The sticky footer was extending the document
+
+`position: sticky; bottom: 0` on the LAST child has its displacement counted
+into the scrollable overflow: 81px of dead document under the bar, and in those
+81px the bar drifted up off the bottom edge. It is `position: fixed` now, with
+its height measured by a ResizeObserver and published as `--statusbar-h` for
+the shell to reserve — measured, not assumed, because the bar wraps to two
+lines exactly when the figures are long enough to matter.
+
+### Verified in a real browser, over CDP
+
+Headless Chrome under `--virtual-time-budget` dispatches no scroll events and
+runs no animation frames, so it will report a scroll-driven feature as broken
+whether or not it is. Driving a real headless browser over the DevTools
+protocol instead (Node's built-in `fetch` and `WebSocket`, no dependencies):
+
+    at scrollY 5000   rows 141-191 mounted
+    at scrollY 30000  rows 975-1025 mounted
+    at the bottom     row 2404 mounted, 36 rows in the DOM
+    last row bottom 717 = status bar top 717, 0px of dead document
+
+Desktop re-checked at 1440x900 and unchanged: the page does not scroll, the
+scroller still owns it, the status bar is still a grid row. All four tabs flow
+into the page on a phone.
+
 ## 2026-08-26 — the Region 0 figure was reaching the browser as an em dash
 
 Shipped in v0.5.5 and immediately invisible. The server returned
