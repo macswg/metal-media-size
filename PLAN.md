@@ -38,6 +38,8 @@ the filename grammar per request.
 | `src/server/` | Fastify app, query layer, routes, static mount |
 | `src/export/writer.ts` | Sole write path. The export jail |
 | `src/export/{json,markdown,ffs}.ts` | Pure renderers |
+| `src/export/scenarios.ts` | Keep-N costed at 1–4 over the whole snapshot |
+| `src/export/report.ts` | The shareable HTML report. Print-styled, self-contained |
 | `src/web/` | Frontend, served statically at `/` |
 
 ## Key decisions

@@ -2,6 +2,115 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the summary stopped pointing at a row nobody asked about
+
+> *"the this export flag is confusing. i want a summary that just presents the
+> options, the executive will not know which export is selected. also instead of
+> archive reclaim call is Media Cleanup"* — the user
+
+Page one badged the row the attached job used, `THIS EXPORT`, and tinted it.
+That was written for the operator, who knows what they selected. The person the
+page is actually for does not know an export exists, and a highlighted row reads
+to them as a recommendation nobody made. The badge, the tint and the whole
+"What is on the table right now" block are gone; page one is four options and
+the key to reading them, and nothing on it belongs to the attached job.
+
+The tie-back moved to page two, where the export is the subject rather than an
+intrusion: **The proposal attached to this report** carries the headline figure,
+names which option it is (*"the current + 2 previous versions option on page
+one"*), and says so plainly when the operator narrowed the selection and the job
+covers only part of that option.
+
+What page one gained in its place is the material that holds whichever option is
+chosen — the current version is never removed, fixes are never treated as
+replacements, a preview never displaces a master, nothing is erased. Those are
+the facts that make the table trustworthy, and none of them depend on the choice.
+
+`test/report.test.ts` pins it structurally: the choice table carries no badge and
+no tinted row, and the export's headline block does not appear anywhere before
+page two starts.
+
+Retitled **Media cleanup — executive summary**, in the masthead and the `<title>`.
+
+### Dark on screen, ink on paper
+
+The palette is dark, as asked. Every colour was already a token, so the
+`@media print` block redefines the lot and the document prints black-on-white
+exactly as before — 90 pages, unchanged. That is not a hedge: printing a dark
+page either floods it with toner or, when the browser drops the backgrounds,
+leaves pale text on white. The PDF route is the whole reason this artefact is
+HTML, so it has to come out of a printer legible. A test asserts both palettes.
+
+## 2026-08-27 — a report you can send to someone who will never open this tool
+
+> *"i want to add an export that is an easily sharable report... an executive
+> summary of the options; how much space will be recovered if only the current
+> version is kept, if current and one previous version..."* — the user
+
+New export format, `report`, producing `report.html` beside the existing
+artefacts. Page one is the decision and nothing else:
+
+    If we keep…                       Recovered   Cost of one more   Left on the archive
+    Current version only               49.87 TiB              —              83.89 TiB
+    Current + 1 previous version       18.26 TiB      −31.61 TiB             115.50 TiB
+    Current + 2 previous  THIS EXPORT   5.71 TiB      −12.56 TiB             128.06 TiB
+    Current + 3 previous                1.49 TiB       −4.22 TiB             132.28 TiB
+
+Measured on snapshot 11. The third column was "Archive after" until the user
+asked what it meant, which was answer enough: it is now "Left on the archive",
+and a "Reading the columns" line under the table defines all three and says the
+two figures on each row add back up to the 133.77 TiB the folder holds today. The pages after it are what the Markdown review
+already carried, re-cut for someone reading it cold: what this export contains
+and what running it does, provenance, the per-song split at every setting,
+every affected asset showing what goes next to what stays, then the file list.
+
+### HTML, not PDF
+
+Producing a PDF directly means a PDF library or a headless browser — a large
+dependency in a project with three, in the one module whose output a person is
+expected to trust — to gain a format the browser will produce from this file
+with `Cmd-P → Save as PDF`. So the report is HTML with a print stylesheet
+(`@page`, `break-after: page`, `break-inside: avoid` on every table and ladder,
+`print-color-adjust: exact` so the bars survive printing). The full keep-3 set
+comes out as a 100-page PDF that paginates cleanly.
+
+Self-contained is a property, not a preference: inline CSS, no script, no font,
+no image, no link. It has to render on the machine of whoever it is forwarded
+to, offline, with no part of it silently missing. `test/report.test.ts` asserts
+the emitted file contains no `http:`, no `<script`, no `src=`, no `@import`.
+
+### The scenario table is archive-wide; the rest of the document is this export
+
+Two different scopes in one document, so both are stated on the page rather
+than left to be inferred. The reason is the rule that already governs
+`/api/reclaim`: `computeReclaim` ranks an asset's versions against each other,
+so narrowing its input promotes an old version to "latest kept" and reports a
+live master as reclaimable. `buildScenarios` therefore runs over the whole
+snapshot at every N, and a test proves the four rows do not move when the
+export's selection shrinks from six versions to one — while the export's own
+totals do, which is the whole distinction.
+
+The arithmetic an executive cannot check is asserted instead: keeping more
+versions can never free more space (and `buildScenarios` throws rather than
+render an impossible table); each row's stated cost equals the gap to the row
+above; the total under management is identical in every row; the patch
+protection does not move when the choice does.
+
+### The number the report will not print
+
+The path list is capped at 2,000 entries. When the cap bites the page says how
+many it is not printing and points at the `.paths.txt` manifest — a truncated
+list that looked complete is the single worst failure this document could have.
+
+### Fixture
+
+`test/report.test.ts` builds its own archive rather than borrowing the export
+suite's: five full versions so keep-1 through keep-4 are genuinely different
+(a table of four identical rows would pass a monotonicity assertion), a live
+patch so the constant protection is not trivially zero, a preview-only version,
+and a song folder called `010_ONE & TWO <LL180>` so escaping is exercised by
+the same names the archive actually uses.
+
 ## 2026-08-26 — the emitted job no longer names the folder it will act on
 
 > *"the right side of the ffs file should not have a location, we'll need to set

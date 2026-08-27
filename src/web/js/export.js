@@ -24,6 +24,7 @@ import { bytes as fmtBytes, count } from './format.js';
 
 const FORMATS = [
   ['ffs_gui', 'FreeFileSync job (.ffs_gui)', 'Opens in FreeFileSync so you review the file list and press Compare yourself.'],
+  ['report', 'Shareable report (report.html)', 'One self-contained page: what each keep-N choice recovers, up front, then the detail. Opens anywhere; print it to PDF to send on.'],
   ['json', 'JSON manifest', 'The literal resolved paths, for scripting or record-keeping.'],
   ['markdown', 'Markdown manifest', 'A readable list to check over or paste into a ticket.'],
 ];
@@ -81,7 +82,7 @@ export function openExportDialog({ versionIds, summary }) {
   // Blank by default: the job is generated here and run wherever the archive is
   // mounted on the machine that runs FreeFileSync, which is not this path.
   let rightFolder = localStorage.getItem('aa.rightFolder') || '';
-  const formats = new Set(['ffs_gui', 'json', 'markdown']);
+  const formats = new Set(['ffs_gui', 'report', 'json', 'markdown']);
 
   const folderField = h('div.field', { hidden: true });
   const folderInput = h('input', {

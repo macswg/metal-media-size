@@ -56,6 +56,8 @@ import {
 } from './ffs.ts';
 import { renderJsonExport } from './json.ts';
 import { renderMarkdown } from './markdown.ts';
+import { renderReport } from './report.ts';
+import { buildScenarios, REPORT_KEEP_NS, scenarioBasis } from './scenarios.ts';
 import type {
   DeletionPolicy,
   ExportArtifact,
@@ -94,11 +96,20 @@ export {
 } from './ffs.ts';
 export { buildJsonExport, renderJsonExport } from './json.ts';
 export { renderMarkdown, formatBytes } from './markdown.ts';
+export { renderReport, MAX_REPORT_PATHS, MAX_REPORT_LADDERS } from './report.ts';
+export {
+  buildScenarios,
+  scenarioBasis,
+  scenarioLabel,
+  scenarioSubLabel,
+  REPORT_KEEP_NS,
+} from './scenarios.ts';
 
 export const ALL_FORMATS: readonly ExportFormat[] = Object.freeze([
   'json',
   'markdown',
   'ffs_gui',
+  'report',
 ]);
 
 /** Default keep-latest-N used when the caller does not say. */
@@ -489,8 +500,16 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
   if (!snap) throw new Error(`Snapshot ${snapshotId} not found.`);
 
   // --- verdicts, from the same function the UI uses ---------------------
-  const reclaim = computeReclaim(loadReclaimInput(db, snapshotId), keepN);
+  // Loaded once and used twice: for THIS export's verdicts, and for the
+  // keep-N scenarios on the report's first page. Both run over the whole
+  // snapshot, which is the only input `computeReclaim` may be given.
+  const reclaimInput = loadReclaimInput(db, snapshotId);
+  const reclaim = computeReclaim(reclaimInput, keepN);
   const verdictById = new Map(reclaim.verdicts.map((v) => [v.versionId, v]));
+
+  // Archive-wide, deliberately independent of `versionIds` and of any filter
+  // the operator had applied. See `scenarios.ts`.
+  const scenarios = buildScenarios(reclaimInput, REPORT_KEEP_NS, keepN);
 
   // --- literal files ----------------------------------------------------
   const fileRows = db
@@ -708,6 +727,8 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
       unparsedCount: snap.unparsed_count,
     },
     keepN,
+    scenarios,
+    scenarioBasis: scenarioBasis(reclaimInput, snap.total_bytes),
     deletionPolicy: policy,
     versioningFolder,
     note: opts.note?.trim() || null,
@@ -833,6 +854,15 @@ export async function writeExport(opts: WriteExportOptions): Promise<ExportResul
   if (formats.includes('markdown')) {
     const f = await writeExportText(join(exportDir, 'review.md'), renderMarkdown(dataset), jail);
     artifacts.push({ format: 'markdown', ...f });
+  }
+
+  if (formats.includes('report')) {
+    // Self-contained: inline CSS, no scripts, no external references. It is the
+    // artefact intended to leave this machine, so it has to render identically
+    // on one that has never seen this project. `Cmd-P -> Save as PDF` is how it
+    // becomes a PDF; the print stylesheet is what makes that paginate.
+    const f = await writeExportText(join(exportDir, 'report.html'), renderReport(dataset), jail);
+    artifacts.push({ format: 'report', ...f });
   }
 
   return {

@@ -33,7 +33,7 @@ import type { AppContext } from '../context.ts';
 import { badRequest, unavailable } from '../errors.ts';
 import { DEFAULT_KEEP_N } from '../query.ts';
 
-export const EXPORT_FORMATS = ['json', 'markdown', 'ffs_gui'] as const;
+export const EXPORT_FORMATS = ['json', 'markdown', 'ffs_gui', 'report'] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
 export const DELETION_POLICIES = ['Versioning', 'RecycleBin'] as const;

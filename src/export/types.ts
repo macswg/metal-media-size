@@ -13,7 +13,7 @@ import type { KeepReason } from '../scan/reclaim.ts';
 /** Only these two. `Permanent` is not representable -- see `ffs.ts`. */
 export type DeletionPolicy = 'Versioning' | 'RecycleBin';
 
-export type ExportFormat = 'json' | 'markdown' | 'ffs_gui';
+export type ExportFormat = 'json' | 'markdown' | 'ffs_gui' | 'report';
 
 /** One literal file inside a selected version. */
 export interface ExportFileRow {
@@ -131,6 +131,64 @@ export interface ExportChunk {
   manifestFileName: string;
 }
 
+/** One song's share of a scenario's reclaim. Whole archive, not this export. */
+export interface ExportScenarioSong {
+  songFolder: string;
+  reclaimBytes: number;
+  supersededVersions: number;
+  supersededFiles: number;
+}
+
+/**
+ * One keep-latest-N choice, costed over the WHOLE snapshot.
+ *
+ * These are the rows on page one of the shareable report. They answer "what
+ * would we get back if we kept only the current version / one previous / two /
+ * three", and they are deliberately NOT scoped to this export's selection or
+ * to whatever filters the operator had on screen -- see `scenarios.ts`.
+ */
+export interface ExportScenario {
+  keepN: number;
+  /** "Current version only" / "Current + 2 previous versions". */
+  label: string;
+  /** One plain sentence saying what that means for the archive. */
+  subLabel: string;
+  reclaimBytes: number;
+  reclaimVersions: number;
+  reclaimFiles: number;
+  reclaimProxyBytes: number;
+  /** Bytes still on the archive after this choice. */
+  keptBytes: number;
+  keptVersions: number;
+  /**
+   * Patches sitting at or above their asset's latest full version. Constant
+   * across every row by construction; carried per row so a reader can SEE that
+   * the protection does not depend on the choice being made.
+   */
+  protectedPatchBytes: number;
+  protectedPatchVersions: number;
+  /**
+   * Bytes given up by choosing this row instead of the one above it -- i.e.
+   * what one more version of insurance costs. Zero on the first row, which has
+   * nothing above it and is by definition the maximum.
+   */
+  costVsRowAbove: number;
+  /** True on the row whose N this export's verdicts were computed under. */
+  isExportPolicy: boolean;
+  bySong: ExportScenarioSong[];
+}
+
+/** What the scenario table was computed over. The whole snapshot, stated. */
+export interface ExportScenarioBasis {
+  assetCount: number;
+  versionCount: number;
+  versionedBytes: number;
+  versionedFiles: number;
+  songCount: number;
+  /** Snapshot bytes belonging to no version: names the grammar could not parse. */
+  unversionedBytes: number;
+}
+
 export interface ExportSnapshotProvenance {
   snapshotId: number;
   /** Absolute scan root the relative paths are relative to. */
@@ -165,6 +223,14 @@ export interface ExportDataset {
   snapshot: ExportSnapshotProvenance;
   /** The keep-latest-N the verdicts were computed under. */
   keepN: number;
+  /**
+   * Keep-latest-N costed at several values of N over the WHOLE snapshot, for
+   * the executive summary. Independent of `selected` and of any filter: see
+   * `scenarios.ts` for why narrowing the input would be unsafe.
+   */
+  scenarios: ExportScenario[];
+  /** What `scenarios` was computed over. */
+  scenarioBasis: ExportScenarioBasis;
   deletionPolicy: DeletionPolicy;
   versioningFolder: string | null;
   note: string | null;

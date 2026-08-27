@@ -146,8 +146,19 @@ superseded. That is what this tool works out.
   storage; reading means egress). Always labelled "content not verified".
 - **Snapshots** — every scan is retained and two can be diffed. The archive is
   live, so this matters. Old snapshots can be removed from the index.
-- **Exports** — JSON, Markdown, and a FreeFileSync `.ffs_gui` removal job with a
-  literal-path manifest beside it.
+- **Exports** — a shareable HTML report, JSON, Markdown, and a FreeFileSync
+  `.ffs_gui` removal job with a literal-path manifest beside it.
+- **The report** (`report.html`) is the one meant to leave this machine. Page
+  one is the options and nothing else: what comes back if only the current
+  version is kept, and what each extra version of insurance costs, at keep-1
+  through keep-4 over the whole archive. It does not mark which option the
+  attached job uses — the person it is written for does not know an export was
+  ever selected. The pages after it are the detail: which option the job is and
+  what it contains, where the numbers come from, the per-song split, every
+  affected asset showing what goes next to what stays, and the file list. One
+  self-contained file, no scripts and no external references, so it opens
+  offline on any machine. Dark on screen; the print stylesheet inverts the whole
+  palette, so *Save as PDF* still gives ink on paper.
 
 ## Safety
 

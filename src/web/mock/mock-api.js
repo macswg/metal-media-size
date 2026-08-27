@@ -539,7 +539,10 @@ export async function createMockApi() {
         mock: true,
         files: (payload.formats || ['json']).map((format) => ({
           format,
-          path: `exports/manifest_${stamp}.${format === 'ffs_gui' ? 'ffs_gui' : format === 'markdown' ? 'md' : 'json'}`,
+          path:
+            format === 'report'
+              ? `exports/export_${stamp}/report.html`
+              : `exports/manifest_${stamp}.${format === 'ffs_gui' ? 'ffs_gui' : format === 'markdown' ? 'md' : 'json'}`,
           bytes: 0,
         })),
         summary: { fileCount, totalBytes, versionCount: ids.length },
