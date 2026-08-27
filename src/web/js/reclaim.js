@@ -83,7 +83,7 @@ export class ReclaimStrip {
     // Not a keep-N figure. It says how much of what is in view is the
     // whole-canvas region0 copy the offline edit is cut against -- material
     // the edit needs, whatever the slider is set to.
-    this.factRegion0 = fact('Region 0', 'region0');
+    this.factRegion0 = fact('Region 0s', 'region0');
     this.factMatched = fact('In view', '');
 
     // On a phone the slider is a 7-stop track you drag with a thumb that
