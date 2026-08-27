@@ -53,6 +53,7 @@ const MAX_VERSION_IDS = 100_000;
 
 interface ExportBody {
   jobLayout?: unknown;
+  rightFolder?: unknown;
   versionIds?: unknown;
   formats?: unknown;
   deletionPolicy?: unknown;
@@ -77,6 +78,8 @@ export interface ExportRequest {
   note?: string;
   keepN: number;
   jobLayout?: JobLayout;
+  /** `null`/absent leaves the job's `<Right>` folder blank. */
+  rightFolder?: string | null;
   /** Roots the writer must refuse to write into. The archive, always. */
   forbiddenRoots: string[];
   /** Test-only override of the export directory; omitted in normal operation. */
@@ -126,6 +129,31 @@ function validateJobLayout(raw: unknown): JobLayout | undefined {
   return raw as JobLayout;
 }
 
+/**
+ * The folder the emitted job will act on.
+ *
+ * Blank by default and blank is not an error: the job is generated where the
+ * archive was scanned and run where it is mounted differently, so the path is
+ * the operator's to set in FreeFileSync. A supplied value must be an absolute
+ * path -- a relative one would resolve against whatever directory FreeFileSync
+ * happens to be run from, which is nobody's intent.
+ */
+function validateRightFolder(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string') {
+    throw badRequest('bad_right_folder', 'rightFolder must be a string path, or empty to leave it unset.');
+  }
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  if (!trimmed.startsWith('/')) {
+    throw badRequest(
+      'bad_right_folder',
+      `rightFolder must be an absolute path when given. Got ${JSON.stringify(raw)}.`,
+    );
+  }
+  return trimmed;
+}
+
 function validateFormats(raw: unknown): ExportFormat[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw badRequest(
@@ -169,6 +197,7 @@ export function registerExportRoutes(app: FastifyInstance, ctx: AppContext): voi
     const deletionPolicy = validatePolicy(body.deletionPolicy);
     const formats = validateFormats(body.formats);
     const jobLayout = validateJobLayout(body.jobLayout);
+    const rightFolder = validateRightFolder(body.rightFolder);
     const versionIds = validateVersionIds(body.versionIds);
 
     let versioningFolder: string | undefined;
@@ -271,6 +300,7 @@ export function registerExportRoutes(app: FastifyInstance, ctx: AppContext): voi
       // The archive itself is never a legal write target, whatever else is.
       forbiddenRoots: [...ctx.cfg.allowedRoots, ctx.cfg.root],
       ...(jobLayout === undefined ? {} : { jobLayout }),
+      ...(rightFolder === null ? {} : { rightFolder }),
       ...(versioningFolder === undefined ? {} : { versioningFolder }),
       ...(note === undefined ? {} : { note }),
       ...(ctx.exportsDir === undefined ? {} : { exportsDir: ctx.exportsDir }),

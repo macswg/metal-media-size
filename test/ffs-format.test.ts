@@ -168,6 +168,7 @@ const CHUNK: ExportChunk = {
   index: 1,
   songFolders: ['010_SONG & CO [LL180]'],
   baseFolder: '/archive/root/010_SONG & CO [LL180]',
+  pairRightFolder: '/archive/root/010_SONG & CO [LL180]',
   basePrefix: '010_SONG & CO [LL180]/',
   includes: [
     '/010_SONG & CO [LL180]_MAIN_v001_region1.mov',
@@ -389,6 +390,26 @@ describe('XML escaping round-trips real filenames', () => {
     expect(unescapeXml(escapeXmlAttr('a & "b" <c>'))).toBe('a & "b" <c>');
   });
 
+  it('leaves the right-hand folder empty when the operator will set it', () => {
+    const chunk: ExportChunk = { ...CHUNK, pairRightFolder: '' };
+    const xml = buildRemovalGui(chunk, GUI_OPTS);
+    const root = child(parseXml(xml), 'FreeFileSync');
+    // Empty, and still a well-formed pair with the empty left folder beside it.
+    expect(textOf(child(child(root, 'FolderPairs'), 'Pair'), 'Right')).toBe('');
+    expect(textOf(child(child(root, 'FolderPairs'), 'Pair'), 'Left')).toBe(
+      GUI_OPTS.emptyLeftFolder,
+    );
+    // The filter is untouched by any of this -- it is what binds the job to
+    // whatever folder the operator picks.
+    expect(items(child(child(root, 'Filter'), 'Include'))).toEqual(chunk.includes);
+    // And the job says so, loudly, before it says anything else.
+    const comment = /<!--([\s\S]*?)-->/.exec(xml)?.[1] as string;
+    expect(comment).toContain('SET THE RIGHT-HAND FOLDER BEFORE YOU DO ANYTHING ELSE');
+    expect(comment).toContain('IT MUST BE THAT FOLDER ITSELF');
+    // The folder it was scanned from is still stated, as the thing to match.
+    expect(comment).toContain(CHUNK.baseFolder);
+  });
+
   it('handles a real sibling project name: 22_DEAD_&_COMPANY', () => {
     const song = '22_DEAD_&_COMPANY';
     const rel = `${song}/22_DEAD_&_COMPANY_MAIN_v002d_region1.mov`;
@@ -396,6 +417,7 @@ describe('XML escaping round-trips real filenames', () => {
       ...CHUNK,
       songFolders: [song],
       baseFolder: `/archive/${song}`,
+      pairRightFolder: `/archive/${song}`,
       basePrefix: `${song}/`,
       includes: ['/22_DEAD_&_COMPANY_MAIN_v002d_region1.mov'],
       relPaths: [rel],

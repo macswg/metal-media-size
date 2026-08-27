@@ -354,6 +354,7 @@ POST /api/export
 { versionIds: number[], formats: ('json'|'markdown'|'ffs_gui')[],
   deletionPolicy: 'Versioning'|'RecycleBin',
   jobLayout?: 'single'|'per-song',
+  rightFolder?: string | null,
   versioningFolder?: string, note?: string }
 -> { files: [{ format, path, bytes }], summary: { fileCount, totalBytes } }
 ```
@@ -383,6 +384,14 @@ the archive. Same path list, same reversible policies, same companion manifest
 either way; an unknown value is a 400 (`bad_job_layout`). See
 `docs/ffs-format.md`.
 
+`rightFolder` is the folder the emitted job will act on. **Absent or empty is
+the default and leaves the job's `<Right>` blank** — the operator sets it in
+FreeFileSync, because the machine that runs the job reaches the delivery folder
+by a different path than the machine that scanned it. The include patterns are
+anchored and relative, so they bind to whatever folder is chosen. A supplied
+value must be an ABSOLUTE path (`bad_right_folder` otherwise); under
+`per-song` the song folder is appended to it.
+
 **`files[].format` includes `'ffs_manifest'`**, which is not one of the three
 requested `formats`. Every `.ffs_gui` job ships with a companion literal-path
 manifest so a human reviews concrete paths rather than filter patterns; it is
@@ -394,6 +403,7 @@ Further validation, all 400:
 | `deletion_policy_required` | `deletionPolicy` absent |
 | `deletion_policy_forbidden` | `deletionPolicy: 'Permanent'` |
 | `bad_job_layout` | `jobLayout` present and not `single` or `per-song` |
+| `bad_right_folder` | `rightFolder` present, non-empty, and not an absolute path |
 | `bad_deletion_policy` | any other value |
 | `versioning_folder_required` | policy is `'Versioning'` with no `versioningFolder` |
 | `bad_formats` | empty, or a format outside the three |

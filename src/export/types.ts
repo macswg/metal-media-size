@@ -96,8 +96,22 @@ export interface ExportChunk {
   index: number;
   /** Song folders represented in this chunk. */
   songFolders: string[];
-  /** Absolute path of the right-hand folder-pair root, forward slashes. */
+  /**
+   * Absolute path of the folder this chunk's paths are relative to, as seen by
+   * the SCAN. Provenance: it is what the manifests resolve their absolute paths
+   * against, and it is not necessarily what the job runs against.
+   */
   baseFolder: string;
+  /**
+   * What goes in the `.ffs_gui`'s `<Right>` element.
+   *
+   * Usually `baseFolder`. EMPTY STRING when the operator asked for the folder
+   * to be left blank, because the job will be run against a different mount of
+   * the same delivery folder and the path is theirs to set in FreeFileSync.
+   * The include patterns are anchored and relative, so they bind to whatever
+   * folder is chosen -- which is exactly why the field can be left open.
+   */
+  pairRightFolder: string;
   /** Root-relative prefix that `baseFolder` adds, '' or 'SONG/'. */
   basePrefix: string;
   /**

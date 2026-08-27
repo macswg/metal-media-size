@@ -2,6 +2,50 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — the emitted job no longer names the folder it will act on
+
+> *"the right side of the ffs file should not have a location, we'll need to set
+> the location manually because we'll be running it on a different location than
+> what we're scanning right now"* — the user
+
+The `.ffs_gui` now ships with `<Right Threads="8"></Right>` — empty — and the
+operator sets the folder in FreeFileSync. This works, and only works, because
+the include items are anchored and RELATIVE: `/110_ENGINE/..._v001.mov` binds to
+whatever folder is chosen, so the same job is correct against any mount of the
+same delivery folder.
+
+The risk moves with it, and the job says so before it says anything else:
+
+    SET THE RIGHT-HAND FOLDER BEFORE YOU DO ANYTHING ELSE.
+    ...
+    IT MUST BE THAT FOLDER ITSELF, not its parent and not a subfolder.
+    Point it one level too high and Compare finds nothing, which is the safe
+    failure. Point it at a DIFFERENT archive that happens to share song and
+    file names and it would find those instead, which is not.
+
+It also states the folder as scanned, as the thing to match, and the checklist
+gains a step 0. The companion manifest's header says `Pair right: (blank in the
+job -- set it in FreeFileSync before running)` and explains that its literal
+paths are written against the scan root while the job matches on the part after
+it.
+
+### An empty pair path is INFERRED, not verified
+
+The real 14.10 config has a path in both halves. What FFS does with an empty one
+— open with a blank field, or complain on load — has not been observed, so it is
+on the unverified list in `docs/ffs-format.md` with the mitigation named: open
+one generated job once, and if FFS objects, type the destination path into the
+export dialog instead and the job ships with it filled in.
+
+### One meaning per value
+
+`rightFolder` was briefly `string | null | undefined` with `undefined` meaning
+"as scanned". A test caught the obvious: `{ rightFolder: undefined }` is not
+distinguishable from omitting the key in any way a caller should have to reason
+about, and the failure mode is a blank job nobody asked for. It is
+`string | null` now — blank unless a path is given, and a caller who wants the
+scanned path passes it.
+
 ## 2026-08-26 — a redeployed module could come back from the browser cache
 
 Found while verifying the export dialog: a headless run reported the new control

@@ -73,7 +73,11 @@ function chunkJson(c: ExportChunk, root: string): Record<string, unknown> {
     manifestFileName: c.manifestFileName,
     songFolders: c.songFolders,
     /** The right-hand side of the FreeFileSync folder pair. */
-    pairRightFolder: c.baseFolder,
+    // What the emitted job actually carries -- '' when the operator is setting
+    // the folder in FreeFileSync. `scanBaseFolder` is where the paths were
+    // seen, which is what `absolutePaths` below resolves against.
+    pairRightFolder: c.pairRightFolder,
+    scanBaseFolder: c.baseFolder,
     basePrefix: c.basePrefix,
     versionIds: c.versionIds,
     fileCount: c.fileCount,

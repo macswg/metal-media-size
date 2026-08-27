@@ -24,7 +24,12 @@ import { join } from 'node:path';
 import type { Database as Db } from 'better-sqlite3';
 
 import { openDb } from '../src/db/index.ts';
-import { writeExport, buildDataset, buildChunks } from '../src/export/index.ts';
+import {
+  writeExport,
+  buildDataset,
+  buildChunks,
+  resolveRightFolder,
+} from '../src/export/index.ts';
 import { buildRemovalGui, unescapeXml } from '../src/export/ffs.ts';
 import type { ExportChunk, ExportVersionRow } from '../src/export/types.ts';
 
@@ -596,6 +601,7 @@ describe('the single-job layout', () => {
           index: 1,
           songFolders: [],
           baseFolder: ROOT,
+          pairRightFolder: ROOT,
           basePrefix: '',
           includes: [],
           relPaths: [],
@@ -617,6 +623,102 @@ describe('the single-job layout', () => {
         },
       ),
     ).toThrow(/empty include list/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('the right-hand folder', () => {
+  /**
+   * The job is generated on the machine that scanned the archive and run on a
+   * machine that reaches the same delivery folder by a different path, so the
+   * emitted `<Right>` is EMPTY by default and the operator sets it in
+   * FreeFileSync. This works only because the include patterns are anchored and
+   * relative -- they bind to whatever folder is chosen -- which is exactly what
+   * these tests pin.
+   */
+  it('is blank by default, and the filter still carries every path', async () => {
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-BLANK',
+    });
+    const xml = readFileSync(res.files.find((f) => f.format === 'ffs_gui')?.path as string, 'utf8');
+    expect(/<Right Threads="8"><\/Right>|<Right Threads="8"\/>/.test(xml)).toBe(true);
+    expect(includeItemsOf(xml)).toHaveLength(res.summary.fileCount as number);
+  });
+
+  it('tells the operator what to point it at, and that a parent will not do', async () => {
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-BLANK-BANNER',
+    });
+    const xml = readFileSync(res.files.find((f) => f.format === 'ffs_gui')?.path as string, 'utf8');
+    expect(xml).toContain('SET THE RIGHT-HAND FOLDER BEFORE YOU DO ANYTHING ELSE');
+    // The folder as scanned, named as the thing to match on the other machine.
+    expect(xml).toContain(ROOT);
+    expect(xml).toContain('IT MUST BE THAT FOLDER ITSELF');
+    expect(xml).toContain('0. Set the right-hand folder');
+  });
+
+  it('emits the scan root when the caller passes it', () => {
+    // There is no separate "as scanned" value: a caller that wants the scanned
+    // path says so by passing it. One meaning per value.
+    const d = buildDataset(db, {
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      rightFolder: ROOT,
+    });
+    expect(d.chunks[0]?.pairRightFolder).toBe(ROOT);
+  });
+
+  it('takes an operator-supplied folder, and appends the song under per-song', () => {
+    const single = buildDataset(db, {
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      rightFolder: '/Volumes/OtherMount/00_D3_Delivery',
+    });
+    expect(single.chunks[0]?.pairRightFolder).toBe('/Volumes/OtherMount/00_D3_Delivery');
+
+    const perSong = buildDataset(db, {
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      jobLayout: 'per-song',
+      // Trailing slash tolerated: an operator pasting a path should not have to
+      // care, and a doubled separator in a folder-pair path is a real bug.
+      rightFolder: '/Volumes/OtherMount/00_D3_Delivery/',
+    });
+    expect(perSong.chunks[0]?.pairRightFolder).toBe(
+      `/Volumes/OtherMount/00_D3_Delivery/${SONG_A}`,
+    );
+  });
+
+  it('resolves the choice the same way everywhere', () => {
+    expect(resolveRightFolder(null, '')).toBe('');
+    expect(resolveRightFolder('', '')).toBe('');
+    expect(resolveRightFolder('/x', '')).toBe('/x');
+    expect(resolveRightFolder('/x/', 'SONG/')).toBe('/x/SONG');
+    expect(resolveRightFolder('/x///', 'SONG/')).toBe('/x/SONG');
+  });
+
+  it('still resolves every include against the scanned base in the manifest', async () => {
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-BLANK-MANIFEST',
+    });
+    const man = res.files.find((f) => f.format === 'ffs_manifest')?.path as string;
+    const text = readFileSync(man, 'utf8');
+    expect(text).toContain('(blank in the job -- set it in FreeFileSync before running)');
+    // The literal paths a human reviews are still absolute, against the scan.
+    for (const line of manifestPathsOf(text)) expect(line.startsWith(`${ROOT}/`)).toBe(true);
   });
 });
 
@@ -650,6 +752,7 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
           guiFileName: string;
           manifestFileName: string;
           pairRightFolder: string;
+          scanBaseFolder: string;
           basePrefix: string;
           includePatterns: string[];
           relPaths: string[];
@@ -684,9 +787,13 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
       );
       for (const p of c.absolutePaths) expect(md).toContain(p);
 
-      // 5. the pair root plus the pattern is the real absolute path
+      // 5. the pattern resolved against the folder the job will be pointed at
+      //    is the real absolute path. That folder is blank in the file by
+      //    default -- the operator sets it -- so the scan base is what the
+      //    manifest resolves against, and `scanBaseFolder` records it.
+      expect(c.pairRightFolder).toBe('');
       for (let i = 0; i < fromXml.length; i++) {
-        expect(`${c.pairRightFolder}${fromXml[i]}`).toBe(c.absolutePaths[i]);
+        expect(`${c.scanBaseFolder}${fromXml[i]}`).toBe(c.absolutePaths[i]);
       }
       seen += fromXml.length;
     }
@@ -714,9 +821,13 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
     const dir = res.summary.exportDir;
     for (const f of readdirSync(dir).filter((x) => x.endsWith('.ffs_gui'))) {
       const xml = readFileSync(join(dir, f), 'utf8');
-      const base = unescapeXml(/<Right Threads="8">([\s\S]*?)<\/Right>/.exec(xml)?.[1] as string);
-      // The pair root is the song folder under 'per-song' and the scan root
-      // itself under 'single', where there is no prefix to add back.
+      // The job's own <Right> is empty by default (the operator sets it), so
+      // the prefix comes from the run's JSON, which records the scanned base.
+      const json = JSON.parse(
+        readFileSync(res.files.find((x) => x.format === 'json')?.path as string, 'utf8'),
+      ) as { freeFileSync: { chunks: { guiFileName: string; scanBaseFolder: string }[] } };
+      const base = json.freeFileSync.chunks.find((c) => c.guiFileName === f)
+        ?.scanBaseFolder as string;
       const prefix = base === ROOT ? '' : `${base.slice(ROOT.length + 1)}/`;
       for (const inc of includeItemsOf(xml)) {
         const rel = `${prefix}${inc.slice(1)}`;

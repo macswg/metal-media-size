@@ -78,6 +78,9 @@ export function openExportDialog({ versionIds, summary }) {
   let versioningFolder = localStorage.getItem('aa.versioningFolder') || '';
   let note = '';
   let jobLayout = 'single';
+  // Blank by default: the job is generated here and run wherever the archive is
+  // mounted on the machine that runs FreeFileSync, which is not this path.
+  let rightFolder = localStorage.getItem('aa.rightFolder') || '';
   const formats = new Set(['ffs_gui', 'json', 'markdown']);
 
   const folderField = h('div.field', { hidden: true });
@@ -159,6 +162,26 @@ export function openExportDialog({ versionIds, summary }) {
     layoutOpts.appendChild(opt);
   }
 
+  const rightField = h('div.field');
+  rightField.append(
+    h('label', 'Right-hand folder (optional)'),
+    h('input', {
+      type: 'text',
+      class: 'mono',
+      value: rightFolder,
+      placeholder: 'Leave blank and set it in FreeFileSync',
+      spellcheck: 'false',
+      onInput: (e) => {
+        rightFolder = e.target.value.trim();
+        validate();
+      },
+    }),
+    h(
+      'div.hint',
+      'The folder the job will act on. Left blank, the job ships with an empty right-hand side for you to fill in — which is what you want when the archive is mounted at a different path on the machine that runs it. The file list is relative, so it binds to whatever folder you pick; it must be the delivery folder itself, not its parent.',
+    ),
+  );
+
   const formatBox = h(
     'div.field',
     h('label', 'Manifest formats'),
@@ -195,6 +218,7 @@ export function openExportDialog({ versionIds, summary }) {
     policyOpts,
     folderField,
     layoutOpts,
+    rightField,
     formatBox,
     noteBox,
     problem,
@@ -213,6 +237,7 @@ export function openExportDialog({ versionIds, summary }) {
     else if (!policy) msg = 'Choose a deletion policy.';
     else if (policy === 'Versioning' && !versioningFolder) msg = 'Versioning needs a folder path — that folder is what makes the operation reversible.';
     else if (formats.size === 0) msg = 'Choose at least one manifest format.';
+    else if (rightFolder && !rightFolder.startsWith('/')) msg = 'The right-hand folder must be an absolute path, or blank.';
     problem.hidden = !msg;
     problem.textContent = msg;
     reviewBtn.disabled = !!msg;
@@ -221,7 +246,7 @@ export function openExportDialog({ versionIds, summary }) {
 
   reviewBtn.onclick = () => {
     dlg.close();
-    openConfirm({ versionIds, summary, policy, versioningFolder, formats: [...formats], note, jobLayout });
+    openConfirm({ versionIds, summary, policy, versioningFolder, formats: [...formats], note, jobLayout, rightFolder });
   };
 }
 
@@ -240,7 +265,7 @@ function summaryCard(versionIds, summary) {
   );
 }
 
-function openConfirm({ versionIds, summary, policy, versioningFolder, formats, note, jobLayout }) {
+function openConfirm({ versionIds, summary, policy, versioningFolder, formats, note, jobLayout, rightFolder }) {
   const lines = [
     ['Asset-versions in the manifest', count(versionIds.length)],
     ['Files those versions cover', summary.files ? count(summary.files) : 'resolved by the exporter'],
@@ -254,7 +279,11 @@ function openConfirm({ versionIds, summary, policy, versioningFolder, formats, n
       'FreeFileSync jobs',
       jobLayout === 'per-song'
         ? 'one per song folder, each scoped to that folder'
-        : 'a single job covering everything, paired at the archive root',
+        : 'a single job covering everything',
+    ],
+    [
+      'Right-hand folder',
+      rightFolder || 'left blank — you set it in FreeFileSync before running',
     ],
     ['Written to', 'exports/ inside this project — nowhere else'],
   ];
@@ -300,11 +329,14 @@ function openConfirm({ versionIds, summary, policy, versioningFolder, formats, n
         versionIds,
         formats,
         jobLayout,
+        ...(rightFolder ? { rightFolder } : {}),
         deletionPolicy: policy,
         ...(policy === 'Versioning' ? { versioningFolder } : {}),
         ...(note ? { note } : {}),
       });
       if (policy === 'Versioning') localStorage.setItem('aa.versioningFolder', versioningFolder);
+      if (rightFolder) localStorage.setItem('aa.rightFolder', rightFolder);
+      else localStorage.removeItem('aa.rightFolder');
       dlg.close();
       showResult(res);
       // Overrides deliberately survive an export. They are standing decisions

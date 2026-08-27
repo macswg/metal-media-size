@@ -121,6 +121,34 @@ export const DEFAULT_MAX_PATHS_PER_CHUNK = 750;
  */
 export const DEFAULT_JOB_LAYOUT: JobLayout = 'single';
 
+/**
+ * Where the emitted job points its right-hand folder.
+ *
+ *   null / '' / omitted  -- LEAVE IT BLANK. The default. The operator sets the
+ *                           folder in FreeFileSync, because the machine that
+ *                           runs the job reaches the delivery folder by a
+ *                           different path than the machine that scanned it.
+ *   a path               -- that folder, with the song folder appended under
+ *                           'per-song'. Pass the scan root to reproduce the
+ *                           old behaviour; there is no separate "as scanned"
+ *                           value, because one meaning per value is what stops
+ *                           a caller getting a blank job it did not ask for.
+ *
+ * Blank works only because the include patterns are anchored and RELATIVE:
+ * they bind to whatever folder is chosen. That is also the risk, and the job's
+ * banner says so — the chosen folder has to be the delivery folder itself.
+ */
+export type RightFolderChoice = string | null;
+
+/** Resolve the `<Right>` value for one chunk. */
+export function resolveRightFolder(choice: RightFolderChoice, basePrefix: string): string {
+  if (!choice) return '';
+  const base = choice.replace(/\/+$/, '');
+  // Under 'per-song' the pair points inside the song, so an operator-supplied
+  // root gets the same song folder appended that the scan root would have.
+  return basePrefix === '' ? base : `${base}/${basePrefix.replace(/\/$/, '')}`;
+}
+
 export interface WriteExportOptions {
   /** Asset-version ids to propose for removal. Required, non-empty. */
   versionIds: readonly number[];
@@ -158,6 +186,11 @@ export interface WriteExportOptions {
    * emits one per song folder. See `JobLayout`.
    */
   jobLayout?: JobLayout;
+  /**
+   * What to put in the job's `<Right>` folder. `null` (the default) leaves it
+   * BLANK for the operator to set in FreeFileSync. See `RightFolderChoice`.
+   */
+  rightFolder?: RightFolderChoice;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,7 +287,11 @@ function safeName(s: string): string {
  * base. Sorted, so the file reads in archive order and two runs over the same
  * selection produce the same bytes.
  */
-function buildSingleChunk(selected: readonly ExportVersionRow[], root: string): ExportChunk {
+function buildSingleChunk(
+  selected: readonly ExportVersionRow[],
+  root: string,
+  rightFolder: RightFolderChoice,
+): ExportChunk {
   const ordered = selected
     .slice()
     .sort((a, b) =>
@@ -282,6 +319,7 @@ function buildSingleChunk(selected: readonly ExportVersionRow[], root: string): 
     index: 1,
     songFolders,
     baseFolder: root,
+    pairRightFolder: resolveRightFolder(rightFolder, ''),
     basePrefix: '',
     includes: relPaths.map((p) => `/${p}`),
     relPaths,
@@ -313,8 +351,9 @@ export function buildChunks(
   root: string,
   maxPaths: number,
   layout: JobLayout = DEFAULT_JOB_LAYOUT,
+  rightFolder: RightFolderChoice = null,
 ): ExportChunk[] {
-  if (layout === 'single') return [buildSingleChunk(selected, root)];
+  if (layout === 'single') return [buildSingleChunk(selected, root, rightFolder)];
   const bySong = new Map<string, ExportVersionRow[]>();
   for (const v of selected) {
     const list = bySong.get(v.songFolder);
@@ -365,6 +404,7 @@ export function buildChunks(
         index,
         songFolders: [song],
         baseFolder,
+        pairRightFolder: resolveRightFolder(rightFolder, basePrefix),
         basePrefix,
         // Anchored, base-relative, forward slashes: the form the verified
         // config uses for a root-relative filter item.
@@ -586,6 +626,7 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
     snap.root,
     opts.maxPathsPerChunk ?? DEFAULT_MAX_PATHS_PER_CHUNK,
     opts.jobLayout ?? DEFAULT_JOB_LAYOUT,
+    opts.rightFolder ?? null,
   );
 
   // Cross-check: the chunking must account for every path exactly once.

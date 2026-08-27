@@ -206,6 +206,19 @@ Safety requirements, non-negotiable:
   per-file includes rely on FFS traversing a directory when a child might match.
   Mitigated: each generated job states its expected row count and tells the human
   to stop if Compare disagrees.
+- **An EMPTY `<Right>` folder-pair path.** Emitted by default since 2026-08-26:
+  the job is generated on the machine that scanned the archive and run on one
+  that reaches the same delivery folder by a different path, so the operator
+  sets the folder in FreeFileSync. The real config has a path in both halves, so
+  what FFS 14.10 does with an empty one — opens with a blank field, as intended,
+  or complains on load — is **inferred, not verified**. Confirm by opening one
+  generated job once; if FFS objects, type the destination path into the
+  export dialog instead and the job ships with it filled in.
+  The include items are anchored and relative, so they bind to whatever folder
+  is chosen; the risk that moves with them is that the chosen folder must be the
+  delivery folder ITSELF. A parent finds nothing (safe). A different archive
+  with the same song and file names would find those (not safe). The job's
+  banner says both, and the manifest lists every literal path.
 - **A top-level XML comment.** The real config has none. Generated jobs carry one,
   and duplicate the same text into `<Notes>` — a verified element FFS displays — so
   the warning survives even if the comment is discarded.
@@ -238,7 +251,14 @@ have been **moved off it**: both are confirmed in the 14.10 binary.
 4. Always emit the standard macOS excludes from the verified real file.
 5. Write only into the project's `exports/` directory. Never into
    `~/Library/Application Support/FreeFileSync/`; never overwrite `LastRun.ffs_gui`.
-6. **Job layout is chosen per export**, surfaced in the UI:
+6. **The right-hand folder is left BLANK by default**, and set by the operator in
+   FreeFileSync. *(Added 2026-08-26 at the user's request: "the right side of the
+   ffs file should not have a location, we'll need to set the location manually
+   because we'll be running it on a different location than what we're scanning".)*
+   The export dialog takes an absolute path if the destination IS known, in which
+   case the job ships with it filled in; under `per-song` the song folder is
+   appended to it. See the unverified-list entry above for what is inferred here.
+7. **Job layout is chosen per export**, surfaced in the UI:
    - `single` — the **default**. One `.ffs_gui` for everything, paired at the
      archive root, with every selected path in the include filter.
    - `per-song` — one job per song folder, each pair scoped inside its song.
