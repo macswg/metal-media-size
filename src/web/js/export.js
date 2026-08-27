@@ -77,6 +77,7 @@ export function openExportDialog({ versionIds, summary }) {
   let policy = 'RecycleBin';
   let versioningFolder = localStorage.getItem('aa.versioningFolder') || '';
   let note = '';
+  let jobLayout = 'single';
   const formats = new Set(['ffs_gui', 'json', 'markdown']);
 
   const folderField = h('div.field', { hidden: true });
@@ -130,6 +131,34 @@ export function openExportDialog({ versionIds, summary }) {
       'A permanent-deletion policy is deliberately not offered by this tool and is rejected by the exporter.'),
   );
 
+  // ONE JOB OR SIXTY-FIVE. The per-song split is the more defensive shape --
+  // each job's folder pair sits inside one song, so it cannot reach the rest of
+  // the archive even in principle -- but it is also sixty-five files to open,
+  // and a human working through sixty-five near-identical jobs stops reading
+  // them. The single job is the default; the trade is stated, not hidden.
+  const layoutOpts = h('fieldset.policy', h('legend', 'FreeFileSync jobs'));
+  const layoutNodes = new Map();
+  for (const [value, title, desc, recommended] of [
+    ['single', 'One job for everything', 'A single .ffs_gui covering every file in the manifest. Its folder pair is the archive root, and the include filter is what narrows it — check the row count after Compare.', true],
+    ['per-song', 'One job per song folder', 'A separate .ffs_gui for each song, each pointed inside that song folder so it cannot see the rest of the archive. Safest, and one file to run per song.', false],
+  ]) {
+    const radio = h('input', { type: 'radio', name: 'joblayout', value, checked: value === jobLayout });
+    const opt = h(
+      `label.policy-opt${value === jobLayout ? '.on' : ''}`,
+      {
+        onClick: () => {
+          jobLayout = value;
+          radio.checked = true;
+          for (const [v, n] of layoutNodes) n.classList.toggle('on', v === value);
+        },
+      },
+      radio,
+      h('div', h('div.t', title, recommended ? h('span.tag-rec', 'recommended') : null), h('div.d', desc)),
+    );
+    layoutNodes.set(value, opt);
+    layoutOpts.appendChild(opt);
+  }
+
   const formatBox = h(
     'div.field',
     h('label', 'Manifest formats'),
@@ -165,6 +194,7 @@ export function openExportDialog({ versionIds, summary }) {
     summaryCard(versionIds, summary),
     policyOpts,
     folderField,
+    layoutOpts,
     formatBox,
     noteBox,
     problem,
@@ -191,7 +221,7 @@ export function openExportDialog({ versionIds, summary }) {
 
   reviewBtn.onclick = () => {
     dlg.close();
-    openConfirm({ versionIds, summary, policy, versioningFolder, formats: [...formats], note });
+    openConfirm({ versionIds, summary, policy, versioningFolder, formats: [...formats], note, jobLayout });
   };
 }
 
@@ -210,7 +240,7 @@ function summaryCard(versionIds, summary) {
   );
 }
 
-function openConfirm({ versionIds, summary, policy, versioningFolder, formats, note }) {
+function openConfirm({ versionIds, summary, policy, versioningFolder, formats, note, jobLayout }) {
   const lines = [
     ['Asset-versions in the manifest', count(versionIds.length)],
     ['Files those versions cover', summary.files ? count(summary.files) : 'resolved by the exporter'],
@@ -220,6 +250,12 @@ function openConfirm({ versionIds, summary, policy, versioningFolder, formats, n
     ['Deletion policy', policy === 'Versioning' ? 'Versioning → timestamped folder (reversible)' : 'Recycle Bin'],
     ...(policy === 'Versioning' ? [['Versioning folder', versioningFolder]] : []),
     ['Formats produced', formats.join(', ')],
+    [
+      'FreeFileSync jobs',
+      jobLayout === 'per-song'
+        ? 'one per song folder, each scoped to that folder'
+        : 'a single job covering everything, paired at the archive root',
+    ],
     ['Written to', 'exports/ inside this project — nowhere else'],
   ];
 
@@ -263,6 +299,7 @@ function openConfirm({ versionIds, summary, policy, versioningFolder, formats, n
       const res = await api.exportManifest({
         versionIds,
         formats,
+        jobLayout,
         deletionPolicy: policy,
         ...(policy === 'Versioning' ? { versioningFolder } : {}),
         ...(note ? { note } : {}),

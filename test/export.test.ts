@@ -25,8 +25,8 @@ import type { Database as Db } from 'better-sqlite3';
 
 import { openDb } from '../src/db/index.ts';
 import { writeExport, buildDataset, buildChunks } from '../src/export/index.ts';
-import { unescapeXml } from '../src/export/ffs.ts';
-import type { ExportVersionRow } from '../src/export/types.ts';
+import { buildRemovalGui, unescapeXml } from '../src/export/ffs.ts';
+import type { ExportChunk, ExportVersionRow } from '../src/export/types.ts';
 
 const ROOT = '/Users/Shared/ObjectMount.noindex/show-archive/SHOW_2026/00_D3_Delivery';
 const SONG_A = '010_ONE & TWO [LL180]';
@@ -211,6 +211,8 @@ describe('writeExport produces the expected artefacts', () => {
       exportsDir,
       runId: 'RUN-A',
       note: 'Reviewed with Sean on 2026-08-25.',
+      // The per-song layout is no longer the default; this test is about it.
+      jobLayout: 'per-song',
     });
 
     expect(res.files.filter((f) => f.format === 'json')).toHaveLength(1);
@@ -460,7 +462,11 @@ describe('the verdicts and totals come from computeReclaim, not from the exporte
 
 describe('chunking', () => {
   it('gives each song its own job, pointed at that song folder only', () => {
-    const d = buildDataset(db, { ...BASE_OPTS, versionIds: supersededIds() });
+    const d = buildDataset(db, {
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      jobLayout: 'per-song',
+    });
     expect(d.chunks).toHaveLength(2);
     expect(d.chunks[0]?.baseFolder).toBe(`${ROOT}/${SONG_A}`);
     expect(d.chunks[1]?.baseFolder).toBe(`${ROOT}/${SONG_B}`);
@@ -474,7 +480,7 @@ describe('chunking', () => {
   it('splits a song that is too large, never across a version boundary', () => {
     const d = buildDataset(db, { ...BASE_OPTS, versionIds: supersededIds() });
     const songA = d.selected.filter((v) => v.songFolder === SONG_A);
-    const chunks = buildChunks(songA, ROOT, 2);
+    const chunks = buildChunks(songA, ROOT, 2, 'per-song');
     expect(chunks.length).toBe(3);
     for (const c of chunks) {
       expect(c.baseFolder).toBe(`${ROOT}/${SONG_A}`);
@@ -488,26 +494,152 @@ describe('chunking', () => {
     expect(new Set(chunks.map((c) => c.guiFileName)).size).toBe(3);
   });
 
-  it('accounts for every selected path exactly once', () => {
+  it('accounts for every selected path exactly once, under either layout', () => {
+    for (const jobLayout of ['single', 'per-song'] as const) {
+      const d = buildDataset(db, { ...BASE_OPTS, versionIds: supersededIds(), jobLayout });
+      const all = d.chunks.flatMap((c) => c.relPaths).sort();
+      const expected = ['v001', 'v002', 'v002d', 'B-v001']
+        .flatMap((l) => versionPaths.get(l) as string[])
+        .sort();
+      expect(all).toEqual(expected);
+    }
+  });
+
+  it('keeps the old default reachable, and it still splits by song', () => {
+    const d = buildDataset(db, {
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      jobLayout: 'per-song',
+    });
+    expect(d.chunks).toHaveLength(2);
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+
+describe('the single-job layout', () => {
+  /**
+   * ONE `.ffs_gui` FOR THE WHOLE RUN, which is what an operator asked for after
+   * meeting sixty-five of them. The pair moves up to the archive root and the
+   * include filter is what narrows the job, so these tests pin the two things
+   * that keeps true: every pattern is anchored and carries its song folder, and
+   * the path list is still exactly the selected one.
+   */
+  it('emits exactly one job and one manifest, whatever the song count', async () => {
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-SINGLE',
+    });
+    expect(res.files.filter((f) => f.format === 'ffs_gui')).toHaveLength(1);
+    expect(res.files.filter((f) => f.format === 'ffs_manifest')).toHaveLength(1);
+    expect(res.summary.chunkCount).toBe(1);
+    // Two songs went in; one job came out, and it still knows about both.
+    expect(res.summary.songCount).toBe(2);
+  });
+
+  it('is the default, so a caller that says nothing gets one file', () => {
     const d = buildDataset(db, { ...BASE_OPTS, versionIds: supersededIds() });
-    const all = d.chunks.flatMap((c) => c.relPaths).sort();
-    const expected = ['v001', 'v002', 'v002d', 'B-v001']
-      .flatMap((l) => versionPaths.get(l) as string[])
-      .sort();
-    expect(all).toEqual(expected);
+    expect(d.chunks).toHaveLength(1);
+    expect(d.chunks[0]?.baseFolder).toBe(ROOT);
+    expect(d.chunks[0]?.basePrefix).toBe('');
+    expect(d.chunks[0]?.songFolders).toEqual([SONG_A, SONG_B].sort());
+  });
+
+  it('anchors every include at the root and keeps the song folder in it', () => {
+    const d = buildDataset(db, { ...BASE_OPTS, versionIds: supersededIds() });
+    const chunk = d.chunks[0] as ExportChunk;
+    expect(chunk.includes).toHaveLength(chunk.relPaths.length);
+    for (let i = 0; i < chunk.includes.length; i++) {
+      const inc = chunk.includes[i] as string;
+      expect(inc.startsWith('/')).toBe(true);
+      // Anchored pattern minus its slash IS the root-relative path, so the
+      // pair root plus the pattern is the file on disk.
+      expect(inc.slice(1)).toBe(chunk.relPaths[i]);
+      expect(inc.slice(1).includes('/')).toBe(true);
+    }
+  });
+
+  it('does not split on maxPathsPerChunk -- not splitting is the point', () => {
+    const d = buildDataset(db, {
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      maxPathsPerChunk: 1,
+    });
+    expect(d.chunks).toHaveLength(1);
+    expect(d.chunks[0]?.fileCount).toBeGreaterThan(1);
+  });
+
+  it('says in the job itself that the filter is the only thing narrowing it', async () => {
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-SINGLE-BANNER',
+    });
+    const gui = res.files.find((f) => f.format === 'ffs_gui')?.path as string;
+    const xml = readFileSync(gui, 'utf8');
+    expect(xml).toContain('the only one in this run');
+    expect(xml).toContain('the include filter is what narrows it');
+    // And the count the human is told to check is the real one.
+    expect(xml).toContain(`${res.summary.fileCount} file(s)`);
+  });
+
+  it('still refuses to emit a job with an empty include list', () => {
+    expect(() =>
+      buildRemovalGui(
+        {
+          index: 1,
+          songFolders: [],
+          baseFolder: ROOT,
+          basePrefix: '',
+          includes: [],
+          relPaths: [],
+          versionIds: [],
+          bytes: 0,
+          fileCount: 0,
+          guiFileName: 'removal-all.ffs_gui',
+          manifestFileName: 'removal-all.paths.txt',
+        },
+        {
+          emptyLeftFolder: '/tmp/empty',
+          deletionPolicy: 'RecycleBin',
+          versioningFolder: null,
+          manifestFileName: 'removal-all.paths.txt',
+          chunkCount: 1,
+          runId: 'RUN-EMPTY',
+          generatedAt: '2026-08-26T00:00:00Z',
+          note: null,
+        },
+      ),
+    ).toThrow(/empty include list/i);
   });
 });
 
 // ---------------------------------------------------------------------------
 
 describe('THE PATH LIST CANNOT DIVERGE', () => {
-  it('the .ffs_gui include list equals the JSON manifest equals the text manifest', async () => {
+  // The invariant is about the path list, not about how it is cut up, so it is
+  // asserted under BOTH layouts: one job at the archive root and one job per
+  // song folder resolve their patterns against different pair roots and must
+  // still land on the same absolute paths.
+  it.each([
+    ['single', 1],
+    ['per-song', 2],
+  ] as const)(
+    'the .ffs_gui include list equals the JSON manifest equals the text manifest (%s)',
+    async (jobLayout, expectedChunks) => {
     const res = await writeExport({
       ...BASE_OPTS,
       versionIds: supersededIds(),
       db,
       exportsDir,
-      runId: 'RUN-XCHECK',
+      runId: `RUN-XCHECK-${jobLayout}`,
+      jobLayout,
     });
     const json = JSON.parse(
       readFileSync(res.files.find((f) => f.format === 'json')?.path as string, 'utf8'),
@@ -526,7 +658,7 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
       };
     };
 
-    expect(json.freeFileSync.chunks).toHaveLength(2);
+    expect(json.freeFileSync.chunks).toHaveLength(expectedChunks);
     const dir = res.summary.exportDir;
     let seen = 0;
 
@@ -559,15 +691,19 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
       seen += fromXml.length;
     }
     expect(seen).toBe(res.summary.fileCount);
-  });
+    },
+  );
 
-  it('every listed path really belongs to a selected version', async () => {
+  it.each(['single', 'per-song'] as const)(
+    'every listed path really belongs to a selected version (%s)',
+    async (jobLayout) => {
     const res = await writeExport({
       ...BASE_OPTS,
       versionIds: supersededIds(),
       db,
       exportsDir,
-      runId: 'RUN-XCHECK2',
+      runId: `RUN-XCHECK2-${jobLayout}`,
+      jobLayout,
     });
     const allowed = new Set(
       ['v001', 'v002', 'v002d', 'B-v001'].flatMap((l) => versionPaths.get(l) as string[]),
@@ -578,15 +714,18 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
     const dir = res.summary.exportDir;
     for (const f of readdirSync(dir).filter((x) => x.endsWith('.ffs_gui'))) {
       const xml = readFileSync(join(dir, f), 'utf8');
-      const base = /<Right Threads="8">([\s\S]*?)<\/Right>/.exec(xml)?.[1] as string;
-      const prefix = unescapeXml(base).slice(ROOT.length + 1);
+      const base = unescapeXml(/<Right Threads="8">([\s\S]*?)<\/Right>/.exec(xml)?.[1] as string);
+      // The pair root is the song folder under 'per-song' and the scan root
+      // itself under 'single', where there is no prefix to add back.
+      const prefix = base === ROOT ? '' : `${base.slice(ROOT.length + 1)}/`;
       for (const inc of includeItemsOf(xml)) {
-        const rel = `${prefix}${inc}`;
+        const rel = `${prefix}${inc.slice(1)}`;
         expect(allowed.has(rel)).toBe(true);
         expect(forbidden.has(rel)).toBe(false);
       }
     }
-  });
+    },
+  );
 
   it('escapes the ampersand in the real song folder name and recovers it', async () => {
     const res = await writeExport({
@@ -595,6 +734,10 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
       db,
       exportsDir,
       runId: 'RUN-AMP',
+      // Per-song, so the ampersand lands in the PAIR PATH -- the case this
+      // test is named for. The single-job form puts it in the filter items
+      // instead, which the test below covers.
+      jobLayout: 'per-song',
     });
     const gui = readdirSync(res.summary.exportDir).filter((f) => f.endsWith('.ffs_gui'));
     const xml = readFileSync(join(res.summary.exportDir, gui[0] as string), 'utf8');
@@ -605,5 +748,27 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
       /&(?!amp;|lt;|gt;|quot;|apos;|#\d+;)/,
     );
     expect(includeItemsOf(xml).every((i) => i.includes('ONE & TWO [LL180]'))).toBe(true);
+  });
+
+  it('escapes the ampersand inside a single job, where it lands in the filter', async () => {
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-AMP-SINGLE',
+      jobLayout: 'single',
+    });
+    const gui = readdirSync(res.summary.exportDir).filter((f) => f.endsWith('.ffs_gui'));
+    expect(gui).toHaveLength(1);
+    const xml = readFileSync(join(res.summary.exportDir, gui[0] as string), 'utf8');
+    expect(xml.replace(/<!--[\s\S]*?-->/g, '')).not.toMatch(
+      /&(?!amp;|lt;|gt;|quot;|apos;|#\d+;)/,
+    );
+    // The song folder now rides inside every include pattern rather than in the
+    // pair path, so this is where the escaping has to hold.
+    const items = includeItemsOf(xml);
+    expect(items.some((i) => i.startsWith(`/${SONG_A}/`))).toBe(true);
+    expect(items.every((i) => i.startsWith('/'))).toBe(true);
   });
 });

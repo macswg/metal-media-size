@@ -353,6 +353,7 @@ An unknown value is a 400 (`bad_severity`).
 POST /api/export
 { versionIds: number[], formats: ('json'|'markdown'|'ffs_gui')[],
   deletionPolicy: 'Versioning'|'RecycleBin',
+  jobLayout?: 'single'|'per-song',
   versioningFolder?: string, note?: string }
 -> { files: [{ format, path, bytes }], summary: { fileCount, totalBytes } }
 ```
@@ -374,6 +375,14 @@ Returns **201**. Actual response:
 `summary.fileCount` / `totalBytes` are the **archive files the export proposes
 to move**, not the artefacts written. `summary.artifactBytes` is the artefacts.
 
+`jobLayout` decides how many FreeFileSync jobs come out. `'single'` (the
+default) emits ONE `.ffs_gui` for the whole run, paired at the archive root with
+every selected path in its include filter. `'per-song'` emits one per song
+folder, each pair scoped inside its own song so a job cannot reach the rest of
+the archive. Same path list, same reversible policies, same companion manifest
+either way; an unknown value is a 400 (`bad_job_layout`). See
+`docs/ffs-format.md`.
+
 **`files[].format` includes `'ffs_manifest'`**, which is not one of the three
 requested `formats`. Every `.ffs_gui` job ships with a companion literal-path
 manifest so a human reviews concrete paths rather than filter patterns; it is
@@ -384,6 +393,7 @@ Further validation, all 400:
 |---|---|
 | `deletion_policy_required` | `deletionPolicy` absent |
 | `deletion_policy_forbidden` | `deletionPolicy: 'Permanent'` |
+| `bad_job_layout` | `jobLayout` present and not `single` or `per-song` |
 | `bad_deletion_policy` | any other value |
 | `versioning_folder_required` | policy is `'Versioning'` with no `versioningFolder` |
 | `bad_formats` | empty, or a format outside the three |

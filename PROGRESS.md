@@ -2,6 +2,49 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — one FreeFileSync job, not thirty-seven
+
+> *"when i export a manifest i get a bunch of ffs files, but i want a single ffs
+> file that is ready to remove all the files marked for deletion"* — the user
+
+The exporter cut the removal set one job per song folder, and split a song again
+past 750 paths. A keep-1 run therefore produced 37 `.ffs_gui` files (plus 37
+companion manifests) to open one at a time.
+
+`jobLayout` is now an export option, defaulting to `'single'`: one `.ffs_gui`
+for the whole run, its folder pair at the archive root, every selected path in
+the include filter. Measured on the live index at keep-1: **one 668 KiB job
+naming all 8,091 files, 49.87 TiB, across 37 song folders**, with a 1,089 KiB
+literal-path manifest beside it.
+
+### What the layout actually trades
+
+Per-song is the more defensive shape and it stays available in the dialog: each
+pair points INSIDE one song, so a job cannot reach the rest of the archive even
+if its filter were emptied. The single job gives that up — the pair is the
+archive root and the include filter is the only thing narrowing it.
+
+Everything else is identical, and deliberately so: `Create="none"`
+`Update="none"` `Delete="right"`, a reversible deletion policy, the literal path
+manifest beside the job, the refusal to emit an empty include list. The single
+job also says its own scope out loud in the banner — that the pair is the root,
+that the filter is what narrows it, and to check the row count after Compare
+every time.
+
+That is a trade for the operator to make, not for this tool to make quietly, so
+it is a labelled choice in the export dialog with the consequence written next
+to each option.
+
+### The path-list invariant now runs under both layouts
+
+`THE PATH LIST CANNOT DIVERGE` is the suite that proves the XML filter, the JSON
+manifest, the text manifest and the Markdown all render the same array. It was
+written against song-relative patterns; it is parameterised over both layouts
+now, because the two resolve their patterns against different pair roots and
+must still land on the same absolute paths. Six new tests cover the single job
+itself, including that `maxPathsPerChunk` does not split it — not splitting is
+the whole point — and that an empty include list is still refused.
+
 ## 2026-08-26 — on a phone, the page scrolls
 
 The desktop shell is 100dvh with `overflow: hidden` and one scroller, inside

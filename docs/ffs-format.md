@@ -175,8 +175,14 @@ Safety requirements, non-negotiable:
 - `<Errors Ignore="false" Retry="0" Delay="5"/>` — stop on error, never push through.
 - Emit a companion plain-text/JSON manifest of the literal resolved paths. The human
   reviews that concrete list, not the filter patterns.
-- Chunk large sets into several files grouped by song folder, to bound blast radius
-  and keep each file reviewable.
+- Cutting the set into jobs is the operator's choice, and both shapes are emitted
+  from the same path list:
+  - **one job for the whole run** (the default) — the pair is the archive root and
+    the `<Include>` filter is the only thing narrowing it. One file to open, one
+    Compare to read. The job says so in its own banner.
+  - **one job per song folder** — the pair sits inside the song, so a job cannot
+    reach the rest of the archive even if its filter were emptied. Bounds the blast
+    radius; costs one file per song.
 - Include the standard macOS excludes from the real file above.
 - The archive mount is read-only, so FFS cannot write `sync.ffs_lock` or `.ffs_db`
   there. Emit `<DetectMovedFiles>false</DetectMovedFiles>` inside `<Synchronize>`.
@@ -232,3 +238,15 @@ have been **moved off it**: both are confirmed in the 14.10 binary.
 4. Always emit the standard macOS excludes from the verified real file.
 5. Write only into the project's `exports/` directory. Never into
    `~/Library/Application Support/FreeFileSync/`; never overwrite `LastRun.ffs_gui`.
+6. **Job layout is chosen per export**, surfaced in the UI:
+   - `single` — the **default**. One `.ffs_gui` for everything, paired at the
+     archive root, with every selected path in the include filter.
+   - `per-song` — one job per song folder, each pair scoped inside its song.
+
+   *(Added on 2026-08-26 at the user's request: "i want a single ffs file that is
+   ready to remove all the files marked for deletion". Per-song was the original
+   and only shape, and it is the more defensive of the two — but a keep-1 run
+   produced 37 jobs to open one at a time, and a human working through 37
+   near-identical jobs is a human who stops reading them. Both layouts emit the
+   same path list, the same reversible policies, the same literal-path manifest,
+   and both refuse to emit an empty include list.)*

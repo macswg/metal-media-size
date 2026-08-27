@@ -39,10 +39,20 @@ export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 export const DELETION_POLICIES = ['Versioning', 'RecycleBin'] as const;
 export type DeletionPolicy = (typeof DELETION_POLICIES)[number];
 
+/**
+ * How the removal set is cut into FreeFileSync jobs. `'single'` is one job for
+ * the whole run, which is the default; `'per-song'` is one job per song folder,
+ * each pair scoped inside its own song. Both emit the same path list and the
+ * same reversible policies -- see `JobLayout` in src/export/types.ts.
+ */
+export const JOB_LAYOUTS = ['single', 'per-song'] as const;
+export type JobLayout = (typeof JOB_LAYOUTS)[number];
+
 /** Ceiling on one export request, so a stray client cannot ask for millions. */
 const MAX_VERSION_IDS = 100_000;
 
 interface ExportBody {
+  jobLayout?: unknown;
   versionIds?: unknown;
   formats?: unknown;
   deletionPolicy?: unknown;
@@ -66,6 +76,7 @@ export interface ExportRequest {
   versioningFolder?: string;
   note?: string;
   keepN: number;
+  jobLayout?: JobLayout;
   /** Roots the writer must refuse to write into. The archive, always. */
   forbiddenRoots: string[];
   /** Test-only override of the export directory; omitted in normal operation. */
@@ -102,6 +113,17 @@ function validatePolicy(raw: unknown): DeletionPolicy {
     );
   }
   return raw as DeletionPolicy;
+}
+
+function validateJobLayout(raw: unknown): JobLayout | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw !== 'string' || !(JOB_LAYOUTS as readonly string[]).includes(raw)) {
+    throw badRequest(
+      'bad_job_layout',
+      `jobLayout must be one of: ${JOB_LAYOUTS.join(', ')}. Got ${JSON.stringify(raw)}.`,
+    );
+  }
+  return raw as JobLayout;
 }
 
 function validateFormats(raw: unknown): ExportFormat[] {
@@ -146,6 +168,7 @@ export function registerExportRoutes(app: FastifyInstance, ctx: AppContext): voi
     // including before we look at whether an exporter exists.
     const deletionPolicy = validatePolicy(body.deletionPolicy);
     const formats = validateFormats(body.formats);
+    const jobLayout = validateJobLayout(body.jobLayout);
     const versionIds = validateVersionIds(body.versionIds);
 
     let versioningFolder: string | undefined;
@@ -247,6 +270,7 @@ export function registerExportRoutes(app: FastifyInstance, ctx: AppContext): voi
       keepN,
       // The archive itself is never a legal write target, whatever else is.
       forbiddenRoots: [...ctx.cfg.allowedRoots, ctx.cfg.root],
+      ...(jobLayout === undefined ? {} : { jobLayout }),
       ...(versioningFolder === undefined ? {} : { versioningFolder }),
       ...(note === undefined ? {} : { note }),
       ...(ctx.exportsDir === undefined ? {} : { exportsDir: ctx.exportsDir }),

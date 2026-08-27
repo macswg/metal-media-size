@@ -68,11 +68,28 @@ export interface ExportAssetLadder {
 }
 
 /**
+ * How the removal set is cut into FreeFileSync jobs.
+ *
+ *   'single'   -- ONE job for the whole run. The folder pair points at the
+ *                 archive root and the include filter carries every path.
+ *                 One file to open, one Compare to read, one Sync to press.
+ *   'per-song' -- one job per song folder, each pair pointing INSIDE its own
+ *                 song, so a job physically cannot see the rest of the
+ *                 archive. Safer in the hand, and 65 files to work through.
+ *
+ * The trade is real and belongs to the operator, so it is an option rather
+ * than a decision made here. Everything else -- reversible deletion policy,
+ * `Create`/`Update` pinned to `none`, the literal path manifest beside every
+ * job, the refusal to emit an empty include list -- is identical either way.
+ */
+export type JobLayout = 'single' | 'per-song';
+
+/**
  * One `.ffs_gui` file's worth of work.
  *
- * `baseFolder` is the deepest folder that contains every path in the chunk, so
- * the FreeFileSync folder pair points at one song folder wherever possible and
- * the job physically cannot see the rest of the archive.
+ * `baseFolder` is the folder the FreeFileSync pair points at: the song folder
+ * under 'per-song', where the job cannot see the rest of the archive, and the
+ * scan root under 'single', where the include filter is what narrows it.
  */
 export interface ExportChunk {
   /** 1-based. */

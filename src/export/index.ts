@@ -59,6 +59,7 @@ import { renderMarkdown } from './markdown.ts';
 import type {
   DeletionPolicy,
   ExportArtifact,
+  JobLayout,
   ExportAssetLadder,
   ExportChunk,
   ExportDataset,
@@ -109,6 +110,17 @@ export const DEFAULT_KEEP_N = 3;
  */
 export const DEFAULT_MAX_PATHS_PER_CHUNK = 750;
 
+/**
+ * One job for the whole run unless the caller asks otherwise.
+ *
+ * The per-song layout came first and is the more defensive of the two -- each
+ * pair points inside one song, so a job cannot reach the rest of the archive
+ * even in principle. It also produced sixty-odd files to open one at a time,
+ * which is its own kind of risk: a human working through 65 near-identical
+ * jobs is a human who stops reading them.
+ */
+export const DEFAULT_JOB_LAYOUT: JobLayout = 'single';
+
 export interface WriteExportOptions {
   /** Asset-version ids to propose for removal. Required, non-empty. */
   versionIds: readonly number[];
@@ -141,6 +153,11 @@ export interface WriteExportOptions {
   /** Override the run id (and therefore the directory name). Tests only. */
   runId?: string;
   maxPathsPerChunk?: number;
+  /**
+   * `'single'` (default) emits ONE `.ffs_gui` for everything; `'per-song'`
+   * emits one per song folder. See `JobLayout`.
+   */
+  jobLayout?: JobLayout;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,19 +246,75 @@ function safeName(s: string): string {
 }
 
 /**
+ * The whole removal set as one job, with the folder pair at the scan root.
+ *
+ * The include patterns are root-relative and anchored (`/SONG/name.mov`) --
+ * the same leading-slash form the verified config uses for a root-relative
+ * filter item, and the same form the per-song layout uses against its own
+ * base. Sorted, so the file reads in archive order and two runs over the same
+ * selection produce the same bytes.
+ */
+function buildSingleChunk(selected: readonly ExportVersionRow[], root: string): ExportChunk {
+  const ordered = selected
+    .slice()
+    .sort((a, b) =>
+      a.songFolder < b.songFolder
+        ? -1
+        : a.songFolder > b.songFolder
+          ? 1
+          : a.base < b.base
+            ? -1
+            : a.base > b.base
+              ? 1
+              : ladderOrder(a, b),
+    );
+  const relPaths: string[] = [];
+  let bytes = 0;
+  for (const v of ordered) {
+    bytes += v.bytes;
+    for (const f of v.files) relPaths.push(f.relPath);
+  }
+  relPaths.sort();
+  const songFolders = [...new Set(ordered.map((v) => v.songFolder))].sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  return {
+    index: 1,
+    songFolders,
+    baseFolder: root,
+    basePrefix: '',
+    includes: relPaths.map((p) => `/${p}`),
+    relPaths,
+    versionIds: ordered.map((v) => v.versionId),
+    bytes,
+    fileCount: relPaths.length,
+    guiFileName: 'removal-all.ffs_gui',
+    manifestFileName: 'removal-all.paths.txt',
+  };
+}
+
+/**
  * Group the selected versions into `.ffs_gui`-sized chunks.
  *
- * ONE SONG FOLDER PER CHUNK. That is what makes the folder pair point at the
- * song folder rather than at the archive root, so a job cannot see — let alone
- * act on — anything outside its own song. A song large enough to exceed
- * `maxPaths` is split into several jobs over the SAME folder, always on an
- * asset-version boundary, so a version is never half-listed.
+ * UNDER `'per-song'`: ONE SONG FOLDER PER CHUNK. That is what makes the folder
+ * pair point at the song folder rather than at the archive root, so a job
+ * cannot see — let alone act on — anything outside its own song. A song large
+ * enough to exceed `maxPaths` is split into several jobs over the SAME folder,
+ * always on an asset-version boundary, so a version is never half-listed.
+ *
+ * UNDER `'single'`: one chunk for everything, the pair at the scan root, and
+ * `maxPaths` does not apply — splitting is the thing the caller asked not to
+ * happen. The include list is longer and the paths carry their song folder,
+ * but they are the SAME paths, built the same way, and the manifest beside the
+ * job still lists every one of them literally.
  */
 export function buildChunks(
   selected: readonly ExportVersionRow[],
   root: string,
   maxPaths: number,
+  layout: JobLayout = DEFAULT_JOB_LAYOUT,
 ): ExportChunk[] {
+  if (layout === 'single') return [buildSingleChunk(selected, root)];
   const bySong = new Map<string, ExportVersionRow[]>();
   for (const v of selected) {
     const list = bySong.get(v.songFolder);
@@ -512,6 +585,7 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
     selected,
     snap.root,
     opts.maxPathsPerChunk ?? DEFAULT_MAX_PATHS_PER_CHUNK,
+    opts.jobLayout ?? DEFAULT_JOB_LAYOUT,
   );
 
   // Cross-check: the chunking must account for every path exactly once.
