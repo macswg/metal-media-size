@@ -61,6 +61,32 @@ not how much of the picture each slice carries. Only summed bytes mean anything.
 fuzzy-match it — `140_RIVER_ANIMATIC_LL180` and `140_RIVER_ANIMATIC_IMAG_LL180` are
 different deliverables and merging them would be wrong.
 
+### `region0` is the whole canvas; `_proxyN` is a resolution
+Two different facts that happen to coincide here. **Confirmed by the user:**
+*"the region0 files are also proxies, but that will not always be the case. The
+region0 files are necessary for offline editing."*
+
+So they are counted separately and neither is derived from the other:
+
+- `asset_version.proxy_bytes` — bytes in files carrying a `_proxyN` token.
+- `asset_version.region0_bytes` — bytes in files whose region is 0.
+- **`region_count` counts slices, and region0 is never one of them** — with or
+  without the proxy token on the name. It used to be excluded only when it was
+  a proxy; a full-resolution `_region0` would have ranked as a playable slice
+  and let a version carrying nothing but the offline-edit copy supersede a
+  master. Excluding region0 outright is the protective direction and measured
+  as a no-op on this archive (all 2,151 region0 files here are `_proxy3`, and
+  the integration ground truth did not move by a byte).
+- Anything asking "is there a whole-canvas copy here?" — the `hasProxy` filter,
+  in the UI the **Proxy/region0** control — asks about **both**. `hasProxy=only`
+  means a whole canvas with no slices behind it, shown as **Region 0 only**.
+- The board carries a **Region 0** figure next to Retained: how much of what is
+  in view is offline-edit material. 2.175 TiB measured 2026-08-26, exactly
+  equal to the proxy subtotal — the coincidence this rule expects to outlive.
+
+Pinned by `test/region0-rule.test.ts`. The query param stays named `hasProxy`
+so saved links keep working.
+
 ### `v002d` is a SEPARATE VERSION from `v002`
 Ordering is `(ver_num, sub_letter)` with an absent letter first:
 `v002 < v002a < v002d < v002f < v003`. **Confirmed directly by the user.**

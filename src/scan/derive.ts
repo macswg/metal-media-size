@@ -40,8 +40,21 @@ export interface DerivedVersion {
   /** Subtotal of `bytes` contributed by `_proxyN` files. */
   proxyBytes: number;
   /**
-   * Distinct regions present, EXCLUDING proxy files (region0 is the
-   * whole-canvas proxy, not a region). A region-less version has 0.
+   * Subtotal of `bytes` contributed by `region0` files -- the whole-canvas
+   * copy the offline edit is cut against.
+   *
+   * SEPARATE FROM `proxyBytes` ON PURPOSE. In this archive every region0 file
+   * also carries `_proxy3`, so the two subtotals are equal to the byte. That
+   * is a fact about this delivery, not about the grammar: region0 names the
+   * whole canvas, `_proxyN` names the resolution it was rendered at, and a
+   * future delivery may ship a full-resolution region0. Deriving one from the
+   * other would quietly break on that archive, so both are counted.
+   */
+  region0Bytes: number;
+  /**
+   * Distinct regions present, EXCLUDING region0 and proxy files. Region0 is
+   * the whole canvas -- the offline-edit copy -- not one of the slices the
+   * canvas is cut into for the venue. A region-less version has 0.
    */
   regionCount: number;
   latestMtime: number;
@@ -151,6 +164,7 @@ export function deriveAssets(
         bytes: 0,
         fileCount: 0,
         proxyBytes: 0,
+        region0Bytes: 0,
         regionCount: 0,
         latestMtime: 0,
         fileIndexes: [],
@@ -163,11 +177,15 @@ export function deriveAssets(
     version.bytes += f.size;
     version.fileCount += 1;
     if (p.isProxy) version.proxyBytes += f.size;
+    if (p.region === 0) version.region0Bytes += f.size;
     if (f.mtime > version.latestMtime) version.latestMtime = f.mtime;
     version.fileIndexes.push(i);
 
-    // region0 belongs to the proxy canvas, not to the region set.
-    if (p.region !== null && !p.isProxy) {
+    // region0 is the whole canvas, not one of the slices it is cut into, so it
+    // is never a member of the region set -- with or without a `_proxyN` token
+    // on the name. The proxy test stays alongside it: a proxy is not a slice
+    // either, whatever region it claims.
+    if (p.region !== null && p.region !== 0 && !p.isProxy) {
       (regionSets.get(`${assetKey} ${vkey}`) as Set<number>).add(p.region);
     }
   }

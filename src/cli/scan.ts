@@ -37,10 +37,18 @@ async function main(): Promise<void> {
     const result = await runScan(db, cfg, { onProgress: (m) => console.log(`  ${m}`) });
 
     const { walk, derived } = result;
-    const proxyBytes = walk.files.reduce(
-      (n, f) => (/_proxy3_region0\./i.test(f.name) ? n + f.size : n),
-      0,
-    );
+    // Both subtotals, from the derivation rather than from a second reading of
+    // the names. They are the same number on this archive -- every region0
+    // file here is a `_proxy3` -- and printing them side by side is how a
+    // delivery that breaks that assumption announces itself.
+    let proxyBytes = 0;
+    let region0Bytes = 0;
+    for (const a of derived.assets) {
+      for (const v of a.versions) {
+        proxyBytes += v.proxyBytes;
+        region0Bytes += v.region0Bytes;
+      }
+    }
 
     console.log('');
     console.log(`snapshot     : ${result.snapshotId}`);
@@ -72,7 +80,8 @@ async function main(): Promise<void> {
     );
     console.log(`skipped dirs : ${walk.skipped.length}`);
     for (const s of walk.skipped) console.log(`   skipped -> ${s.path}: ${s.reason}`);
-    console.log(`proxy3_region0: ${toTiB(proxyBytes).toFixed(2)} TiB`);
+    console.log(`proxy files  : ${toTiB(proxyBytes).toFixed(2)} TiB`);
+    console.log(`region0 files: ${toTiB(region0Bytes).toFixed(2)} TiB (offline edit)`);
 
     const mov = walk.files.filter((f) => f.ext === 'mov').length;
     console.log(`.mov files   : ${mov.toLocaleString()} of ${walk.files.length.toLocaleString()}`);

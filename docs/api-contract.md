@@ -105,15 +105,15 @@ GET /api/versions?<filters>&keepN=<int>
 ```
 Row: everything in `v_asset_version`, plus per-row reclaim verdict:
 `{ versionId, assetId, songFolder, base, family, verNum, subLetter, verLabel,
-   isPatch, patchFrame, bytes, fileCount, proxyBytes, regionCount, latestMtime,
-   status: 'kept'|'superseded', keepReason: KeepReason }`
+   isPatch, patchFrame, bytes, fileCount, proxyBytes, region0Bytes, regionCount,
+   latestMtime, status: 'kept'|'superseded', keepReason: KeepReason }`
 
 `keepReason` comes straight from `computeReclaim`'s `KeepReason` union — surface
 it verbatim so the UI can explain *why* a version is kept or dropped.
 
 Sortable columns: `versionId, assetId, songFolder, base, family, verNum,
 subLetter, verLabel, isPatch, patchFrame, bytes, fileCount, proxyBytes,
-regionCount, latestMtime, status`. Default `bytes desc`. `status` is resolved in
+region0Bytes, regionCount, latestMtime, status`. Default `bytes desc`. `status` is resolved in
 JS rather than SQL, but is allowlisted like the rest.
 
 ### Version ladder for one asset
@@ -145,6 +145,7 @@ GET /api/reclaim?keepN=<int>&<filters>
   ignoredStatusFilter,   // 'kept' | 'superseded' | null — see below
   versionCount, totalFiles, keptBytes, supersededFiles,
   protectedPatchCount, reclaimProxyBytes,
+  region0Bytes,          // region0 (offline-edit) bytes across the rows in view
   archive: { reclaimBytes, supersededCount, supersededFiles,
              protectedPatchBytes, totalBytes } }
 ```
@@ -200,7 +201,7 @@ first three and version bytes for the rest.
   files: { count, totalBytes, totalTiB, unparsedCount, zeroByteCount,
            earliestMtime, latestMtime },
   songCount, assetCount, versionCount, patchVersionCount,
-  patchBytes, versionBytes, proxyBytes,
+  patchBytes, versionBytes, proxyBytes, region0Bytes,
   songFolders: string[],                     // every song folder, sorted
   extensions: string[],                      // extensions present, commonest first
   byExtension: [{ ext, count, bytes }],      // the same list with counts
@@ -414,9 +415,20 @@ orders by pixel count (`width * height`), because 8996x2584 and 3976x3248
 cannot be ordered on either axis alone; unprobed rows sort as zero.
 `/api/summary` reports `media: { probed, withDimensions, total }`.
 
-`hasProxy=only` is the third state: `proxyBytes > 0` AND `regionCount = 0` — a
-version that is nothing but its preview. Those are not deliveries of the asset
-(see the proxy-only rule), which is why they are separately selectable.
+`hasProxy` spans BOTH subtotals: `proxyBytes > 0 OR region0Bytes > 0`. Region0
+is the whole canvas and `_proxyN` is a resolution — two facts that coincide in
+this delivery and need not in the next, so the filter asks about either. The
+param keeps its name; the UI calls the control **Proxy/region0**.
+
+`hasProxy=only` is the third state: that, AND `regionCount = 0` — a version
+that is a whole canvas with nothing behind it, shown as **Region 0 only**.
+Those are not deliveries of the asset (see the proxy-only rule), which is why
+they are separately selectable.
+
+`region0Bytes` is a per-version subtotal of the bytes held in region0 files.
+`/api/reclaim` returns it summed over the rows in view (kept and superseded
+alike — it is a property of the archive, not of the keep-N verdict), and
+`/api/summary` returns it for the whole snapshot.
 
 Build these with parameterised SQL. `pathRe` must be applied in JS over a
 bounded candidate set, never interpolated into SQL.

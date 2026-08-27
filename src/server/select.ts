@@ -35,7 +35,8 @@ import {
 
 const VERSION_COLUMNS = `av.version_id, av.asset_id, av.snapshot_id, av.song_folder, av.base,
   av.family, av.ver_num, av.sub_letter, av.ver_label, av.is_patch, av.patch_frame,
-  av.bytes, av.file_count, av.proxy_bytes, av.region_count, av.latest_mtime`;
+  av.bytes, av.file_count, av.proxy_bytes, av.region0_bytes, av.region_count,
+  av.latest_mtime`;
 
 // `av.asset_id` rides along on the LEFT JOIN the file queries already carry,
 // so a file row can link straight to its asset ladder. NULL for unparsed files.

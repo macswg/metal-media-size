@@ -2,6 +2,53 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — region0 counted in its own right
+
+The board gained a **Region 0** figure beside Retained, and the proxy filter
+became the **Proxy/region0** filter. The reason the change is more than a label:
+region0 and `_proxy3` are two different facts about a file that this delivery
+happens to apply to the same 2,151 files.
+
+> *"the region0 files are also proxies, but that will not always be the case.
+> The region0 files are necessary for offline editing."* — the user
+
+So `asset_version` now carries `region0_bytes` alongside `proxy_bytes`, derived
+from the region token and not from the proxy token, and nothing derives one
+from the other. Measured on the live archive: 2.175 TiB in 2,151 region0 files,
+equal to the proxy subtotal **to the byte** — 143,359,229,135,106 bytes across
+all 60 snapshots in the integration index. That equality is what the separation
+is guarding: it is a property of this delivery, not of the grammar.
+
+### region_count now excludes region0 unconditionally
+
+It excluded region0 only when the name also carried `_proxyN`. A
+full-resolution `_region0` would therefore have counted as a playable slice,
+and a version holding nothing but the offline-edit copy could have ranked as a
+delivery and superseded a master — the exact failure the proxy-only rule exists
+to prevent, arriving through the other door.
+
+**No drift on the real archive**, as expected: every region0 file here is a
+`_proxy3`, so all 27 integration assertions pass unchanged, keep-1 included.
+The change is protective and currently inert; it stops being inert the first
+time a delivery ships a full-resolution whole canvas.
+
+### The filter is a union, and the schema migrates itself
+
+`hasProxy` now matches `proxy_bytes > 0 OR region0_bytes > 0`, and
+`hasProxy=only` means a whole canvas with no slices behind it — labelled
+**Region 0 only**, which is what it has always meant and never quite said. The
+param keeps its name so existing links and saved views keep working.
+
+Schema version 2. `openDb` adds the column and backfills it from the file rows
+already on record, so an existing index reports a real figure without a
+rescan — reporting a confident `0` would have been worse than reporting
+nothing. The backfill is the one place outside `parse.ts` that recognises a
+region token; it is a legacy path by construction, since those rows were
+written by a scanner that did not record the subtotal.
+
+Pinned by `test/region0-rule.test.ts` (10 tests: derivation, the filter union,
+and the migration).
+
 ## 2026-08-26 — snapshot 8, and the integration ground truth re-pinned
 
 The five failing integration tests were archive drift, so the fix was a fresh

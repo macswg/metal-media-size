@@ -32,10 +32,11 @@
  *   pathRe       file.rel_path (JS regex)    version has >=1 matching file
  *   family       family of the file's version (display label only)
  *   isPatch      the file's version          asset_version.is_patch
- *   hasProxy     the file's version          asset_version.proxy_bytes > 0
- *                (0|1|only)                  only = proxy_bytes > 0 AND
- *                                            region_count = 0 -- a preview
- *                                            with no slices behind it
+ *   hasProxy     the file's version          proxy_bytes > 0 OR
+ *                (0|1|only)                  region0_bytes > 0
+ *                                            only = that, AND region_count = 0
+ *                                            -- a whole-canvas copy with no
+ *                                            slices behind it
  *   status       verdict of the file's       verdict of the version at keepN
  *                version at keepN
  *   q            substring of rel_path       substring of
@@ -141,10 +142,17 @@ function boolIntParam(q: Query, key: string): 0 | 1 | undefined {
 
 /**
  * `hasProxy` is not quite a boolean. Beyond "has one" / "has none" there is a
- * third state worth filtering on: a version that is NOTHING BUT its proxy --
- * `proxy_bytes > 0` with `region_count = 0`. Those are previews, not
- * deliveries of the asset, and the reclaim policy treats them specially, so
- * being able to see exactly which versions they are matters.
+ * third state worth filtering on: a version that is NOTHING BUT its
+ * whole-canvas copy -- no `region1`..`regionN` slices behind it. Those are
+ * offline-edit material, not deliveries of the asset, and the reclaim policy
+ * treats them specially, so being able to see exactly which versions they are
+ * matters.
+ *
+ * The predicate spans BOTH `proxy_bytes` and `region0_bytes`. In this archive
+ * every region0 file is also a `_proxy3`, so the two are the same set; the
+ * grammar does not require that, and a region0 rendered at full resolution is
+ * still the offline-edit copy. The param keeps its name so existing links and
+ * saved views keep working -- the UI calls the control "Proxy/region0".
  */
 function proxyParam(q: Query): 0 | 1 | 'only' | undefined {
   const s = str(q, 'hasProxy');
@@ -458,12 +466,13 @@ export function fileWhere(snapshotId: number, f: FilterSpec): SqlWhere {
     params.push(f.isPatch);
   }
   if (f.hasProxy !== undefined) {
+    const has = '(COALESCE(av.proxy_bytes, 0) > 0 OR COALESCE(av.region0_bytes, 0) > 0)';
     parts.push(
       f.hasProxy === 'only'
-        ? 'COALESCE(av.proxy_bytes, 0) > 0 AND COALESCE(av.region_count, 0) = 0'
+        ? `${has} AND COALESCE(av.region_count, 0) = 0`
         : f.hasProxy === 1
-          ? 'COALESCE(av.proxy_bytes, 0) > 0'
-          : 'COALESCE(av.proxy_bytes, 0) = 0',
+          ? has
+          : `NOT ${has}`,
     );
   }
   if (f.q !== undefined) {
@@ -528,12 +537,13 @@ export function versionWhere(snapshotId: number, f: FilterSpec): SqlWhere {
     params.push(f.isPatch);
   }
   if (f.hasProxy !== undefined) {
+    const has = '(av.proxy_bytes > 0 OR av.region0_bytes > 0)';
     parts.push(
       f.hasProxy === 'only'
-        ? 'av.proxy_bytes > 0 AND av.region_count = 0'
+        ? `${has} AND av.region_count = 0`
         : f.hasProxy === 1
-          ? 'av.proxy_bytes > 0'
-          : 'av.proxy_bytes = 0',
+          ? has
+          : `NOT ${has}`,
     );
   }
   if (f.q !== undefined) {
@@ -585,6 +595,7 @@ export const VERSION_SORT_COLUMNS: Record<string, string> = {
   bytes: 'av.bytes',
   fileCount: 'av.file_count',
   proxyBytes: 'av.proxy_bytes',
+  region0Bytes: 'av.region0_bytes',
   regionCount: 'av.region_count',
   latestMtime: 'av.latest_mtime',
   // Resolved from the reclaim verdicts in JS, not from SQL.

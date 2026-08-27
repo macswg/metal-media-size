@@ -84,6 +84,7 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
 
     let reclaimBytes = 0;
     let reclaimProxyBytes = 0;
+    let region0Bytes = 0;
     let supersededCount = 0;
     let supersededFiles = 0;
     let protectedPatchBytes = 0;
@@ -97,6 +98,11 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
     for (const r of rows) {
       totalBytes += r.bytes;
       totalFiles += r.fileCount;
+      // Counted over every row in view, kept and superseded alike: the figure
+      // answers "how much of what I am looking at is the whole-canvas copy the
+      // offline edit needs", which is a property of the archive and not of the
+      // keep-N verdict.
+      region0Bytes += r.region0Bytes;
 
       let tally = bySongMap.get(r.songFolder);
       if (!tally) {
@@ -149,6 +155,14 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
       supersededFiles,
       protectedPatchCount,
       reclaimProxyBytes,
+      /**
+       * Bytes held in `region0` files across the rows in view -- the
+       * whole-canvas copy each version keeps for offline editing. In this
+       * archive those files are also the `_proxy3` previews; the grammar does
+       * not guarantee it, so the subtotal is counted on the region and not on
+       * the proxy token.
+       */
+      region0Bytes,
       /** Whole-snapshot totals, so the UI can show "of the archive" alongside. */
       archive: {
         reclaimBytes: whole.reclaimableBytes,

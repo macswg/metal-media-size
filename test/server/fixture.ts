@@ -379,8 +379,8 @@ function populate(
   const insertVersion = db.prepare(
     `INSERT INTO asset_version
        (asset_id, ver_num, sub_letter, is_patch, patch_frame, bytes, file_count,
-        proxy_bytes, region_count, latest_mtime, ver_label)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        proxy_bytes, region0_bytes, region_count, latest_mtime, ver_label)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertFile = db.prepare(
     `INSERT INTO file (snapshot_id, rel_path, song_folder, name, ext, size, mtime, parse_ok,
@@ -403,7 +403,10 @@ function populate(
       const sizes = ver.files.map((f) => ({ ...f, size: f.size + delta }));
       const bytes = sizes.reduce((n, f) => n + f.size, 0);
       const proxyBytes = sizes.filter((f) => f.proxy).reduce((n, f) => n + f.size, 0);
-      const regionCount = sizes.filter((f) => !f.proxy).length;
+      // Mirrors deriveAssets: region0 is the whole canvas, never a slice, with
+      // or without a proxy token on the name.
+      const region0Bytes = sizes.filter((f) => f.region === 0).reduce((n, f) => n + f.size, 0);
+      const regionCount = sizes.filter((f) => !f.proxy && f.region !== 0).length;
 
       const versionId = Number(
         insertVersion.run(
@@ -415,6 +418,7 @@ function populate(
           bytes,
           sizes.length,
           proxyBytes,
+          region0Bytes,
           regionCount,
           ver.mtime,
           ver.verLabel,

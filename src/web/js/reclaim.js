@@ -80,6 +80,10 @@ export class ReclaimStrip {
 
     this.factProtected = fact('Protected patches', 'protected');
     this.factKept = fact('Retained', 'kept');
+    // Not a keep-N figure. It says how much of what is in view is the
+    // whole-canvas region0 copy the offline edit is cut against -- material
+    // the edit needs, whatever the slider is set to.
+    this.factRegion0 = fact('Region 0', 'region0');
     this.factMatched = fact('In view', '');
 
     // On a phone the slider is a 7-stop track you drag with a thumb that
@@ -115,7 +119,13 @@ export class ReclaimStrip {
             this.slider,
             this.ticks,
           ),
-      h('div.reclaim-facts', this.factMatched.node, this.factProtected.node, this.factKept.node),
+      h(
+        'div.reclaim-facts',
+        this.factMatched.node,
+        this.factProtected.node,
+        this.factKept.node,
+        this.factRegion0.node,
+      ),
     );
 
     this.paintSliderLabel();
@@ -252,6 +262,10 @@ export class ReclaimStrip {
       r.protectedPatchVersions != null ? `${count(r.protectedPatchVersions)} live patches, never dropped` : 'live patches, never dropped',
     );
     this.factKept.set(tib(r.keptBytes ?? (r.totalBytes - r.reclaimBytes)), 'stays on the archive');
+    this.factRegion0.set(
+      r.region0Bytes != null ? fmtBytes(r.region0Bytes) : '—',
+      'whole-canvas region0 files in view — what offline editing is cut against',
+    );
   }
 }
 

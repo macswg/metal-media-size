@@ -193,12 +193,20 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .ticks span:hover { color: var(--text-2); background: var(--panel-2); }
 .ticks span.on { color: var(--accent); }
 
-.reclaim-facts { display: flex; gap: 26px; align-items: center; justify-content: flex-end; flex: 1 1 auto; }
+/* Four figures now, and the fourth is the one that may drop to a second row
+   on a narrow desktop window rather than push the strip into a scroll. */
+.reclaim-facts {
+  display: flex; gap: 10px 26px; align-items: center;
+  justify-content: flex-end; flex: 1 1 auto; flex-wrap: wrap;
+}
 .fact { text-align: right; }
 .fact .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--faint); white-space: nowrap; }
 .fact .v { font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; }
 .fact.protected .v { color: var(--patch); }
 .fact.kept .v { color: var(--kept); }
+/* Deliberately not a verdict colour: region0 is material the offline edit
+   needs, not something the keep-N slider decides about. */
+.fact.region0 .v { color: var(--accent); }
 .fact.flagged .k { color: var(--superseded); cursor: help; }
 
 /* ------------------------------------------------------------- workspace */
@@ -532,7 +540,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 13px; height: 13px;
 .lad-top .spacer { flex: 1; }
 .lad-bytes { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; }
 .lad-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 10px;
+  /* auto-fit rather than a fixed 4, so adding a figure re-flows instead of
+     leaving one cell alone on a second row. */
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 4px 10px;
   font-size: 11px; color: var(--dim); font-family: var(--mono);
 }
 .lad-grid b { display: block; color: var(--text-2); font-weight: 500; font-size: 12px; }

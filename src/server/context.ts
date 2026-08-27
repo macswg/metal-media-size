@@ -170,6 +170,7 @@ export interface VersionDbRow {
   bytes: number;
   file_count: number;
   proxy_bytes: number;
+  region0_bytes: number;
   region_count: number;
   latest_mtime: number;
 }
@@ -188,6 +189,8 @@ export interface VersionRow {
   bytes: number;
   fileCount: number;
   proxyBytes: number;
+  /** Bytes held in region0 files -- the whole-canvas offline-edit copy. */
+  region0Bytes: number;
   regionCount: number;
   latestMtime: number;
   status: 'kept' | 'superseded' | 'unknown';
@@ -212,6 +215,7 @@ export function toVersionRow(
     bytes: r.bytes,
     fileCount: r.file_count,
     proxyBytes: r.proxy_bytes,
+    region0Bytes: r.region0_bytes,
     regionCount: r.region_count,
     latestMtime: r.latest_mtime,
     status: verdict === undefined ? 'unknown' : verdict.keep ? 'kept' : 'superseded',

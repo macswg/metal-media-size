@@ -27,13 +27,19 @@
  *     the FreeFileSync bookkeeping files are counted so they are never
  *     silently invisible.
  *   asset_version.ver_label -- the version as displayed, e.g. `v008d`.
+ *   asset_version.region0_bytes -- subtotal of `bytes` held in `region0`
+ *     files, the whole-canvas copy the offline edit is cut against. Kept apart
+ *     from `proxy_bytes` because region0 says WHICH part of the canvas and
+ *     `_proxyN` says AT WHAT RESOLUTION; they coincide in this delivery and
+ *     need not in the next. Added in schema version 2, and backfilled for
+ *     snapshots scanned before it -- see `migrate` in db/index.ts.
  *   file_media -- pixel dimensions, written only by `npm run probe`. Kept out
  *     of `file` so that the insert-only guarantee on a scan's rows holds
  *     literally: a probe adds rows to its own table and edits nothing.
  * ---------------------------------------------------------------------------
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -122,7 +128,11 @@ CREATE TABLE IF NOT EXISTS asset_version (
   bytes        INTEGER NOT NULL,            -- includes proxy_bytes
   file_count   INTEGER NOT NULL,
   proxy_bytes  INTEGER NOT NULL,            -- subtotal of bytes
-  region_count INTEGER NOT NULL,            -- distinct regions, excl. proxy
+  -- Subtotal of bytes in region0 files: the whole-canvas copy kept for offline
+  -- editing. NOT the same column as proxy_bytes even though this archive's
+  -- region0 files are all proxies -- see the header note.
+  region0_bytes INTEGER NOT NULL DEFAULT 0, -- subtotal of bytes
+  region_count INTEGER NOT NULL,            -- distinct slices, excl. region0
   latest_mtime INTEGER NOT NULL,            -- epoch ms
   ver_label    TEXT    NOT NULL             -- e.g. 'v008d', 'v003 frame05259'
 );
@@ -167,7 +177,8 @@ SELECT
   a.family         AS family,
   av.ver_num, av.sub_letter, av.ver_label,
   av.is_patch, av.patch_frame,
-  av.bytes, av.file_count, av.proxy_bytes, av.region_count, av.latest_mtime
+  av.bytes, av.file_count, av.proxy_bytes, av.region0_bytes, av.region_count,
+  av.latest_mtime
 FROM asset_version av
 JOIN asset a ON a.id = av.asset_id;
 

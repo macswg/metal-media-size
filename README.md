@@ -135,8 +135,8 @@ superseded. That is what this tool works out.
   a filter panel and live running totals. Holds 26k+ rows at a constant ~1,000
   DOM nodes.
 - **Version ladder** per asset — every version oldest→newest with its rolled-up
-  size, region count, proxy subtotal and date, and a plain-English reason why it
-  is kept or superseded.
+  size, region count, proxy and region0 subtotals, date, and a plain-English
+  reason why it is kept or superseded.
 - **Keep-latest-N slider** recomputing reclaimable bytes live across whatever
   you currently have filtered. It scales to the asset with the most versions.
 - **Anomalies** — missing regions, versions with no proxy, unparsed and

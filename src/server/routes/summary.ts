@@ -80,6 +80,7 @@ export function registerSummaryRoutes(app: FastifyInstance, ctx: AppContext): vo
                 COUNT(DISTINCT asset_id) AS assets,
                 COALESCE(SUM(bytes), 0) AS bytes,
                 COALESCE(SUM(proxy_bytes), 0) AS proxy_bytes,
+                COALESCE(SUM(region0_bytes), 0) AS region0_bytes,
                 SUM(CASE WHEN is_patch = 1 THEN 1 ELSE 0 END) AS patches,
                 COALESCE(SUM(CASE WHEN is_patch = 1 THEN bytes ELSE 0 END), 0) AS patch_bytes
            FROM v_asset_version WHERE snapshot_id = ?`,
@@ -89,6 +90,7 @@ export function registerSummaryRoutes(app: FastifyInstance, ctx: AppContext): vo
       assets: number;
       bytes: number;
       proxy_bytes: number;
+      region0_bytes: number;
       patches: number;
       patch_bytes: number;
     };
@@ -159,6 +161,13 @@ export function registerSummaryRoutes(app: FastifyInstance, ctx: AppContext): vo
       patchBytes: versionTotals.patch_bytes,
       versionBytes: versionTotals.bytes,
       proxyBytes: versionTotals.proxy_bytes,
+      /**
+       * Bytes in `region0` files across the whole snapshot -- the whole-canvas
+       * copies kept for offline editing. Equal to `proxyBytes` on this archive
+       * because every region0 file here is a `_proxy3`; counted separately
+       * because that is a property of the delivery, not of the grammar.
+       */
+      region0Bytes: versionTotals.region0_bytes,
       excluded: { count: snapshot.excluded_count, bytes: snapshot.excluded_bytes },
       /**
        * How much of this snapshot has had its pixel dimensions read.

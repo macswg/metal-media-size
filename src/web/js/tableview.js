@@ -498,7 +498,8 @@ export class TableView {
         width: '78px',
         align: 'right',
         render: (row) => (row.regionCount ? count(row.regionCount) : h('span.muted', { text: '—' })),
-        tooltip: (row) => `${row.regionCount} distinct regions (the proxy is not a region)`,
+        tooltip: (row) =>
+          `${row.regionCount} distinct slices — region 0, the whole canvas, is not one of them`,
       },
       {
         key: 'bytes',

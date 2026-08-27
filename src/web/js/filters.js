@@ -209,7 +209,7 @@ export class FilterPanel {
     );
     this.paintSelectionHint();
 
-    /* ---- patch / proxy ---------------------------------------------- */
+    /* ---- patch / proxy+region0 --------------------------------------- */
     this.host.appendChild(
       group(
         'Render type',
@@ -223,19 +223,21 @@ export class FilterPanel {
           (v) => this.set('isPatch', v),
         ),
         h('div', { style: { height: '8px' } }),
-        h('span.flabel', 'Proxy'),
+        h('span.flabel', 'Proxy/region0'),
         seg(
           [
             ['', 'All'],
-            ['1', 'Has proxy'],
-            ['0', 'No proxy'],
-            ['only', 'Proxy only'],
+            ['1', 'Has proxy/region0'],
+            ['0', 'No proxy/region0'],
+            ['only', 'Region 0 only'],
           ],
           f.hasProxy,
           (v) => this.set('hasProxy', v),
           'wrap',
         ),
-        hint('Proxy only = a preview with no regions behind it — not a playable delivery.'),
+        hint(
+          'Region 0 is the whole canvas, kept for offline editing. Region 0 only = a version with nothing behind it — no slices, so not a playable delivery.',
+        ),
       ),
     );
 

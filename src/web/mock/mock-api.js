@@ -32,7 +32,7 @@ const REASONS = [
 const SORTABLE = {
   versions: new Set([
     'songFolder', 'base', 'family', 'verNum', 'verLabel', 'bytes', 'fileCount',
-    'proxyBytes', 'regionCount', 'latestMtime', 'status', 'isPatch',
+    'proxyBytes', 'region0Bytes', 'regionCount', 'latestMtime', 'status', 'isPatch',
   ]),
   files: new Set(['relPath', 'songFolder', 'name', 'ext', 'size', 'mtime', 'parseOk']),
   songs: new Set(['songFolder', 'fileCount', 'totalBytes', 'assetCount', 'versionCount', 'supersededBytes', 'latestMtime']),
@@ -89,6 +89,10 @@ export async function createMockApi() {
         bytes: v.by,
         fileCount: v.fc,
         proxyBytes: v.pb,
+        // The fixture records a proxy subtotal, not a region0 one, so this is
+        // summed from the file list -- which is what the real index does, one
+        // layer down. On this archive the two agree to the byte.
+        region0Bytes: v.fl.reduce((n, f) => (/_region0\./i.test(f[0]) ? n + f[1] : n), 0),
         regionCount: v.rc,
         latestMtime: v.mt,
         _reasons: v.r,
@@ -188,10 +192,12 @@ export async function createMockApi() {
     if (p.mtimeTo) tests.push((v) => v.latestMtime <= Number(p.mtimeTo));
     if (p.isPatch === '1' || p.isPatch === 1) tests.push((v) => v.isPatch);
     if (p.isPatch === '0' || p.isPatch === 0) tests.push((v) => !v.isPatch);
-    if (p.hasProxy === '1' || p.hasProxy === 1) tests.push((v) => v.proxyBytes > 0);
-    if (p.hasProxy === '0' || p.hasProxy === 0) tests.push((v) => v.proxyBytes === 0);
-    // 'only' = a preview with no regions behind it, never a playable delivery.
-    if (p.hasProxy === 'only') tests.push((v) => v.proxyBytes > 0 && !v.regionCount);
+    // Proxy OR region0: the same union the server applies. See query.ts.
+    const hasP = (v) => v.proxyBytes > 0 || v.region0Bytes > 0;
+    if (p.hasProxy === '1' || p.hasProxy === 1) tests.push(hasP);
+    if (p.hasProxy === '0' || p.hasProxy === 0) tests.push((v) => !hasP(v));
+    // 'only' = a whole canvas with no slices behind it, never a playable delivery.
+    if (p.hasProxy === 'only') tests.push((v) => hasP(v) && !v.regionCount);
     if (p.q) {
       const q = String(p.q).toLowerCase();
       tests.push((v) => `${v.songFolder}/${v.base} ${v.verLabel}`.toLowerCase().includes(q));
@@ -308,6 +314,7 @@ export async function createMockApi() {
       bytes: v.bytes,
       fileCount: v.fileCount,
       proxyBytes: v.proxyBytes,
+      region0Bytes: v.region0Bytes,
       regionCount: v.regionCount,
       latestMtime: v.latestMtime,
     };
@@ -413,9 +420,11 @@ export async function createMockApi() {
       let protectedPatchBytes = 0;
       let protectedPatchVersions = 0;
       let totalBytes = 0;
+      let region0Bytes = 0;
       const bySong = new Map();
       for (const v of vs) {
         totalBytes += v.bytes;
+        region0Bytes += v.region0Bytes;
         let s = bySong.get(v.songFolder);
         if (!s) bySong.set(v.songFolder, (s = { songFolder: v.songFolder, reclaimBytes: 0, supersededCount: 0, totalBytes: 0 }));
         s.totalBytes += v.bytes;
@@ -439,6 +448,7 @@ export async function createMockApi() {
         protectedPatchVersions,
         totalBytes,
         keptBytes: totalBytes - reclaimBytes,
+        region0Bytes,
         bySong: [...bySong.values()].sort((a, b) => b.reclaimBytes - a.reclaimBytes),
       };
     }
@@ -456,6 +466,7 @@ export async function createMockApi() {
         totalBytes: snap.totalBytes,
         assetCount: c.assets.length,
         versionCount: c.versions.length,
+        region0Bytes: c.versions.reduce((n, v) => n + v.region0Bytes, 0),
         songCount: songs.size,
         unparsedCount: snap.unparsedCount,
         excludedCount: snap.excludedCount,

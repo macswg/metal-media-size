@@ -33,12 +33,63 @@ export interface SnapshotRow {
   skipped_json: string | null;
 }
 
+/**
+ * Bring an index written by an older schema version up to the current one.
+ *
+ * Runs before the views, which reference the columns added here. Each step is
+ * guarded by an inspection of the live schema rather than by the recorded
+ * version number, so an index that was half-upgraded, or one built by a
+ * checkout somewhere between two versions, still converges.
+ *
+ * THIS IS THE ONE PLACE A PRIOR SNAPSHOT'S ROWS ARE WRITTEN TO. The
+ * insert-only promise is about SCANS: a scan never revisits a snapshot it did
+ * not create. A migration filling in a column that did not exist yet is not a
+ * scan and does not change what any row says -- it derives, once, a subtotal
+ * that was always true of the files already recorded.
+ */
+export function migrate(db: Db): void {
+  const columns = new Set(
+    (db.pragma('table_info(asset_version)') as { name: string }[]).map((c) => c.name),
+  );
+
+  // v1 -> v2: region0_bytes.
+  if (!columns.has('region0_bytes')) {
+    try {
+      db.exec(`ALTER TABLE asset_version ADD COLUMN region0_bytes INTEGER NOT NULL DEFAULT 0`);
+    } catch (err) {
+      // The server and a CLI pass can open the same index seconds apart, so
+      // the column may have appeared between the inspection above and here.
+      // That is the one failure worth swallowing: the other process has
+      // already done the work, and the backfill below is idempotent anyway.
+      if (!/duplicate column name/i.test(String((err as Error).message))) throw err;
+    }
+    // Backfill, so an existing index does not have to be rescanned to read the
+    // new figure -- and, more to the point, does not report a confident 0.
+    //
+    // This is the ONLY place the region token is recognised outside
+    // `parse.ts`, and it is deliberately a legacy path: these rows were
+    // written by a scanner that did not record the subtotal, so the files are
+    // all that is left to derive it from. GLOB is used rather than LIKE
+    // because LIKE's `_` is a wildcard. A snapshot scanned under a custom
+    // `parse.pattern` whose region token is spelled differently backfills as
+    // 0; rescanning it fixes that, and every scan from here on records the
+    // subtotal properly.
+    db.exec(
+      `UPDATE asset_version SET region0_bytes = (
+         SELECT COALESCE(SUM(f.size), 0) FROM file f
+          WHERE f.asset_version_id = asset_version.id
+            AND lower(f.name) GLOB '*_region0.*')`,
+    );
+  }
+}
+
 /** Open (creating if needed) the index database and ensure the schema exists. */
 export function openDb(path: string): Db {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA_SQL);
+  migrate(db);
   db.exec(VIEWS_SQL);
   db.prepare(
     `INSERT INTO schema_meta(key, value) VALUES ('schema_version', ?)
@@ -128,8 +179,8 @@ export function writeSnapshotData(
   const insertVersion = db.prepare(
     `INSERT INTO asset_version
        (asset_id, ver_num, sub_letter, is_patch, patch_frame, bytes, file_count,
-        proxy_bytes, region_count, latest_mtime, ver_label)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        proxy_bytes, region0_bytes, region_count, latest_mtime, ver_label)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const linkFile = db.prepare(`UPDATE file SET asset_version_id = ? WHERE id = ?`);
 
@@ -169,6 +220,7 @@ export function writeSnapshotData(
             v.bytes,
             v.fileCount,
             v.proxyBytes,
+            v.region0Bytes,
             v.regionCount,
             Math.round(v.latestMtime),
             verLabel(v),

@@ -178,6 +178,11 @@ export class LadderPanel {
           cell('Files', count(v.fileCount)),
           cell('Regions', v.regionCount ? count(v.regionCount) : '—'),
           cell('Proxy', v.proxyBytes ? fmtBytes(v.proxyBytes) : '—'),
+          // Same bytes as Proxy on this archive, where every region0 file is a
+          // _proxy3. Shown on its own line because that is a fact about the
+          // delivery, not about the grammar -- a full-resolution region0 would
+          // read here and not there.
+          cell('Region 0', v.region0Bytes ? fmtBytes(v.region0Bytes) : '—'),
           cell('Modified', dateTime(v.latestMtime)),
         ),
         h(
