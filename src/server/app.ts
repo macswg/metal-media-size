@@ -125,8 +125,29 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
     root: opts.webRoot ?? WEB_ROOT,
     prefix: '/',
     index: ['index.html'],
-    // No caching: the app is edited in place and reloaded during a session.
+    // The app is edited in place and reloaded during a session, so a stale
+    // asset is always a bug and never a saving.
+    //
+    // `cacheControl: false` alone does NOT say that: it only stops the plugin
+    // sending a Cache-Control header, and a response with no Cache-Control is
+    // free to be cached HEURISTICALLY -- browsers guess a lifetime from
+    // Last-Modified. That is how a redeployed ES module comes back from the
+    // browser's cache and a feature that shipped looks like it did not.
+    // `no-cache` means "store it, but revalidate every time", so the ETag
+    // still turns an unchanged file into a 304.
     cacheControl: false,
+    //
+    // Typed loosely on purpose: @fastify/static declares this callback as
+    // taking a FastifyReply, and hands it the raw ServerResponse. Set the
+    // header through whichever of the two is actually there.
+    setHeaders: (res: unknown) => {
+      const r = res as {
+        setHeader?: (k: string, v: string) => void;
+        header?: (k: string, v: string) => void;
+      };
+      if (typeof r.setHeader === 'function') r.setHeader('Cache-Control', 'no-cache');
+      else r.header?.('Cache-Control', 'no-cache');
+    },
     dotfiles: 'deny',
   });
 

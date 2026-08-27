@@ -2,6 +2,25 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-26 — a redeployed module could come back from the browser cache
+
+Found while verifying the export dialog: a headless run reported the new control
+missing from a page that was definitely serving it. The file on the wire had it;
+the browser replayed an older copy.
+
+`@fastify/static` was configured `cacheControl: false`, whose comment read "no
+caching". It does not mean that. It only stops the plugin SENDING a
+Cache-Control header, and a response with no Cache-Control may still be cached
+heuristically — browsers guess a lifetime from Last-Modified. So every redeploy
+was a race between the operator's reload and a guess.
+
+The static handler now sends `Cache-Control: no-cache`, which means "store it,
+but revalidate every time". Confirmed on the live server: the header is present
+and a conditional request still answers 304, so revalidation stays cheap.
+
+Worth keeping in mind for anything that looks shipped-but-missing on a page that
+has been open across a restart.
+
 ## 2026-08-26 — one FreeFileSync job, not thirty-seven
 
 > *"when i export a manifest i get a bunch of ffs files, but i want a single ffs
