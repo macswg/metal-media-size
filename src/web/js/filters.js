@@ -229,14 +229,14 @@ export class FilterPanel {
             ['', 'All'],
             ['1', 'Has proxy/region0'],
             ['0', 'No proxy/region0'],
-            ['only', 'Region 0 only'],
+            ['only', 'Has Region 0 only'],
           ],
           f.hasProxy,
           (v) => this.set('hasProxy', v),
           'wrap',
         ),
         hint(
-          'Region 0 is the whole canvas, kept for offline editing. Region 0 only = a version with nothing behind it — no slices, so not a playable delivery.',
+          'Region 0 is the whole canvas, kept for offline editing. Has Region 0 only = a version with nothing behind it — no slices, so not a playable delivery.',
         ),
       ),
     );

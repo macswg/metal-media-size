@@ -421,7 +421,7 @@ this delivery and need not in the next, so the filter asks about either. The
 param keeps its name; the UI calls the control **Proxy/region0**.
 
 `hasProxy=only` is the third state: that, AND `regionCount = 0` — a version
-that is a whole canvas with nothing behind it, shown as **Region 0 only**.
+that is a whole canvas with nothing behind it, shown as **Has Region 0 only**.
 Those are not deliveries of the asset (see the proxy-only rule), which is why
 they are separately selectable.
 
