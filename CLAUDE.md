@@ -80,7 +80,7 @@ So they are counted separately and neither is derived from the other:
 - Anything asking "is there a whole-canvas copy here?" — the `hasProxy` filter,
   in the UI the **Proxy/region0** control — asks about **both**. `hasProxy=only`
   means a whole canvas with no slices behind it, shown as **Region 0 only**.
-- The board carries a **Region 0s** figure next to Retained: how much of what is
+- The board carries a **REGION 0s** figure next to Retained: how much of what is
   in view is offline-edit material. 2.175 TiB measured 2026-08-26, exactly
   equal to the proxy subtotal — the coincidence this rule expects to outlive.
 

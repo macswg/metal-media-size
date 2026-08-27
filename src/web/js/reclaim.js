@@ -83,7 +83,7 @@ export class ReclaimStrip {
     // Not a keep-N figure. It says how much of what is in view is the
     // whole-canvas region0 copy the offline edit is cut against -- material
     // the edit needs, whatever the slider is set to.
-    this.factRegion0 = fact('Region 0s', 'region0');
+    this.factRegion0 = fact('Region 0s', 'region0', 'REGION 0s');
     this.factMatched = fact('In view', '');
 
     // On a phone the slider is a 7-stop track you drag with a thumb that
@@ -269,9 +269,16 @@ export class ReclaimStrip {
   }
 }
 
-function fact(label, cls) {
+/**
+ * `display` overrides the text of the key line while `label` stays the plain
+ * name used in the tooltip. It exists for one case: the keys are uppercased in
+ * CSS, and a label ending in a plural `s` comes out as REGION 0S, where the S
+ * reads as part of the figure. That one key is pre-cased here and opts out of
+ * the transform in `.fact.region0 .k`.
+ */
+function fact(label, cls, display = label) {
   const v = h('div.v', { text: '—' });
-  const k = h('div.k', { text: label });
+  const k = h('div.k', { text: display });
   const node = h(`div.fact${cls ? `.${cls}` : ''}`, { title: label }, k, v);
   return {
     node,
@@ -281,7 +288,7 @@ function fact(label, cls) {
     },
     /** Mark the figure as computed with one filter deliberately ignored. */
     flag(on) {
-      k.textContent = on ? `${label} *` : label;
+      k.textContent = on ? `${display} *` : display;
       node.classList.toggle('flagged', !!on);
     },
   };

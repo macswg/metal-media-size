@@ -207,6 +207,10 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 /* Deliberately not a verdict colour: region0 is material the offline edit
    needs, not something the keep-N slider decides about. */
 .fact.region0 .v { color: var(--accent); }
+/* The key line is uppercased for every other fact, which turns a plural into
+   REGION 0S -- the S reads as part of the number. This one arrives pre-cased
+   from reclaim.js as "REGION 0s" and keeps its lower-case plural. */
+.fact.region0 .k { text-transform: none; }
 .fact.flagged .k { color: var(--superseded); cursor: help; }
 
 /* ------------------------------------------------------------- workspace */
