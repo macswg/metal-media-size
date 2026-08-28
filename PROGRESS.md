@@ -2,6 +2,50 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the phone stopped scrolling sideways
+
+> *"adjust the columns on the per-machine tab so they fit on the screen better
+> ... I like the vertical scroll on mobile, I don't want the horizontal
+> scroll"* — the user
+
+Per-machine kept three of its nine columns on a phone, but they kept the widths
+they were given for a 1440px table: 150 + 112 + 150 = **412px on a 390px
+screen**. The table is the widest thing on the page, so that did not scroll
+inside its own box — it widened the document and took the top bar, the headline
+and the status bar off the right edge with it. Files did the same at 428px, and
+put the size column, half the reason it survived the cut, behind the swipe.
+
+Measured in a headless Chrome at 300, 320, 360, 375, 390, 428 and 760px:
+`document.scrollWidth` now equals the viewport at every one of them, in all four
+browse modes and all four tabs.
+
+**Per-machine gets its own phone layout**, `narrowMachineColumns()`, in the
+shape asset-versions already used — two lines per cell instead of more columns:
+
+```
+301  UNDERSTUDY          27.47 TiB   [====|===   ]
+r6, r7 · mirror 105, 106 10.34 TiB        99.4%
+```
+
+Identity over allocation, total over what a cleanup would free, and the drive
+meter with its reading underneath it. What went: the file count, the free
+figure, and the role and mirror columns — the meter already draws free space,
+and the mirror list moved into the second line because a machine row has
+nowhere to drill to and a tooltip is not an answer on a phone. `driveMeter()`
+takes a `stacked` option; 116px cannot hold a track and its percentage side by
+side, and a 40px track is not a bar.
+
+**Two width bugs behind it.** Columns that survive the narrow cut may now
+declare a width for that layout (`NARROW_WIDTHS`) — the path column had been
+holding 320px of a 390px screen. And the mode switcher's four labels have a
+min-content width of ~344px, which a flex container hands up to whatever sizes
+it, so below 344px the toolbar was widening the document on its own account.
+`min-width: 0` cuts that chain, and under 375px the switcher wraps into the 2x2
+block `.seg.wrap` already used in the sidebar rather than truncating labels or
+hiding Per-machine behind its own `overflow: hidden`.
+
+Nothing about the desktop layout changed.
+
 ## 2026-08-27 — "29.10 TiB as labelled" had it the wrong way round
 
 > *"Each drive holds 29.10 TiB as labelled ... The drives are actually labeled

@@ -1217,9 +1217,12 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
 
   /* ---------------------------------------------------------- table */
 
-  /* Asset-versions fits the viewport exactly (see narrowVersionColumns in
-     tableview.js), so no horizontal scroll. Files and song folders keep a
-     modest minimum and scroll sideways if they must. */
+  /* Nothing here scrolls sideways. Every mode declares a phone column set
+     that fits the viewport exactly -- see narrowVersionColumns,
+     narrowMachineColumns and NARROW_WIDTHS in tableview.js. The table is the
+     widest thing on the page, so a column set that overflows does not scroll
+     inside its own box: it widens the document and drags the top bar, the
+     headline and the status bar off the right edge with it. */
   .vt-scroller { -webkit-overflow-scrolling: touch; }
   .vt-th { padding: 8px; font-size: 10px; }
   .vt-td { font-size: 13px; padding: 0 8px; }
@@ -1257,6 +1260,27 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   }
   .stack-dot { color: var(--faint); }
   .stack-2 .cell-ver { font-family: var(--mono); color: var(--text-2); }
+  /* Per-machine: identity over allocation on the left, total over recoverable
+     on the right. The numeric stack is right-aligned as a block so the two
+     figures line up under each other rather than against the cell. */
+  .stack-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .stack-head .cell-base { overflow: hidden; text-overflow: ellipsis; }
+  .cell-role {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+    color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .stack-num { justify-items: end; text-align: right; }
+  .stack-num .stack-1 { font-family: var(--sans); font-variant-numeric: tabular-nums; }
+  .stack-num .stack-2 { font-family: var(--mono); font-size: 10px; }
+
+  /* The drive meter, stacked: the track cannot share 116px with its reading
+     and still be a bar, so the reading goes underneath it. */
+  .meter.stacked { display: grid; gap: 3px; width: 100%; }
+  .meter.stacked .meter-line { display: flex; align-items: center; gap: 5px; }
+  .meter.stacked .meter-read { justify-content: flex-end; }
+  .meter.stacked .meter-track { min-width: 0; height: 8px; }
+  .meter.stacked .meter-pct { min-width: 0; font-size: 10.5px; }
+  .meter.stacked .meter-flag { font-size: 9px; padding: 0 4px; }
   .pill.tiny {
     padding: 0 5px;
     font-size: 9.5px;
@@ -1270,6 +1294,12 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   .toolbar {
     gap: 5px;
     padding: 6px 10px;
+    /* The mode switcher's four labels have a min-content width of ~344px, and
+       a flex container hands that up to whatever sizes it -- so below ~344px
+       the toolbar was widening the whole document and taking the table's last
+       column off the right edge with it. Cut the chain here; under 360px the
+       switcher wraps to 2x2 instead (see the block after this one). */
+    min-width: 0;
   }
   .toolbar .totals { font-size: 12px; }
   .toolbar .spacer { display: none; }
@@ -1353,6 +1383,18 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   .brand-name { display: none; }
   .headline-num { font-size: 26px; }
   .headline-lead { font-size: 11.5px; }
+}
+
+/* Narrower than an iPhone SE. The four mode labels need ~344px on one line,
+   so below this they wrap into a 2x2 block -- the shape `.seg.wrap` already
+   uses in the sidebar. The alternatives were both worse: truncating gives four
+   buttons reading "Asset-ve...", and letting the row overflow hides
+   Per-machine behind the seg's own `overflow: hidden`. */
+@media (max-width: 374px) {
+  .toolbar .seg { flex-wrap: wrap; }
+  .toolbar .seg button { flex: 1 0 45%; border-bottom: 1px solid var(--line); }
+  .toolbar .seg button:nth-child(even) { border-right: 0; }
+  .toolbar .seg button:nth-last-child(-n + 2) { border-bottom: 0; }
 }
 
 /* Coarse pointers at any width: hover styling is misleading on touch, where

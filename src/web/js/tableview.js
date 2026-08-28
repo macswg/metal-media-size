@@ -442,20 +442,30 @@ export class TableView {
   static NARROW_KEYS = {
     files: ['relPath', 'size'],
     songs: ['songFolder', 'versionCount', 'totalBytes'],
-    machines: ['name', 'totalBytes', 'usedFraction'],
+  };
+
+  /**
+   * Dropping columns is not enough on its own: a kept column keeps the width
+   * it was given for the desktop, and those minimums were sized against a
+   * 1440px table. Files kept 320px of path plus 108px of size on a 390px
+   * screen, which put the size -- half the reason the column survived -- 38px
+   * behind a sideways swipe. A column that survives the cut may declare the
+   * width it should have here, and the flexible one takes what is left.
+   */
+  static NARROW_WIDTHS = {
+    files: { relPath: 'minmax(0, 1fr)', size: '92px' },
   };
 
   columns() {
     if (isNarrow()) {
       if (state.mode === 'versions') return this.narrowVersionColumns();
-      const all =
-        state.mode === 'files'
-          ? this.fileColumns()
-          : state.mode === 'machines'
-            ? this.machineColumns()
-            : this.songColumns();
+      if (state.mode === 'machines') return this.narrowMachineColumns();
+      const all = state.mode === 'files' ? this.fileColumns() : this.songColumns();
       const keep = new Set(TableView.NARROW_KEYS[state.mode] ?? []);
-      const narrow = all.filter((c) => keep.has(c.key));
+      const widths = TableView.NARROW_WIDTHS[state.mode] ?? {};
+      const narrow = all
+        .filter((c) => keep.has(c.key))
+        .map((c) => (widths[c.key] ? { ...c, width: widths[c.key] } : c));
       // Never return an empty header: if a mode grows a new key set and this
       // map falls behind, every column beats no column.
       return narrow.length ? narrow : all;
@@ -525,6 +535,90 @@ export class TableView {
         width: '92px',
         align: 'right',
         render: (row) => sizeCell(row.bytes),
+      },
+    ];
+  }
+
+  /**
+   * The phone layout for per-machine.
+   *
+   * The desktop table is nine columns and the three that survived a plain cut
+   * still asked for 412px on a 390px screen -- so the drive meter, the one
+   * thing this tab exists to show, sat behind a sideways swipe. The row folds
+   * to two lines per cell instead:
+   *
+   *     301  Understudy          13.47 TiB   [====|==   ]
+   *     r3, r4                   1.2 TiB     99.4%  OVER
+   *
+   * What is dropped is the file count, the free figure and the mirror list.
+   * The meter already draws free space, and a machine row has nowhere to drill
+   * to -- so what is left has to be the part that changes a decision: which
+   * machine, what it carries, how full it is, and what a cleanup would free.
+   */
+  narrowMachineColumns() {
+    return [
+      {
+        key: 'name',
+        label: 'Machine',
+        width: 'minmax(0, 1fr)',
+        render: (row) =>
+          h(
+            'div.stack',
+            { title: row.note || undefined },
+            h(
+              'div.stack-1.stack-head',
+              h('span.cell-base', { text: row.name }),
+              h('span.cell-role', { text: ROLE_LABELS[row.role] ?? row.role }),
+            ),
+            h(
+              'div.stack-2',
+              row.regions.length
+                ? h('span.mono', { text: row.regions.map((r) => `r${r}`).join(', ') })
+                : h('span.muted', { text: 'no regions' }),
+              // Which machine covers this one is the question asked the moment
+              // one of them fails, and a tooltip is not an answer on a phone.
+              h('span.stack-dot', { text: '·' }),
+              row.peers && row.peers.length
+                ? h('span.mono.muted', { text: `mirror ${row.peers.join(', ')}` })
+                : h('span.muted', { text: 'no mirror' }),
+            ),
+          ),
+        tooltip: (row) =>
+          `${ROLE_LABELS[row.role] ?? row.role} · ${row.regions.length ? `regions ${row.regions.join(', ')}` : 'no regions assigned'}` +
+          (row.peers && row.peers.length ? ` · mirrored on ${row.peers.join(', ')}` : ''),
+      },
+      {
+        // Total on top, what a cleanup would free underneath it, in the colour
+        // the meter uses for the same bytes. Two numbers about the same drive
+        // read as a pair; as two columns they read as a comparison.
+        key: 'totalBytes',
+        label: 'Total',
+        width: '86px',
+        align: 'right',
+        render: (row) =>
+          h(
+            'div.stack.stack-num',
+            h('div.stack-1', sizeCell(row.totalBytes)),
+            h(
+              'div.stack-2',
+              row.supersededBytes
+                ? h(
+                    'span',
+                    {
+                      style: { color: 'var(--superseded)' },
+                      title: `Removing the versions superseded at keep-${state.keepN} would free this much on ${row.name}`,
+                    },
+                    fmtBytes(row.supersededBytes),
+                  )
+                : h('span.muted', { text: 'nothing to free' }),
+            ),
+          ),
+      },
+      {
+        key: 'usedFraction',
+        label: 'Drive',
+        width: '116px',
+        render: (row) => driveMeter(row, { stacked: true }),
       },
     ];
   }
@@ -888,7 +982,7 @@ export class TableView {
  * and reachable while the drive still has bytes on it. Severity is never colour
  * alone: the critical and over states carry a word as well.
  */
-function driveMeter(row) {
+function driveMeter(row, { stacked = false } = {}) {
   const cap = row.capacityBytes || 1;
   const pctOf = (n) => `${Math.max(0, (n / cap) * 100)}%`;
   const over = row.freeBytes < 0;
@@ -913,8 +1007,19 @@ function driveMeter(row) {
   // show: a full track looks the same whether a machine just fits or does not.
   const flag = row.driveState === 'over' ? 'OVER' : null;
 
+  const track = h(
+    'div.meter-track',
+    seg('meter-kept', kept),
+    seg('meter-recover', recover),
+    seg('meter-free', free),
+    seg('meter-over', spill),
+    seg('meter-reserve', reserve - spill),
+  );
+  const pct = h('span.meter-pct', { class: `meter-pct is-${row.driveState}`, text: pctText });
+  const flagEl = flag ? h('span.meter-flag', { text: flag }) : null;
+
   return h(
-    'div.meter',
+    `div.meter${stacked ? '.stacked' : ''}`,
     {
       title:
         `${row.name}: ${fmtBytes(row.totalBytes)} on a ${fmtBytes(row.capacityBytes)} drive · ` +
@@ -925,16 +1030,12 @@ function driveMeter(row) {
           : `${fmtBytes(row.freeBytes)} free`) +
         ` · of what is there, ${fmtBytes(recover)} is recoverable at keep-${state.keepN}`,
     },
-    h(
-      'div.meter-track',
-      seg('meter-kept', kept),
-      seg('meter-recover', recover),
-      seg('meter-free', free),
-      seg('meter-over', spill),
-      seg('meter-reserve', reserve - spill),
-    ),
-    h('span.meter-pct', { class: `meter-pct is-${row.driveState}`, text: pctText }),
-    flag ? h('span.meter-flag', { text: flag }) : null,
+    // Side by side on the desktop; on a phone the track sits above its own
+    // reading, because 116px cannot hold both and a 40px-wide track is not a
+    // bar, it is a smudge.
+    stacked ? h('div.meter-line', track) : track,
+    stacked ? h('div.meter-line.meter-read', pct, flagEl) : pct,
+    stacked ? null : flagEl,
   );
 }
 
