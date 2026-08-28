@@ -2,6 +2,27 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — fullness colours, and a number that argued with its own colour
+
+> *"in the where it lands section for the percentage full numbers over 90%
+> should be red, over 75% should be yellow"* — the user
+
+Applied to both the *Full now* column and the four per-option columns, so a
+figure means the same thing wherever it appears.
+
+Doing it surfaced a contradiction. Machine 303 is at 74.5%, printed as **75%**.
+Grading the exact fraction left that cell uncoloured — the page showed a number
+sitting on the threshold and did not treat it as sitting on it. So the report
+takes the band from the value AS PRINTED, not from the underlying fraction, and
+the two can never disagree.
+
+Rounded rather than floored, so the error runs toward warning: a drive shown as
+75% is flagged at 75%. For a fullness indicator that is the safe direction.
+
+This deliberately differs from `driveState`, which the app uses and which grades
+the exact fraction — correctly, because the app prints a decimal and has no
+rounding to contradict. Noted at `pctBand`.
+
 ## 2026-08-27 — renamed to Media Allocation Analyzer
 
 > *"instead of Archive Analyser at the top left of the page put Media Allocation

@@ -303,8 +303,14 @@ tfoot td { font-weight: 700; border-top: 1px solid var(--ink); border-bottom: no
 .m-unused { background: transparent; }
 .m-reserve { background: repeating-linear-gradient(-45deg, var(--ink-faint) 0 1px, transparent 1px 4px); }
 .m-over { background: var(--warn); }
+/* A fullness figure is coloured by how full it is: amber past 75%, red past
+ * 90%, in every column that carries one. Redundant emphasis on a number that
+ * already states its own magnitude -- the reading never depends on the colour,
+ * which is what keeps it legible in greyscale print. */
 .drives .pct { font-variant-numeric: tabular-nums; }
-.drives tr.hot .pct { color: var(--warn); font-weight: 700; }
+.drives .pct.is-watch { color: var(--hold); }
+.drives .pct.is-critical,
+.drives .pct.is-over { color: var(--warn); font-weight: 700; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--ink-faint); margin: 8px 0 2px; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid var(--rule); }
@@ -435,6 +441,33 @@ function choiceTable(scenarios: readonly ExportScenario[]): string {
  * columns beside it give the rest. Anything else would have meant picking one
  * option to draw, on a page that deliberately does not pick one.
  */
+/**
+ * The colour band for a fullness figure, derived from the number AS PRINTED.
+ *
+ * The server's `driveState` grades the exact fraction, which is right for the
+ * app, where the figure is shown to a decimal. This report prints whole
+ * percentages, and 74.5% displayed as "75%" while staying uncoloured is a
+ * contradiction on the page -- the reader sees a number at the threshold that
+ * is not treated as being at it. So the band is computed from the rounded value
+ * instead, and the number and its colour can never disagree.
+ *
+ * It rounds rather than floors, so the error is toward warning: a drive shown
+ * as 75% is flagged as 75%. For a fullness indicator that is the safe
+ * direction.
+ */
+function pctBand(fraction: number): 'ok' | 'watch' | 'critical' | 'over' {
+  const shown = Math.round(fraction * 100);
+  if (shown >= 100) return 'over';
+  if (shown >= 90) return 'critical';
+  if (shown >= 75) return 'watch';
+  return 'ok';
+}
+
+/** A fullness cell: the printed percentage and the band that matches it. */
+function pctCell(fraction: number): string {
+  return `<td class="num pct is-${pctBand(fraction)}">${(fraction * 100).toFixed(0)}%</td>`;
+}
+
 function drivesSection(d: ExportDataset): string {
   const rows = d.machines;
   if (!rows.length) return '';
@@ -462,12 +495,11 @@ function drivesSection(d: ExportDataset): string {
         .map((sc) => {
           const o = m.options.find((x) => x.keepN === sc.keepN);
           if (!o) return '<td class="num">—</td>';
-          const cls = o.state === 'critical' || o.state === 'over' ? ' style="color:var(--warn)"' : '';
-          return `<td class="num pct"${cls}>${(o.remainingFraction * 100).toFixed(0)}%</td>`;
+          return pctCell(o.remainingFraction);
         })
         .join('');
 
-      return `<tr class="${m.state === 'critical' || m.state === 'over' ? 'hot' : ''}">
+      return `<tr>
         <td class="m">${esc(m.name)}</td>
         <td class="r">${esc(m.regions.join(', '))}</td>
         <td class="num">${esc(formatBytes(m.totalBytes))}</td>
@@ -477,7 +509,7 @@ function drivesSection(d: ExportDataset): string {
             unused,
           )}${seg('m-over', spill)}${seg('m-reserve', reserve)}</div>
         </td>
-        <td class="num pct">${(m.usedFraction * 100).toFixed(0)}%</td>
+        ${pctCell(m.usedFraction)}
         ${cells}
       </tr>`;
     })

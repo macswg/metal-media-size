@@ -570,6 +570,58 @@ describe('the per-machine drive section', () => {
     expect(html).toContain('must not be added up as archive');
   });
 
+  it('declares the two threshold colours', () => {
+    const html = renderReport(d);
+    expect(html).toContain('.pct.is-watch { color: var(--hold); }');
+    expect(html).toContain('.pct.is-over { color: var(--warn); font-weight: 700; }');
+  });
+
+  it('paints amber past 75% and red past 90%, wherever the figure appears', () => {
+    // The fixture's drives are all but empty, so the bands that matter are
+    // never reached by it. Set the fractions explicitly.
+    const want = [
+      { used: 0.5, opt: 0.74, usedCls: 'ok', optCls: 'ok', usedPct: '50', optPct: '74' },
+      { used: 0.8, opt: 0.75, usedCls: 'watch', optCls: 'watch', usedPct: '80', optPct: '75' },
+      { used: 0.95, opt: 0.9, usedCls: 'critical', optCls: 'critical', usedPct: '95', optPct: '90' },
+      { used: 1.2, opt: 1.0, usedCls: 'over', optCls: 'over', usedPct: '120', optPct: '100' },
+    ];
+    const staged: ExportDataset = {
+      ...d,
+      machines: want.map((w, i) => ({
+        ...(d.machines[i] as ExportDataset['machines'][number]),
+        machineId: `t${i}`,
+        name: `T${i}`,
+        usedFraction: w.used,
+        options: (d.machines[i] as ExportDataset['machines'][number]).options.map((o) => ({
+          ...o,
+          remainingFraction: w.opt,
+        })),
+      })),
+    };
+    const html = renderReport(staged);
+    for (const w of want) {
+      expect(html).toContain(`<td class="num pct is-${w.usedCls}">${w.usedPct}%</td>`);
+      expect(html).toContain(`<td class="num pct is-${w.optCls}">${w.optPct}%</td>`);
+    }
+  });
+
+  it('never prints a figure whose colour contradicts the number', () => {
+    // 74.5% displays as "75%". Grading the exact fraction would leave that cell
+    // uncoloured, so the page would show a number at the threshold that is not
+    // treated as being at it. The band is taken from what is PRINTED.
+    const staged: ExportDataset = {
+      ...d,
+      machines: [
+        {
+          ...(d.machines[0] as ExportDataset['machines'][number]),
+          usedFraction: 0.745,
+          options: [],
+        },
+      ],
+    };
+    expect(renderReport(staged)).toContain('<td class="num pct is-watch">75%</td>');
+  });
+
   it('can be left out when a caller does not want the extra pass', () => {
     const without = dataset({ includeMachines: false });
     expect(without.machines).toEqual([]);
