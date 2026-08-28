@@ -2,6 +2,64 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the columns a small window was eating
+
+> *"auto resize the columns in the data view when window is smaller, then
+> allow horiz scrolling so all data can be seen when window is smaller
+> width"* — the user
+
+In a window narrower than the table's own minimum, the right-hand columns were
+not merely squeezed — they were **gone**, with no scrollbar anywhere to reach
+them. At 900px, Per-machine drew 998px of columns into a 657px pane; Free and
+Mirrored on were painted outside the panel and clipped. Asset-versions needs
+1,322px and lost its last columns the same way at any window under ~1,600.
+
+The cause was intrinsic sizing propagating up. Every box between the table and
+the viewport was a grid with an implicit `auto` column, and an `auto` column
+sizes to the widest thing inside it — so the table's minimum width travelled up
+the chain and the SHELL grew instead of the table scrolling. `body`'s
+`overflow-x: hidden` then swallowed the difference silently. `min-width: 0` was
+already on several of those boxes and did nothing, which is the trap: a minimum
+width of zero permits a box to be shrunk, it does not stop the box reporting its
+content's minimum width upward. The clamp has to be on the track, so `.app`,
+`.workspace`, `.main`, `.panel`, `.tab-pane` and `.vt` now all carry
+`grid-template-columns: minmax(0, 1fr)`.
+
+With the chain cut, `.vt-scroller` is finally the size of the space it has and
+its `overflow: auto` does what it always said it would. Columns flex down to
+their declared minimums as the window narrows; past that the table scrolls
+sideways, inside itself, with the top bar, the headline and the status bar
+staying exactly where they are. Measured at 761, 800, 900, 1000, 1100, 1280,
+1440 and 1920px: `document.scrollWidth` equals the viewport at all of them.
+
+**Two things had to be built to make that scroll honest.**
+
+The canvas takes `contain: strict`, which clips as well as isolates, so a row
+left to overflow it would have been absent from the scrollable area rather than
+merely off-screen — the scroller would have had nothing to scroll to. So the
+minimum row width is now computed from the track list itself
+(`contentMinWidth()`) and set on the canvas: `120px` and `minmax(120px, 2fr)`
+floor at 120, a bare `1fr` floors at 0, and a column the user has dragged floors
+at the width they dragged it to.
+
+And the header is a sibling of the scroller, not a row inside it, which is what
+keeps it stuck to the top of the viewport on a phone where the PAGE scrolls. It
+therefore does not move sideways on its own, so it clips its own tracks and
+vtable.js holds its `scrollLeft` equal to the scroller's — written in the scroll
+event rather than the frame after it, or the labels slide loose from their
+columns for a frame.
+
+**A misalignment that had been there all along.** The head is a sibling of the
+scroller, so it was 11px wider than the box the rows resolve their columns in —
+the width of the vertical scrollbar — and every flexible column took a share of
+those 11px. Header cells sat up to 11px right of the column they name, worst at
+the right-hand end. The head now reserves the gutter it measures off the
+scroller, and the deltas across all nine Per-machine columns are 0 at every
+width tested.
+
+The phone layout is untouched: its column sets fit the viewport by design, so
+nothing there scrolls sideways.
+
 ## 2026-08-27 — the phone stopped scrolling sideways
 
 > *"adjust the columns on the per-machine tab so they fit on the screen better

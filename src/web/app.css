@@ -61,6 +61,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .app {
   display: grid;
   grid-template-rows: auto auto 1fr auto;
+  /* An implicit `auto` column sizes to the widest thing inside it, and the
+     table's minimum column widths are that thing -- so a window narrower than
+     the table used to widen the whole shell and let `body`'s overflow clip
+     what stuck out, with no scrollbar anywhere to reach it. `minmax(0, 1fr)`
+     pins every row of the shell to the viewport. Each box below that repeats
+     the same clamp: `min-width: 0` alone does NOT do this job, because a
+     minimum width of zero still lets a box report its content's minimum width
+     upward. The clamp has to be on the track. */
+  grid-template-columns: minmax(0, 1fr);
   height: 100vh;
   /* Dynamic viewport height: on iOS Safari 100vh is the height with the URL
      bar HIDDEN, so a 100vh shell is taller than the visible area and the
@@ -217,11 +226,11 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 
 .workspace {
   display: grid;
-  grid-template-columns: 268px 1fr;
+  grid-template-columns: 268px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
-.workspace.with-drawer { grid-template-columns: 268px 1fr 430px; }
+.workspace.with-drawer { grid-template-columns: 268px minmax(0, 1fr) 430px; }
 
 .sidebar {
   border-right: 1px solid var(--line);
@@ -230,7 +239,7 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
   padding: 0 0 40px;
 }
 
-.main { display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; }
+.main { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; }
 
 .drawer {
   border-left: 1px solid var(--line);
@@ -361,9 +370,9 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .tab.on .badge { background: var(--accent); }
 .tabs-spacer { flex: 1; }
 
-.panel { min-height: 0; display: grid; grid-template-rows: 1fr; overflow: hidden; }
+.panel { min-height: 0; display: grid; grid-template-rows: 1fr; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
 .tab-pane { display: none; min-height: 0; }
-.tab-pane.on { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.tab-pane.on { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .tab-pane.scrollpane.on { display: block; overflow-y: auto; padding: 16px 18px 60px; }
 
 /* -------------------------------------------------------------- toolbar */
@@ -380,11 +389,19 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 
 /* --------------------------------------------------------- virtual table */
 
-.vt { display: grid; grid-template-rows: auto 1fr; min-height: 0; position: relative; }
+.vt { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; }
+/* The head is a sibling of the scroller, not a row inside it, so a sideways
+   scroll of the body does not move it on its own. Its columns overflow it by
+   exactly as much as the body's do -- both resolve the same track list -- so
+   `overflow: hidden` gives it something to scroll, and vtable.js keeps its
+   scrollLeft equal to the scroller's. Doing it this way rather than putting
+   the head inside the scroller is what keeps the header stuck to the top of
+   the viewport on a phone, where the PAGE is the vertical scroller. */
 .vt-head {
   display: grid; align-items: stretch;
   background: var(--panel-2); border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 2;
+  overflow: hidden;
   user-select: none;
 }
 .vt-th {

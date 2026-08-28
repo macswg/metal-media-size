@@ -73,6 +73,9 @@ export class VirtualTable {
         // already clean. paint() then only writes, so a steady scroll never
         // forces a synchronous layout at all.
         this.scrollTopHint = this.scroller.scrollTop;
+        // Sideways: applied now, not in the frame below. A header that catches
+        // up a frame later reads as the column labels sliding loose.
+        this.syncHeadScroll();
         if (this.rafPending) return;
         this.rafPending = true;
         requestAnimationFrame(() => {
@@ -99,6 +102,7 @@ export class VirtualTable {
     if (!VirtualTable._resizeHooked) VirtualTable._resizeHooked = true;
     this._onResize = () => {
       this.viewH = 0;
+      this.syncGutter();
       // A resize is also how the layout crosses the breakpoint, which is the
       // one thing that changes which container scrolls.
       this.syncScrollMode();
@@ -180,11 +184,37 @@ export class VirtualTable {
 
   gridTemplate() {
     return this.opts.columns
-      .map((c) => {
-        const px = this.widths.get(c.key);
-        return px ? `${px}px` : c.width || '1fr';
-      })
+      .map((c) => (this.trackOf(c)))
       .join(' ');
+  }
+
+  /** The grid track for one column: a dragged pixel width wins over the declared one. */
+  trackOf(col) {
+    const px = this.widths.get(col.key);
+    return px ? `${px}px` : col.width || '1fr';
+  }
+
+  /**
+   * The narrowest the row can be drawn without a column going below what it
+   * was declared to need. Columns flex down to this as the window narrows;
+   * past it the table scrolls sideways rather than swallowing the columns on
+   * its right-hand end.
+   *
+   * It has to be computed rather than measured. The canvas takes `contain:
+   * strict`, which clips as well as isolates, so a row left to overflow it is
+   * not merely hidden but absent from the scrollable area -- the scroller
+   * would have nothing to scroll to. So the minimum is read off the track
+   * list: `120px` and `minmax(120px, 2fr)` both floor at 120, a bare `1fr`
+   * floors at 0, and a dragged column floors at the width it was dragged to.
+   */
+  contentMinWidth() {
+    let total = 0;
+    for (const col of this.opts.columns) {
+      const track = this.trackOf(col);
+      const m = /^minmax\(\s*([\d.]+)px/.exec(track) || /^([\d.]+)px$/.exec(track);
+      total += m ? Number.parseFloat(m[1]) : 0;
+    }
+    return Math.ceil(total);
   }
 
   /** Push the current template into the head and every live row. */
@@ -192,6 +222,39 @@ export class VirtualTable {
     const tpl = this.gridTemplate();
     this.headEl.style.gridTemplateColumns = tpl;
     for (const el of this.pool.values()) el.style.gridTemplateColumns = tpl;
+    // Rows are absolutely positioned against the canvas, so the canvas is what
+    // decides how wide a row may be, and therefore what the scroller has to
+    // scroll across.
+    this.canvas.style.minWidth = `${this.contentMinWidth()}px`;
+    this.syncGutter();
+    this.syncHeadScroll();
+  }
+
+  /**
+   * Keep the header aligned with a body that has been scrolled sideways.
+   * Cheap enough to call from the scroll handler: a write of a property that
+   * is already correct is a no-op, and the read is off the scroller, which the
+   * handler has just touched anyway.
+   */
+  syncHeadScroll() {
+    const sl = this.scroller.scrollLeft;
+    if (this.headEl.scrollLeft !== sl) this.headEl.scrollLeft = sl;
+  }
+
+  /**
+   * Reserve the body's vertical scrollbar on the header.
+   *
+   * The head is a sibling of the scroller, so it is 11px wider than the box
+   * the rows resolve their columns in -- and every flexible column took a
+   * share of those 11px, which is why a header cell used to sit up to 11px to
+   * the right of the column it names. Reading the gutter off the scroller
+   * covers the cases where there is none: the phone, where the page scrolls,
+   * and a table short enough not to need one.
+   */
+  syncGutter() {
+    const gutter = Math.max(0, this.scroller.offsetWidth - this.scroller.clientWidth);
+    const px = `${gutter}px`;
+    if (this.headEl.style.paddingRight !== px) this.headEl.style.paddingRight = px;
   }
 
   setColumnWidth(key, px) {
@@ -269,6 +332,9 @@ export class VirtualTable {
       );
       this.headEl.appendChild(cell);
     }
+    this.canvas.style.minWidth = `${this.contentMinWidth()}px`;
+    this.syncGutter();
+    this.syncHeadScroll();
   }
 
   /** Discard everything and refetch from offset 0. */
@@ -316,6 +382,9 @@ export class VirtualTable {
         this.total = res.total ?? (res.rows || []).length;
         this.matchedBytes = res.matchedBytes ?? null;
         this.canvas.style.height = `${this.total * this.rowHeight}px`;
+        // A result set that now needs (or no longer needs) a vertical
+        // scrollbar changes the width the rows resolve their columns in.
+        this.syncGutter();
         this.emptyEl.hidden = this.total !== 0;
         if (this.total === 0) {
           clear(this.emptyEl);
