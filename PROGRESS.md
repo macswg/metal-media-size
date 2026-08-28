@@ -2,6 +2,18 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — renamed to Media Allocation Analyzer
+
+> *"instead of Archive Analyser at the top left of the page put Media Allocation
+> Analyzer"* — the user
+
+Brand, `<title>`, the no-JavaScript fallback, the could-not-start screen and both
+launcher scripts. Spelled *Analyzer* with a z, as the user wrote it — the old
+name used the British spelling and the two should not both be in circulation.
+
+The header is 10 characters wider; checked at 1400px and at 430px, where the
+brand still fits before the CSS drops it entirely at the narrowest breakpoint.
+
 ## 2026-08-27 — the Latest column came off the per-machine table
 
 > *"what does the latest column mean on the per-machine page?"* — the user

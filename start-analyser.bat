@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 rem
-rem Archive Analyser -- start (Windows)
+rem Media Allocation Analyzer -- start (Windows)
 rem
 rem Double-click this in Explorer. It checks Node, installs dependencies the
 rem first time, starts the read-only server and opens the browser.
@@ -18,7 +18,7 @@ set URL=http://127.0.0.1:%PORT%/
 rem Explorer may start us anywhere; work from the folder holding this script.
 pushd "%~dp0"
 
-echo Archive Analyser
+echo Media Allocation Analyzer
 echo ================
 echo folder : %CD%
 echo port   : %PORT%

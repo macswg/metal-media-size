@@ -470,7 +470,7 @@ boot().catch((err) => {
     h(
       'div',
       { style: { padding: '40px', fontFamily: 'var(--sans)', color: '#dfe6ee' } },
-      h('h1', { style: { fontSize: '18px' }, text: 'Archive Analyser could not start' }),
+      h('h1', { style: { fontSize: '18px' }, text: 'Media Allocation Analyzer could not start' }),
       h('p.mono', { style: { color: '#e0703a' }, text: String(err && err.stack ? err.stack : err) }),
       h('p.muted', `API source attempted: ${apiSource()}. ${apiNote()}`),
     ),

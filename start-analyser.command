@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Archive Analyser -- start (macOS / Linux)
+# Media Allocation Analyzer -- start (macOS / Linux)
 #
 # Double-click this in Finder. It checks Node, installs dependencies the first
 # time, starts the read-only server and opens the browser.
@@ -33,7 +33,7 @@ is_our_server() {
   curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" 2>/dev/null | grep -q '"ok"'
 }
 
-say "Archive Analyser"
+say "Media Allocation Analyzer"
 say "================"
 say "folder : $(pwd)"
 say "port   : ${PORT}"
