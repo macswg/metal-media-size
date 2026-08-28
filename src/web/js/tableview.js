@@ -36,7 +36,8 @@ const ROLE_LABELS = {
   actor: 'Actor',
   understudy: 'Understudy',
   director: 'Director',
-  'director-understudy': 'Director understudy',
+  // Shortened: the full phrase is clipped by the column at any sane width.
+  'director-understudy': 'Director u/s',
 };
 
 const MODES = [
@@ -165,6 +166,8 @@ export class TableView {
       allocationSource: res.allocationSource ?? null,
       reconcile: res.reconcile ?? null,
       machineCount: res.machineCount ?? 0,
+      drive: res.drive ?? null,
+      firstRow: res.rows?.[0] ?? null,
     };
     return res;
   }
@@ -242,6 +245,33 @@ export class TableView {
     if (!meta) return;
     clear(this.hintEl);
     this.hintEl.className = 'muted';
+
+    // The meter has more than one segment, so identity may not rest on colour
+    // alone: every band is named here.
+    const swatch = (cls, label) =>
+      h('span.meter-legend', h(`i.${cls}`), h('span', { text: label }));
+    this.hintEl.append(
+      h(
+        'span',
+        { style: { display: 'inline-flex', gap: '12px', flexWrap: 'wrap', marginRight: '10px' } },
+        swatch('meter-kept', 'stays'),
+        swatch('meter-recover', 'recoverable'),
+        swatch('meter-reserve', 'reserved headroom'),
+      ),
+    );
+
+    // What the fullness figures assume, said on the page rather than left in
+    // the source: a drive sold as 32 TB holds 29.10 TiB, not 32 TiB, and the
+    // difference decides whether the fullest machine reads 94% or 86%.
+    const d = meta.drive;
+    const r0 = meta.firstRow;
+    if (d && r0) {
+      this.hintEl.append(
+        `Drives ${fmtBytes(d.defaultCapacityBytes)} (${(d.defaultCapacityBytes / 1e12).toFixed(0)} TB as labelled), ` +
+          `less ${(d.reserveFraction * 100).toFixed(0)}% headroom = ${fmtBytes(r0.usableBytes)} usable; ` +
+          'percentages are of that. ',
+      );
+    }
 
     if (meta.allocationSource === 'built-in') {
       // Not a warning: the rig is real. It is a statement of where it lives,
@@ -412,7 +442,7 @@ export class TableView {
   static NARROW_KEYS = {
     files: ['relPath', 'size'],
     songs: ['songFolder', 'versionCount', 'totalBytes'],
-    machines: ['name', 'role', 'totalBytes', 'supersededBytes'],
+    machines: ['name', 'totalBytes', 'usedFraction'],
   };
 
   columns() {
@@ -782,32 +812,44 @@ export class TableView {
       { key: 'fileCount', label: 'Files', width: '84px', align: 'right', render: (row) => count(row.fileCount) },
       { key: 'totalBytes', label: 'Total', width: '112px', align: 'right', render: (row) => sizeCell(row.totalBytes) },
       {
+        // Was 'Superseded'. On a machine row the question is not what fraction
+        // of the media is superseded, it is what a cleanup would free on THIS
+        // drive -- which is the same number under a name that says so.
         key: 'supersededBytes',
-        label: 'Superseded',
+        label: 'Recoverable',
         width: '112px',
         align: 'right',
         render: (row) =>
           row.supersededBytes
-            ? h('span', { style: { color: 'var(--superseded)' } }, sizeCell(row.supersededBytes))
+            ? h(
+                'span',
+                {
+                  style: { color: 'var(--superseded)' },
+                  title: `Removing the versions superseded at keep-${state.keepN} would free this much on ${row.name}`,
+                },
+                sizeCell(row.supersededBytes),
+              )
             : h('span.muted', { text: '—' }),
       },
       {
-        key: 'share',
-        label: 'Share superseded',
-        width: 'minmax(120px, 1fr)',
-        sortable: false,
-        render: (row) => {
-          const pct = row.totalBytes ? (row.supersededBytes / row.totalBytes) * 100 : 0;
-          return h(
-            'div',
-            {
-              style: { display: 'flex', alignItems: 'center', gap: '7px', width: '100%' },
-              title: `${pct.toFixed(1)}% of what this machine holds is superseded at keep-${state.keepN}`,
-            },
-            h('div.bar', { style: { flex: '1' } }, h('i', { style: { width: `${Math.min(100, pct)}%` } })),
-            h('span.mono.muted', { style: { fontSize: '11px', minWidth: '38px', textAlign: 'right' }, text: `${pct.toFixed(0)}%` }),
-          );
-        },
+        key: 'usedFraction',
+        label: 'Drive',
+        width: 'minmax(150px, 1.3fr)',
+        render: (row) => driveMeter(row),
+      },
+      {
+        key: 'freeBytes',
+        label: 'Free',
+        width: '104px',
+        align: 'right',
+        render: (row) =>
+          row.freeBytes >= 0
+            ? h('span', { title: `${fmtBytes(row.usableBytes)} usable of a ${fmtBytes(row.capacityBytes)} drive` }, sizeCell(row.freeBytes))
+            : h(
+                'span',
+                { style: { color: 'var(--warn)' }, title: 'Past the reserved headroom' },
+                `−${fmtBytes(-row.freeBytes)}`,
+              ),
       },
       {
         // On a fully mirrored rig `sharedBytes` equals `totalBytes` on every
@@ -831,6 +873,65 @@ export class TableView {
       { key: 'latestMtime', label: 'Latest', width: '96px', align: 'right', render: (row) => fmtDate(row.latestMtime) },
     ];
   }
+}
+
+/**
+ * One machine's drive, drawn as the whole drive rather than as a percentage.
+ *
+ * The track IS the capacity, so the reserved headroom is a visible slice of it
+ * instead of a number quietly taken off the top: you can see the part you are
+ * not allowed to fill. The used portion is split into what stays after a
+ * cleanup and what a cleanup would free, which is the second question a person
+ * looking at a full drive immediately asks.
+ *
+ * The percentage beside it is of USABLE space, not of the drive, so 100% means
+ * "into the reserve" rather than "physically full" -- the line worth flagging,
+ * and reachable while the drive still has bytes on it. Severity is never colour
+ * alone: the critical and over states carry a word as well.
+ */
+function driveMeter(row) {
+  const cap = row.capacityBytes || 1;
+  const pctOf = (n) => `${Math.max(0, (n / cap) * 100)}%`;
+  const over = row.freeBytes < 0;
+
+  // Segments are fractions of the DRIVE. When a machine is into its reserve the
+  // overflow is drawn in the reserve's place, so the bar still totals the drive
+  // and the encroachment is where you would look for it.
+  const kept = Math.max(0, row.keptBytes);
+  const recover = Math.max(0, row.supersededBytes);
+  const free = Math.max(0, row.freeBytes);
+  const reserve = Math.max(0, row.reserveBytes);
+  const spill = over ? Math.min(-row.freeBytes, reserve) : 0;
+
+  const seg = (cls, bytes) =>
+    bytes > 0 ? h(`span.${cls}`, { style: { width: pctOf(bytes) } }) : null;
+
+  const pctText = `${(row.usedFraction * 100).toFixed(row.usedFraction >= 1 ? 0 : 1)}%`;
+  const flag = row.driveState === 'over' ? 'OVER' : row.driveState === 'critical' ? 'FULL' : null;
+
+  return h(
+    'div.meter',
+    {
+      title:
+        `${row.name}: ${fmtBytes(row.totalBytes)} on a ${fmtBytes(row.capacityBytes)} drive · ` +
+        `${fmtBytes(row.usableBytes)} usable after a ${fmtBytes(row.reserveBytes)} reserve · ` +
+        `${pctText} of usable · ` +
+        (over
+          ? `${fmtBytes(-row.freeBytes)} INTO the reserve`
+          : `${fmtBytes(row.freeBytes)} free`) +
+        ` · of what is there, ${fmtBytes(recover)} is recoverable at keep-${state.keepN}`,
+    },
+    h(
+      'div.meter-track',
+      seg('meter-kept', kept),
+      seg('meter-recover', recover),
+      seg('meter-free', free),
+      seg('meter-over', spill),
+      seg('meter-reserve', reserve - spill),
+    ),
+    h('span.meter-pct', { class: `meter-pct is-${row.driveState}`, text: pctText }),
+    flag ? h('span.meter-flag', { text: flag }) : null,
+  );
 }
 
 /** What the status bar needs to total a selection without a round trip. */

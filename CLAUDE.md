@@ -244,6 +244,20 @@ understudies"*. 206 holds one slice (r2) exactly as every other actor holds one.
 is not a guess and the UI must not disclaim it as one. It becomes `'config'`
 when `config/machines.json` is read.
 
+**A 32 TB drive holds 29.10 TiB, not 32 TiB.** `DEFAULT_DRIVE_CAPACITY_BYTES` is
+`32_000_000_000_000` — the decimal figure a manufacturer labels, confirmed with
+the user. This is the most consequential constant in the view: at 32 TiB the
+fullest machine reads 85.8% and looks comfortable, at the real capacity it reads
+94.4% and does not. A test pins it against `32 * 1024 ** 4`.
+
+`DEFAULT_DRIVE_RESERVE_FRACTION` (5%, also confirmed) is held back before
+anything is called full. **Fullness percentages are of USABLE space**, so `over`
+means "into the reserve" rather than "physically full" — reachable while the
+drive still has bytes on it, and the line worth flagging. 301 sits at 99.4%.
+Capacity and reserve are separate constants rather than one usable figure, so
+the meter can draw the headroom as a visible part of the drive instead of
+silently shrinking it.
+
 ### `family` is a display label
 Never use it to classify anything as removable.
 

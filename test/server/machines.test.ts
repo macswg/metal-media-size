@@ -31,7 +31,11 @@ import type { AppContext } from '../../src/server/context.ts';
 import { makeFixture, type Fixture } from './fixture.ts';
 import { buildMachineRows, type MachineRow } from '../../src/server/routes/machines.ts';
 import {
+  DEFAULT_DRIVE_CAPACITY_BYTES,
+  DEFAULT_DRIVE_RESERVE_FRACTION,
   DEFAULT_MACHINES,
+  driveState,
+  usableBytesOf,
   MachineConfigError,
   machinePeers,
   machinesByRegion,
@@ -307,6 +311,90 @@ describe('when a region is held by more than one machine', () => {
     expect(rows.get('a')?.sharedBytes).toBe(R1 + R2);
     expect(rows.get('b')?.sharedBytes).toBe(R2);
     expect(rows.get('edit')?.sharedBytes).toBe(R1);
+  });
+});
+
+// ===========================================================================
+describe('how full the drive is', () => {
+  const ALL: MachineSpec[] = [{ id: 'all', name: 'All', role: 'actor', regions: [0, 1, 2, 9] }];
+
+  it('reads 32 TB as the label it is: decimal, not 32 TiB', () => {
+    // The single most consequential constant in this view. 32 TiB would make
+    // every machine read ~9 points emptier than it is, and the fullest one look
+    // comfortable when it is not.
+    expect(DEFAULT_DRIVE_CAPACITY_BYTES).toBe(32_000_000_000_000);
+    expect(DEFAULT_DRIVE_CAPACITY_BYTES).not.toBe(32 * 1024 ** 4);
+    expect(DEFAULT_DRIVE_CAPACITY_BYTES / 1024 ** 4).toBeCloseTo(29.1, 1);
+  });
+
+  it('holds back the reserve before calling anything full', () => {
+    expect(DEFAULT_DRIVE_RESERVE_FRACTION).toBe(0.05);
+    expect(usableBytesOf()).toBe(30_400_000_000_000);
+    expect(usableBytesOf(1000, 0.1)).toBe(900);
+  });
+
+  it('grades fullness against usable space, not against the raw drive', () => {
+    // 'over' therefore means "into the reserve", which is reachable while the
+    // drive still has bytes left -- and is the line worth flagging.
+    expect(driveState(0, 1000)).toBe('ok');
+    expect(driveState(749, 1000)).toBe('ok');
+    expect(driveState(750, 1000)).toBe('watch');
+    expect(driveState(899, 1000)).toBe('watch');
+    expect(driveState(900, 1000)).toBe('critical');
+    expect(driveState(999, 1000)).toBe('critical');
+    expect(driveState(1000, 1000)).toBe('over');
+    expect(driveState(1200, 1000)).toBe('over');
+  });
+
+  it('splits what is on the drive into what stays and what a cleanup frees', () => {
+    const row = rowsOf(ALL).get('all') as MachineRow;
+    expect(row.keptBytes + row.supersededBytes).toBe(row.totalBytes);
+    expect(row.keptBytes).toBeGreaterThan(0);
+  });
+
+  it('reports free space and fullness against the usable figure', () => {
+    const row = rowsOf(ALL).get('all') as MachineRow;
+    expect(row.capacityBytes).toBe(DEFAULT_DRIVE_CAPACITY_BYTES);
+    expect(row.reserveBytes).toBe(row.capacityBytes - row.usableBytes);
+    expect(row.usableBytes).toBe(usableBytesOf());
+    expect(row.freeBytes).toBe(row.usableBytes - row.totalBytes);
+    expect(row.usedFraction).toBeCloseTo(row.totalBytes / row.usableBytes, 12);
+    expect(row.driveState).toBe('ok');
+  });
+
+  it('honours a per-machine drive size', () => {
+    const rows = rowsOf([{ ...(ALL[0] as MachineSpec), capacityBytes: 200_000 }]);
+    const row = rows.get('all') as MachineRow;
+    expect(row.capacityBytes).toBe(200_000);
+    expect(row.usableBytes).toBe(190_000);
+  });
+
+  it('reports how far PAST the headroom a full machine is, rather than clamping', () => {
+    // A drive exactly at its reserve and one 1.2 TiB beyond it are not the same
+    // situation, and a clamped zero would say they were.
+    const rows = rowsOf([
+      { id: 'tiny', name: 'Tiny', role: 'actor', regions: [1], capacityBytes: 1_000 },
+    ]);
+    const row = rows.get('tiny') as MachineRow;
+    expect(row.driveState).toBe('over');
+    expect(row.freeBytes).toBeLessThan(0);
+    expect(row.freeBytes).toBe(row.usableBytes - row.totalBytes);
+    expect(row.usedFraction).toBeGreaterThan(1);
+  });
+
+  it('refuses a drive size that is not a positive number of bytes', () => {
+    expect(() =>
+      validateMachines([{ id: 'm1', name: 'One', role: 'actor', regions: [1], capacityBytes: 0 }]),
+    ).toThrow(MachineConfigError);
+    expect(() =>
+      validateMachines([{ id: 'm1', name: 'One', role: 'actor', regions: [1], capacityBytes: -5 }]),
+    ).toThrow(MachineConfigError);
+  });
+
+  it('states its assumptions in the response', async () => {
+    const { body } = await get('/api/machines?keepN=3');
+    expect(body.drive.defaultCapacityBytes).toBe(DEFAULT_DRIVE_CAPACITY_BYTES);
+    expect(body.drive.reserveFraction).toBe(DEFAULT_DRIVE_RESERVE_FRACTION);
   });
 });
 

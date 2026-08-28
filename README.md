@@ -150,8 +150,11 @@ superseded. That is what this tool works out.
   by design and the view states the duplication rather than presenting them as
   shares of a total. The rig is 14 actors (one slice each), 7 understudies (two
   each) and two director machines on region 0, so every byte is stored twice:
-  133.29 TiB allocated, 266.59 TiB across the rig. The allocation lives in
-  `src/machines.ts` and will move to a config file.
+  133.29 TiB allocated, 266.59 TiB across the rig. Each row carries a drive
+  meter — what stays after a cleanup, what a cleanup would free, unused space
+  and the reserved headroom, drawn as one 32 TB drive — so a machine that is
+  nearly full is visible at a glance. The allocation lives in `src/machines.ts`
+  and will move to a config file.
 - **Snapshots** — every scan is retained and two can be diffed. The archive is
   live, so this matters. Old snapshots can be removed from the index.
 - **Exports** — a shareable HTML report, JSON, Markdown, and a FreeFileSync

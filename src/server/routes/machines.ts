@@ -53,10 +53,15 @@ import {
 import { selectFilesFiltered } from '../select.ts';
 import { makeParser } from '../../scan/parse.ts';
 import {
+  DEFAULT_DRIVE_CAPACITY_BYTES,
+  DEFAULT_DRIVE_RESERVE_FRACTION,
+  driveState,
   machinePeers,
   machinesByRegion,
   resolveMachines,
+  usableBytesOf,
   type AllocationSource,
+  type DriveState,
   type MachineRole,
   type MachineSpec,
 } from '../../machines.ts';
@@ -84,6 +89,29 @@ export interface MachineRow {
    */
   peers: string[];
   latestMtime: number | null;
+
+  // --- the drive ---------------------------------------------------------
+  /** The whole drive, as labelled. 32 TB means 32e12 bytes, not 32 TiB. */
+  capacityBytes: number;
+  /** Held back for filesystem overhead and working headroom. */
+  reserveBytes: number;
+  /** `capacityBytes` minus `reserveBytes`: what content may actually use. */
+  usableBytes: number;
+  /**
+   * What stays on this machine once the superseded versions are cleaned up.
+   * `totalBytes` minus `supersededBytes`, precomputed so the meter's segments
+   * come from the server rather than being re-derived per row in the browser.
+   */
+  keptBytes: number;
+  /**
+   * Usable space left. NEGATIVE when the machine is into its reserve, which is
+   * reported rather than clamped -- a drive 1.2 TiB past its headroom and a
+   * drive exactly at it are not the same situation.
+   */
+  freeBytes: number;
+  /** `totalBytes / usableBytes`. Can exceed 1. */
+  usedFraction: number;
+  driveState: DriveState;
 }
 
 /** Bytes that reach no machine, split by why. */
@@ -121,6 +149,9 @@ const SORT_COLUMNS = [
   'machineId',
   'name',
   'role',
+  'usedFraction',
+  'freeBytes',
+  'capacityBytes',
   'fileCount',
   'totalBytes',
   'supersededBytes',
@@ -129,8 +160,17 @@ const SORT_COLUMNS = [
   'latestMtime',
 ];
 
-function emptyRow(m: MachineSpec, peers: string[]): MachineRow {
+function emptyRow(m: MachineSpec, peers: string[], reserveFraction: number): MachineRow {
+  const capacityBytes = m.capacityBytes ?? DEFAULT_DRIVE_CAPACITY_BYTES;
+  const usable = usableBytesOf(capacityBytes, reserveFraction);
   return {
+    capacityBytes,
+    reserveBytes: capacityBytes - usable,
+    usableBytes: usable,
+    keptBytes: 0,
+    freeBytes: usable,
+    usedFraction: 0,
+    driveState: 'ok',
     machineId: m.id,
     name: m.name,
     role: m.role,
@@ -163,11 +203,14 @@ export function buildMachineRows(
   filters: FilterSpec,
   keepN: number,
   machines: readonly MachineSpec[],
+  reserveFraction: number = DEFAULT_DRIVE_RESERVE_FRACTION,
 ): MachineBreakdown {
   const byRegion = machinesByRegion(machines);
   const peers = machinePeers(machines);
   const rows = new Map<string, MachineRow>();
-  for (const m of machines) rows.set(m.id, emptyRow(m, peers.get(m.id) ?? []));
+  for (const m of machines) {
+    rows.set(m.id, emptyRow(m, peers.get(m.id) ?? [], reserveFraction));
+  }
 
   const parse = makeParser(ctx.cfg.parse.pattern, ctx.cfg.parse.flags);
 
@@ -242,6 +285,16 @@ export function buildMachineRows(
   reconcile.duplicatedBytes = perMachineBytes - reconcile.allocatedBytes;
   reconcile.unallocatedRegions = [...orphanRegions].sort((a, b) => a - b);
 
+  // The drive figures, once the bytes are known. `usedBytes` is `totalBytes`:
+  // what the machine has to hold is everything allocated to it, superseded or
+  // not -- the media is on the drive until somebody removes it.
+  for (const row of rows.values()) {
+    row.keptBytes = row.totalBytes - row.supersededBytes;
+    row.freeBytes = row.usableBytes - row.totalBytes;
+    row.usedFraction = row.usableBytes > 0 ? row.totalBytes / row.usableBytes : 0;
+    row.driveState = driveState(row.totalBytes, row.usableBytes);
+  }
+
   return { rows: [...rows.values()], reconcile };
 }
 
@@ -281,6 +334,11 @@ export function registerMachineRoutes(app: FastifyInstance, ctx: AppContext): vo
        */
       allocationSource: source satisfies AllocationSource,
       machineCount: machines.length,
+      /** Stated so the UI can show what the fullness figures assume. */
+      drive: {
+        defaultCapacityBytes: DEFAULT_DRIVE_CAPACITY_BYTES,
+        reserveFraction: DEFAULT_DRIVE_RESERVE_FRACTION,
+      },
       reconcile,
       ...listed,
     };

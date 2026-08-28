@@ -55,6 +55,11 @@ export interface MachineSpec {
   regions: number[];
   /** Free text, shown beside the row. */
   note?: string;
+  /**
+   * Drive size in bytes, when this machine differs from the rig default.
+   * Omitted means `DEFAULT_DRIVE_CAPACITY_BYTES`.
+   */
+  capacityBytes?: number;
 }
 
 /**
@@ -130,6 +135,61 @@ export const DEFAULT_MACHINES: readonly MachineSpec[] = Object.freeze([
   { id: '307', name: '307', role: 'director-understudy', regions: [0] },
 ] as MachineSpec[]);
 
+/**
+ * -----------------------------------------------------------------------------
+ *  DRIVE CAPACITY
+ * -----------------------------------------------------------------------------
+ *
+ * A drive sold as "32 TB" holds 32,000,000,000,000 bytes, which is 29.10 TiB --
+ * NOT 32 TiB. That is a 10% difference and it lands squarely on the answer this
+ * view exists to give: at 32 TiB the fullest machine reads 85.8% and looks
+ * comfortable; at the real 29.10 TiB it reads 94.4% and does not. **Confirmed
+ * with the user: 32 TB is the label**, so the decimal figure is what is stored.
+ *
+ * Not all of it is available for content -- filesystem overhead, and the working
+ * headroom a volume needs to stay healthy. `DEFAULT_DRIVE_RESERVE_FRACTION` is
+ * held back before anything is called full, also at the user's word.
+ *
+ * Both are stated as constants rather than folded into one "usable" number, so
+ * the UI can draw the reserve as a distinct part of the drive rather than
+ * silently shrinking it.
+ */
+
+/** 32 TB as a manufacturer labels it: decimal, not 32 TiB. */
+export const DEFAULT_DRIVE_CAPACITY_BYTES = 32_000_000_000_000;
+
+/** Held back for filesystem overhead and working headroom. */
+export const DEFAULT_DRIVE_RESERVE_FRACTION = 0.05;
+
+/**
+ * How full a drive has to be before the view stops being neutral about it.
+ *
+ * These are fractions of USABLE space, not of the raw drive, so `over` means
+ * "into the reserve" rather than "physically full" -- which is the line worth
+ * warning about, and it is reachable while the drive still has bytes left.
+ */
+export const DRIVE_WATCH_FRACTION = 0.75;
+export const DRIVE_CRITICAL_FRACTION = 0.9;
+
+export type DriveState = 'ok' | 'watch' | 'critical' | 'over';
+
+export function driveState(usedBytes: number, usable: number): DriveState {
+  if (usable <= 0) return 'over';
+  const f = usedBytes / usable;
+  if (f >= 1) return 'over';
+  if (f >= DRIVE_CRITICAL_FRACTION) return 'critical';
+  if (f >= DRIVE_WATCH_FRACTION) return 'watch';
+  return 'ok';
+}
+
+/** Bytes actually available for content on a drive of `capacity`. */
+export function usableBytesOf(
+  capacity: number = DEFAULT_DRIVE_CAPACITY_BYTES,
+  reserveFraction: number = DEFAULT_DRIVE_RESERVE_FRACTION,
+): number {
+  return Math.floor(capacity * (1 - reserveFraction));
+}
+
 export class MachineConfigError extends Error {}
 
 /**
@@ -171,6 +231,12 @@ export function validateMachines(specs: readonly MachineSpec[]): void {
           `Machine ${m.id}: region ${JSON.stringify(r)} is not a non-negative integer.`,
         );
       }
+    }
+    if (m.capacityBytes !== undefined && (!Number.isFinite(m.capacityBytes) || m.capacityBytes <= 0)) {
+      throw new MachineConfigError(
+        `Machine ${m.id}: capacityBytes must be a positive number of bytes, got ` +
+          `${JSON.stringify(m.capacityBytes)}.`,
+      );
     }
     if (new Set(m.regions).size !== m.regions.length) {
       throw new MachineConfigError(

@@ -2,6 +2,55 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — how full each drive is, and 301 is nearly out
+
+> *"each machine has a 32TB drive, so show me how full the drive is with a
+> graph ... we'll need some padding on the drive full indicator"* — the user
+>
+> *"the superseded and share superceded columns are confusing"* — the user
+
+Both, and they turned out to be the same change.
+
+### A 32 TB drive holds 29.10 TiB
+
+The most consequential decision here was a unit. A drive sold as 32 TB holds
+32,000,000,000,000 bytes — 29.10 TiB, not 32 TiB — and the 10% gap lands
+squarely on the answer this view exists to give:
+
+    machine 301 at 27.47 TiB     on 32 TiB   →  85.8%   looks fine
+                                 on 32 TB    →  94.4%   does not
+
+Both readings were put to the user with the numbers attached; the decimal label
+was confirmed, along with 5% headroom. So the fullest machine reads **99.4% of
+usable with 183.90 GiB free**, and it is the one row anybody needs to see.
+Pinned by a test asserting the constant is not `32 * 1024 ** 4`.
+
+Capacity and reserve are kept as separate constants rather than collapsed into
+one usable figure, so the meter can draw the headroom as a visible slice of the
+drive rather than quietly shrinking it.
+
+### The confusing columns were the answer to the graph
+
+`Superseded` and `Share superseded` were the reclaim framing carried over from
+the Song folders table. On a machine row the question is not what fraction of
+the media is superseded, it is how full the drive is and what a cleanup would
+buy — so the percentage bar was replaced outright by the drive meter, and the
+byte column renamed **Recoverable**, which is the same number under a name that
+says what it is for. A **Free** column was added beside it.
+
+The meter is the whole drive, not a percentage: what stays after a cleanup, what
+a cleanup would free, unused space, then the reserved headroom. Four bands, one
+mark, and it answers both questions.
+
+Per the dataviz guidance: values in text tokens, a 2px surface gap between
+adjacent fills so two similar segments do not read as one, and — since the bar
+carries more than one series — a legend, because identity may not rest on colour
+alone. The severity states carry a word (`FULL`, `OVER`) as well as a colour.
+
+The reserve is 5% of the drive, which is a few pixels wide. Hatching it in a
+neighbouring grey made it invisible, so "free" and "may not be used" looked
+identical; it is tinted as well as hatched now.
+
 ## 2026-08-27 — the real rig, and it stores everything twice
 
 The user supplied the allocation region-first (*"r1 is on 101 and 207, r2 is on

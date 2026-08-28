@@ -609,6 +609,49 @@ table.grid tr:hover td { background: #1a212b; }
 .bar { height: 6px; border-radius: 3px; background: var(--panel-3); overflow: hidden; }
 .bar > i { display: block; height: 100%; background: var(--superseded); }
 
+/* --------------------------------------------------------- drive meter
+ * The whole track is one machine's DRIVE, so the reserve is drawn as part of
+ * it rather than quietly subtracted -- you can see the headroom you are not
+ * allowed to fill. Segments left to right: what stays after a cleanup, what a
+ * cleanup would free, unused space, then the reserve.
+ *
+ * A 2px gap separates adjacent fills so two segments of similar size do not
+ * read as one, and the reserve is hatched as well as dimmed so it survives
+ * greyscale and colour-blind viewing. */
+.meter { display: flex; align-items: center; gap: 8px; width: 100%; }
+.meter-track {
+  flex: 1; height: 9px; border-radius: 3px; overflow: hidden;
+  background: var(--panel-3); display: flex; min-width: 60px;
+}
+.meter-track > span { display: block; height: 100%; }
+.meter-track > span + span { border-left: 2px solid var(--panel); }
+.meter-kept { background: var(--kept); }
+.meter-recover { background: var(--superseded); }
+.meter-free { background: transparent; }
+/* The reserve is only 5% of the drive -- a few pixels -- so it is tinted as
+ * well as hatched. A stripe in a neighbouring grey was invisible at this size,
+ * which made "free" and "may not be used" look identical. */
+.meter-reserve {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(224, 112, 58, 0.55) 0 2px,
+    rgba(224, 112, 58, 0.16) 2px 4px
+  );
+}
+.meter-over { background: var(--warn); }
+.meter-pct {
+  font-family: var(--mono); font-size: 11px; min-width: 42px; text-align: right;
+  color: var(--text-2);
+}
+.meter-pct.is-watch { color: var(--superseded); }
+.meter-pct.is-critical, .meter-pct.is-over { color: var(--warn); }
+.meter-flag {
+  font-family: var(--sans); font-size: 9.5px; font-weight: 700; letter-spacing: 0.4px;
+  padding: 0 4px; border-radius: 7px; background: var(--warn); color: var(--bg);
+}
+.meter-legend { display: inline-flex; align-items: center; gap: 5px; }
+.meter-legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
 /* ---------------------------------------------------------------- modal */
 
 .modal-backdrop {
