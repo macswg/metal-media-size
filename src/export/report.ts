@@ -442,6 +442,19 @@ function choiceTable(scenarios: readonly ExportScenario[]): string {
  * option to draw, on a page that deliberately does not pick one.
  */
 /**
+ * A drive's size the way it is written on the drive: decimal TB.
+ *
+ * `formatBytes` gives TiB, which is the honest unit for everything else in this
+ * report but is the wrong one for a LABEL -- nobody has a drive with "29.10
+ * TiB" printed on it. Saying "29.10 TiB as labelled" put the two the wrong way
+ * round and was the confusing part.
+ */
+function driveLabel(bytes: number): string {
+  const tb = bytes / 1e12;
+  return `${Number.isInteger(tb) ? tb.toFixed(0) : tb.toFixed(1)} TB`;
+}
+
+/**
  * The colour band for a fullness figure, derived from the number AS PRINTED.
  *
  * The server's `driveState` grades the exact fraction, which is right for the
@@ -515,15 +528,32 @@ function drivesSection(d: ExportDataset): string {
     })
     .join('');
 
-  const headline = hot.length
-    ? `<strong>${n(hot.length)} machine${hot.length === 1 ? '' : 's'} ${
-        hot.length === 1 ? 'is' : 'are'
-      } at or past ${
-        hot.length === 1 ? 'its' : 'their'
-      } usable limit — ${hot
-        .map((m) => `${esc(m.name)} at ${(m.usedFraction * 100).toFixed(0)}%`)
-        .join(', ')}.</strong> The columns on the right show what each option above would bring ${
-        hot.length === 1 ? 'it' : 'them'
+  // 'past its limit' is only true at 100%. A machine at 99% is nearly out of
+  // room, which is a different sentence, and the earlier wording overstated it.
+  const past = rows.filter((m) => pctBand(m.usedFraction) === 'over');
+  const near = rows.filter((m) => pctBand(m.usedFraction) === 'critical');
+  const list = (ms: ExportMachineFill[]) =>
+    ms.map((m) => `${esc(m.name)} at ${(m.usedFraction * 100).toFixed(0)}%`).join(', ');
+
+  const claims: string[] = [];
+  if (past.length) {
+    claims.push(
+      `<strong>${n(past.length)} machine${past.length === 1 ? ' is' : 's are'} past ${
+        past.length === 1 ? 'its' : 'their'
+      } usable limit — ${list(past)}.</strong>`,
+    );
+  }
+  if (near.length) {
+    claims.push(
+      `<strong>${n(near.length)} machine${near.length === 1 ? ' is' : 's are'} nearly full — ${list(
+        near,
+      )}.</strong>`,
+    );
+  }
+  const affected = past.length + near.length;
+  const headline = claims.length
+    ? `${claims.join(' ')} The columns on the right show what each option above would bring ${
+        affected === 1 ? 'it' : 'them'
       } back to.`
     : 'No machine is close to its usable limit today.';
 
@@ -531,9 +561,11 @@ function drivesSection(d: ExportDataset): string {
     <h2>Where it lands: the playback machines</h2>
     <p class="small muted" style="margin-top:0">
       ${headline}
-      Each drive holds ${esc(formatBytes(first.capacityBytes))} as labelled, of which
-      ${esc(formatBytes(first.reserveBytes))} is kept back as working headroom, leaving
-      ${esc(formatBytes(first.usableBytes))} for content — every percentage here is of that.
+      Each drive is labelled <strong>${esc(driveLabel(first.capacityBytes))}</strong>, which is
+      ${esc(formatBytes(first.capacityBytes))} of real capacity;
+      ${esc(formatBytes(first.reserveBytes))} of that is kept back as working headroom, leaving
+      <strong>${esc(formatBytes(first.usableBytes))}</strong> for content — every percentage here
+      is of that.
     </p>
     <div class="legend">
       <span><i class="m-stay"></i>stays under the most aggressive option</span>

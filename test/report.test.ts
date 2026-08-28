@@ -570,6 +570,34 @@ describe('the per-machine drive section', () => {
     expect(html).toContain('must not be added up as archive');
   });
 
+  it('describes a drive by the size printed on it, not by the derived figure', () => {
+    // "29.10 TiB as labelled" had the two the wrong way round: nobody has a
+    // drive with 29.10 TiB printed on it. The label is decimal TB; TiB is what
+    // that works out to, and the sentence has to say so in that order.
+    const html = renderReport(d);
+    expect(html).toContain('labelled <strong>32 TB</strong>');
+    expect(html).toContain('of real capacity');
+    expect(html).not.toContain('as labelled');
+  });
+
+  it('says a machine is past its limit only when it actually is', () => {
+    // 99% is nearly full, not past the limit. Only 100% of usable is past it.
+    const stage = (usedFraction: number): ExportDataset => ({
+      ...d,
+      machines: [{ ...(d.machines[0] as ExportDataset['machines'][number]), name: 'X', usedFraction, options: [] }],
+    });
+    const nearly = renderReport(stage(0.99));
+    expect(nearly).toContain('1 machine is nearly full — X at 99%');
+    expect(nearly).not.toContain('past its usable limit');
+
+    const past = renderReport(stage(1.04));
+    expect(past).toContain('1 machine is past its usable limit — X at 104%');
+    expect(past).not.toContain('nearly full');
+
+    const fine = renderReport(stage(0.4));
+    expect(fine).toContain('No machine is close to its usable limit today.');
+  });
+
   it('declares the two threshold colours', () => {
     const html = renderReport(d);
     expect(html).toContain('.pct.is-watch { color: var(--hold); }');

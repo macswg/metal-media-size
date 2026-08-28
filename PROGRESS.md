@@ -2,6 +2,35 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — "29.10 TiB as labelled" had it the wrong way round
+
+> *"Each drive holds 29.10 TiB as labelled ... The drives are actually labeled
+> as 32TiB"* — the user
+
+Nobody has a drive with **29.10 TiB** printed on it. The label is decimal TB and
+the TiB figure is what that works out to; the sentence stated the derived number
+as the labelled one, which is precisely the confusion the unit causes in the
+first place. Now:
+
+> Each drive is labelled **32 TB**, which is 29.10 TiB of real capacity; 1.46
+> TiB of that is kept back as working headroom, leaving **27.65 TiB** for
+> content — every percentage here is of that.
+
+The capacity itself did NOT change. The correction read as though it might —
+"actually labeled as 32TiB" would mean 32 TiB of capacity, moving 301 from 99%
+to 90% and dropping 303 and 304 out of amber entirely — so it was put back to
+the user with both sets of figures. Confirmed: 32 TB decimal stands, the wording
+was the whole of the problem.
+
+### A second thing wrong in the same paragraph
+
+*"1 machine is at or past its usable limit — 301 at 99%."* 99% is not at or past
+anything; only 100% of usable is. The headline now separates the two bands it
+was conflating — **past its usable limit** for `over`, **nearly full** for
+`critical` — and reports each only when there is something in it. A machine one
+percentage point from the line does not need the sentence overstated to be
+alarming.
+
 ## 2026-08-27 — fullness colours, and a number that argued with its own colour
 
 > *"in the where it lands section for the percentage full numbers over 90%
