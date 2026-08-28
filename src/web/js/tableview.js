@@ -31,6 +31,14 @@ const TICK_TIP_KEPT =
   'The policy is keeping this version at the current keep-N, so it is not in ' +
   'the manifest. A version that is being kept cannot be added by hand.';
 
+/** Display names for MachineSpec.role, mirroring ROLE_LABELS in src/machines.ts. */
+const ROLE_LABELS = {
+  actor: 'Actor',
+  understudy: 'Understudy',
+  director: 'Director',
+  'director-understudy': 'Director understudy',
+};
+
 const MODES = [
   ['versions', 'Asset-versions'],
   ['files', 'Files'],
@@ -186,13 +194,33 @@ export class TableView {
     const noun = (NOUNS[state.mode] ?? NOUNS.versions)[one ? 0 : 1];
     clear(this.totalsEl);
     this.hintEl.className = 'muted';
-    this.totalsEl.append(
-      h('b', { text: count(this.total) }),
-      ` ${noun}`,
-      h('span.sep', '·'),
-      h('b', { text: this.matchedBytes == null ? '—' : fmtBytes(this.matchedBytes) }),
-      ' matched',
-    );
+
+    // In every other mode the rows partition the media, so summing their bytes
+    // gives what is in view. Machine rows OVERLAP -- on a mirrored rig every
+    // byte appears twice -- so that sum is not "matched", it is what the rig
+    // stores. Showing it under the same word would be a straightforward
+    // misstatement of how big the archive is.
+    const r = state.mode === 'machines' ? this.machineMeta?.reconcile : null;
+    if (r) {
+      this.totalsEl.append(
+        h('b', { text: count(this.total) }),
+        ` ${noun}`,
+        h('span.sep', '·'),
+        h('b', { text: fmtBytes(r.allocatedBytes) }),
+        ' allocated',
+        h('span.sep', '·'),
+        h('b', { text: fmtBytes(r.allocatedBytes + r.duplicatedBytes) }),
+        ' stored across the rig',
+      );
+    } else {
+      this.totalsEl.append(
+        h('b', { text: count(this.total) }),
+        ` ${noun}`,
+        h('span.sep', '·'),
+        h('b', { text: this.matchedBytes == null ? '—' : fmtBytes(this.matchedBytes) }),
+        ' matched',
+      );
+    }
     if (state.mode === 'machines') this.paintMachineNote();
     this.paintSelectAll();
   }
@@ -215,21 +243,21 @@ export class TableView {
     clear(this.hintEl);
     this.hintEl.className = 'muted';
 
-    if (meta.allocationSource === 'placeholder') {
-      this.hintEl.append(
-        h('b', { style: { color: 'var(--warn, #c2410c)' }, text: 'Placeholder allocation. ' }),
-        'These machine names and their regions are invented — the byte totals are real, ' +
-          'but the rig they describe is not. Replace DEFAULT_MACHINES in src/machines.ts. ',
-      );
+    if (meta.allocationSource === 'built-in') {
+      // Not a warning: the rig is real. It is a statement of where it lives,
+      // because it cannot be changed from this screen.
+      this.hintEl.append('Allocation is compiled in (src/machines.ts). ');
     }
 
     const r = meta.reconcile;
     if (!r) return;
     const bits = [];
     if (r.duplicatedBytes > 0) {
+      const times = r.allocatedBytes ? (r.allocatedBytes + r.duplicatedBytes) / r.allocatedBytes : 1;
       bits.push(
-        `${fmtBytes(r.duplicatedBytes)} is held by more than one machine, so these rows ` +
-          'overlap and do not sum to the archive',
+        `${fmtBytes(r.duplicatedBytes)} is held by more than one machine — the rig stores ` +
+          `${times.toFixed(2)}× what the archive holds, so these rows overlap and do not sum ` +
+          'to it',
       );
     } else {
       bits.push('no region is held by two machines, so these rows happen not to overlap');
@@ -384,7 +412,7 @@ export class TableView {
   static NARROW_KEYS = {
     files: ['relPath', 'size'],
     songs: ['songFolder', 'versionCount', 'totalBytes'],
-    machines: ['name', 'totalBytes', 'supersededBytes'],
+    machines: ['name', 'role', 'totalBytes', 'supersededBytes'],
   };
 
   columns() {
@@ -736,6 +764,12 @@ export class TableView {
           ),
       },
       {
+        key: 'role',
+        label: 'Role',
+        width: 'minmax(96px, 0.7fr)',
+        render: (row) => h('span', { text: ROLE_LABELS[row.role] ?? row.role }),
+      },
+      {
         key: 'regions',
         label: 'Regions',
         width: 'minmax(90px, 0.7fr)',
@@ -776,14 +810,23 @@ export class TableView {
         },
       },
       {
-        key: 'sharedBytes',
-        label: 'Also elsewhere',
-        width: '112px',
-        align: 'right',
+        // On a fully mirrored rig `sharedBytes` equals `totalBytes` on every
+        // row, so a column of it would just restate Total. What is actually
+        // wanted is WHICH machine covers this one -- the question asked when
+        // one of them fails. The byte figure rides along as the tooltip so the
+        // arithmetic is still reachable.
+        key: 'peers',
+        label: 'Mirrored on',
+        width: 'minmax(100px, 0.8fr)',
+        sortable: false,
         render: (row) =>
-          row.sharedBytes
-            ? h('span', { title: 'Held by at least one other machine as well' }, sizeCell(row.sharedBytes))
-            : h('span.muted', { text: '—' }),
+          row.peers && row.peers.length
+            ? h('span.mono', {
+                style: { fontSize: '11.5px' },
+                title: `${fmtBytes(row.sharedBytes)} of this machine's media is also held elsewhere`,
+                text: row.peers.join(', '),
+              })
+            : h('span.muted', { text: 'nothing covers it' }),
       },
       { key: 'latestMtime', label: 'Latest', width: '96px', align: 'right', render: (row) => fmtDate(row.latestMtime) },
     ];

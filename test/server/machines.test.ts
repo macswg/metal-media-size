@@ -33,6 +33,7 @@ import { buildMachineRows, type MachineRow } from '../../src/server/routes/machi
 import {
   DEFAULT_MACHINES,
   MachineConfigError,
+  machinePeers,
   machinesByRegion,
   resolveMachines,
   validateMachines,
@@ -78,9 +79,9 @@ function reconcileOf(machines: MachineSpec[], keepN = 3) {
 
 // ===========================================================================
 describe('the allocation config', () => {
-  it('accepts the built-in placeholder and reports it as one', () => {
+  it('accepts the built-in rig and reports where it came from', () => {
     const { machines, source } = resolveMachines();
-    expect(source).toBe('placeholder');
+    expect(source).toBe('built-in');
     expect(machines).toHaveLength(DEFAULT_MACHINES.length);
     expect(() => validateMachines(machines)).not.toThrow();
   });
@@ -96,37 +97,37 @@ describe('the allocation config', () => {
     // silently resolve to whichever the map happened to keep.
     expect(() =>
       validateMachines([
-        { id: 'm1', name: 'One', regions: [1] },
-        { id: 'm1', name: 'Also one', regions: [2] },
+        { id: 'm1', name: 'One', role: 'actor', regions: [1] },
+        { id: 'm1', name: 'Also one', role: 'actor', regions: [2] },
       ]),
     ).toThrow(MachineConfigError);
   });
 
   it('refuses a region listed twice on one machine', () => {
     // Within ONE machine a repeat is never an overlap, it is double-counting.
-    expect(() => validateMachines([{ id: 'm1', name: 'One', regions: [1, 1] }])).toThrow(
+    expect(() => validateMachines([{ id: 'm1', name: 'One', role: 'actor', regions: [1, 1] }])).toThrow(
       /lists a region twice/,
     );
   });
 
   it('refuses a region that is not a non-negative integer', () => {
-    expect(() => validateMachines([{ id: 'm1', name: 'One', regions: [-1] }])).toThrow(
+    expect(() => validateMachines([{ id: 'm1', name: 'One', role: 'actor', regions: [-1] }])).toThrow(
       MachineConfigError,
     );
-    expect(() => validateMachines([{ id: 'm1', name: 'One', regions: [1.5] }])).toThrow(
+    expect(() => validateMachines([{ id: 'm1', name: 'One', role: 'actor', regions: [1.5] }])).toThrow(
       MachineConfigError,
     );
   });
 
   it('allows a machine that carries nothing yet', () => {
     // A spare in the rig. Reporting it at zero is more use than dropping it.
-    expect(() => validateMachines([{ id: 'spare', name: 'Spare', regions: [] }])).not.toThrow();
+    expect(() => validateMachines([{ id: 'spare', name: 'Spare', role: 'actor', regions: [] }])).not.toThrow();
   });
 
   it('maps a region to every machine holding it', () => {
     const byRegion = machinesByRegion([
-      { id: 'a', name: 'A', regions: [1, 2] },
-      { id: 'b', name: 'B', regions: [2] },
+      { id: 'a', name: 'A', role: 'actor', regions: [1, 2] },
+      { id: 'b', name: 'B', role: 'actor', regions: [2] },
     ]);
     expect(byRegion.get(1)?.map((m) => m.id)).toEqual(['a']);
     expect(byRegion.get(2)?.map((m) => m.id)).toEqual(['a', 'b']);
@@ -135,11 +136,86 @@ describe('the allocation config', () => {
 });
 
 // ===========================================================================
+describe('the rig as configured', () => {
+  /**
+   * These are assertions about the SHAPE of the real allocation, not about the
+   * code that reads it. They are here because the rig has a property worth
+   * protecting: every canvas slice is held by exactly one actor and exactly one
+   * understudy, so nothing is unprotected and nothing is triple-stored. An edit
+   * that broke that would otherwise show up only as a byte total nobody
+   * questioned.
+   */
+  const { machines } = resolveMachines();
+  const byId = new Map(machines.map((m) => [m.id, m]));
+  const of = (role: string) => machines.filter((m) => m.role === role);
+  const SLICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+
+  it('has fourteen actors carrying one slice each', () => {
+    const actors = of('actor');
+    expect(actors).toHaveLength(14);
+    for (const a of actors) expect(a.regions).toHaveLength(1);
+    expect(actors.flatMap((a) => a.regions).sort((x, y) => x - y)).toEqual(SLICES);
+  });
+
+  it('has seven understudies covering the same fourteen slices, two each', () => {
+    const understudies = of('understudy');
+    expect(understudies).toHaveLength(7);
+    for (const u of understudies) expect(u.regions).toHaveLength(2);
+    expect(understudies.flatMap((u) => u.regions).sort((x, y) => x - y)).toEqual(SLICES);
+  });
+
+  it('puts region 0 on the director and its understudy, and nowhere else', () => {
+    const byRegion = machinesByRegion(machines);
+    expect(byRegion.get(0)?.map((m) => m.id).sort()).toEqual(['306', '307']);
+    expect(byId.get('306')?.role).toBe('director');
+    expect(byId.get('307')?.role).toBe('director-understudy');
+  });
+
+  it('holds every region on exactly two machines — nothing bare, nothing tripled', () => {
+    const byRegion = machinesByRegion(machines);
+    for (const r of [0, ...SLICES]) {
+      expect(byRegion.get(r)?.length, `region ${r}`).toBe(2);
+    }
+    // ...and no machine carries a region outside that set.
+    const known = new Set([0, ...SLICES]);
+    for (const m of machines) for (const r of m.regions) expect(known.has(r)).toBe(true);
+  });
+
+  it('covers every slice a machine holds with a distinct peer, mutually', () => {
+    const peers = machinePeers(machines);
+    for (const m of machines) {
+      const mine = peers.get(m.id) as string[];
+      // Every region sits on exactly two machines and no machine shares two of
+      // its regions with the same partner, so a machine has one peer PER SLICE
+      // it carries: an actor has one, an understudy carrying two has two.
+      expect(mine, m.id).toHaveLength(m.regions.length);
+      for (const other of mine) {
+        // If 207 covers 101, then 101 is covered by 207. An asymmetric pairing
+        // would mean a machine believed it was covered by one that did not
+        // cover it.
+        expect(peers.get(other), `${m.id} <-> ${other}`).toContain(m.id);
+      }
+    }
+    expect(peers.get('101')).toEqual(['207']);
+    expect(peers.get('206')).toEqual(['305']);
+    expect(peers.get('207')).toEqual(['101', '102']);
+    expect(peers.get('306')).toEqual(['307']);
+  });
+
+  it('pairs each actor with an understudy rather than with another actor', () => {
+    const peers = machinePeers(machines);
+    for (const a of of('actor')) {
+      expect(byId.get((peers.get(a.id) as string[])[0] as string)?.role).toBe('understudy');
+    }
+  });
+});
+
+// ===========================================================================
 describe('rolling the media up by machine', () => {
   const PARTITION: MachineSpec[] = [
-    { id: 'm1', name: 'One', regions: [1] },
-    { id: 'm2', name: 'Two', regions: [2] },
-    { id: 'edit', name: 'Editorial', regions: [0] },
+    { id: 'm1', name: 'One', role: 'actor', regions: [1] },
+    { id: 'm2', name: 'Two', role: 'actor', regions: [2] },
+    { id: 'edit', name: 'Editorial', role: 'actor', regions: [0] },
   ];
 
   it('gives each machine the bytes of the regions it holds', () => {
@@ -185,7 +261,7 @@ describe('rolling the media up by machine', () => {
   });
 
   it('includes a machine that holds nothing, at zero', () => {
-    const rows = rowsOf([...PARTITION, { id: 'spare', name: 'Spare', regions: [] }]);
+    const rows = rowsOf([...PARTITION, { id: 'spare', name: 'Spare', role: 'actor', regions: [] }]);
     const spare = rows.get('spare');
     expect(spare).toBeDefined();
     expect(spare?.totalBytes).toBe(0);
@@ -198,9 +274,9 @@ describe('rolling the media up by machine', () => {
 describe('when a region is held by more than one machine', () => {
   // region1 -> a + edit, region2 -> a + b, region0 -> edit alone.
   const OVERLAP: MachineSpec[] = [
-    { id: 'a', name: 'A', regions: [1, 2] },
-    { id: 'b', name: 'B', regions: [2] },
-    { id: 'edit', name: 'Editorial', regions: [0, 1] },
+    { id: 'a', name: 'A', role: 'actor', regions: [1, 2] },
+    { id: 'b', name: 'B', role: 'actor', regions: [2] },
+    { id: 'edit', name: 'Editorial', role: 'actor', regions: [0, 1] },
   ];
 
   it('counts the bytes on every machine that holds them', () => {
@@ -236,7 +312,7 @@ describe('when a region is held by more than one machine', () => {
 
 // ===========================================================================
 describe('the verdict on a machine row', () => {
-  const ALL: MachineSpec[] = [{ id: 'all', name: 'All', regions: [0, 1, 2, 9] }];
+  const ALL: MachineSpec[] = [{ id: 'all', name: 'All', role: 'actor', regions: [0, 1, 2, 9] }];
 
   it('never claims more is superseded than the machine holds', () => {
     for (const keepN of [1, 2, 3, 4]) {
@@ -294,7 +370,7 @@ describe('a valid name that carries no region', () => {
 
   it('counts it apart from both the allocated media and the unreadable names', () => {
     const { rows, reconcile } = buildMachineRows(ctx, snapshotId, {}, 3, [
-      { id: 'm1', name: 'One', regions: [1] },
+      { id: 'm1', name: 'One', role: 'actor', regions: [1] },
     ]);
     expect(rows[0]?.totalBytes).toBe(100);
     expect(reconcile.allocatedBytes).toBe(100);
@@ -319,9 +395,9 @@ describe('GET /api/machines', () => {
   it('answers with a row per machine and says the allocation is a placeholder', async () => {
     const { status, body } = await get('/api/machines?keepN=3');
     expect(status).toBe(200);
-    // Not cosmetic: while this reads 'placeholder' the machine names are
-    // invented, and the UI is required to say so on the page.
-    expect(body.allocationSource).toBe('placeholder');
+    // 'built-in' means compiled into the source rather than read from a
+    // config file. It is real, and the UI must not disclaim it as a guess.
+    expect(body.allocationSource).toBe('built-in');
     expect(body.machineCount).toBe(DEFAULT_MACHINES.length);
     expect(body.rows).toHaveLength(DEFAULT_MACHINES.length);
     expect(body.total).toBe(DEFAULT_MACHINES.length);

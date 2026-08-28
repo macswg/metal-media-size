@@ -226,10 +226,23 @@ The allocation is a statement about the RIG, never about the archive. Nothing in
 that module decides what is superseded; the verdict arrives on each file row
 from the usual whole-snapshot `computeReclaim`.
 
-`DEFAULT_MACHINES` is currently a **placeholder** — invented names, invented
-regions — and `allocationSource: 'placeholder'` carries that fact to the browser,
-which must say so. Real byte totals under plausible machine names would be the
-worst thing this view could be.
+**The rig.** Fourteen **actors** (101–206) carry the fourteen canvas slices, one
+each. Seven **understudies** (207–305) carry the same fourteen, two each. **306**
+is the director and **307** its understudy, both on region 0. So every region
+sits on exactly two machines and every playable byte is stored twice — the rig
+holds 2.00× what the archive does. `test/server/machines.test.ts` asserts that
+shape, including that the pairing is mutual.
+
+`role` is display and grouping only; nothing keys off it. `peers` is derived
+from the region lists, never stated, so it cannot drift from them.
+
+**101–206 vs 207–305 is a confirmed boundary.** It was first given with 206 in
+both ranges; the user then confirmed *"101-206 are actors, 207-305 are
+understudies"*. 206 holds one slice (r2) exactly as every other actor holds one.
+
+`allocationSource` is `'built-in'` — the real rig, compiled into the source. It
+is not a guess and the UI must not disclaim it as one. It becomes `'config'`
+when `config/machines.json` is read.
 
 ### `family` is a display label
 Never use it to classify anything as removable.

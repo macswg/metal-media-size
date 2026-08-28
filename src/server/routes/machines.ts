@@ -52,11 +52,19 @@ import {
 } from '../query.ts';
 import { selectFilesFiltered } from '../select.ts';
 import { makeParser } from '../../scan/parse.ts';
-import { machinesByRegion, resolveMachines, type AllocationSource, type MachineSpec } from '../../machines.ts';
+import {
+  machinePeers,
+  machinesByRegion,
+  resolveMachines,
+  type AllocationSource,
+  type MachineRole,
+  type MachineSpec,
+} from '../../machines.ts';
 
 export interface MachineRow {
   machineId: string;
   name: string;
+  role: MachineRole;
   /** Slices this machine carries, ascending. */
   regions: number[];
   note: string | null;
@@ -69,6 +77,12 @@ export interface MachineRow {
    * Zero when the allocation happens to be a partition.
    */
   sharedBytes: number;
+  /**
+   * Other machines holding at least one of the same regions -- this machine's
+   * understudy, or the actor it covers. Derived from the region lists, so it
+   * cannot disagree with them.
+   */
+  peers: string[];
   latestMtime: number | null;
 }
 
@@ -106,6 +120,7 @@ export interface MachineReconcile {
 const SORT_COLUMNS = [
   'machineId',
   'name',
+  'role',
   'fileCount',
   'totalBytes',
   'supersededBytes',
@@ -114,12 +129,14 @@ const SORT_COLUMNS = [
   'latestMtime',
 ];
 
-function emptyRow(m: MachineSpec): MachineRow {
+function emptyRow(m: MachineSpec, peers: string[]): MachineRow {
   return {
     machineId: m.id,
     name: m.name,
+    role: m.role,
     regions: [...m.regions].sort((a, b) => a - b),
     note: m.note ?? null,
+    peers,
     fileCount: 0,
     totalBytes: 0,
     supersededBytes: 0,
@@ -148,8 +165,9 @@ export function buildMachineRows(
   machines: readonly MachineSpec[],
 ): MachineBreakdown {
   const byRegion = machinesByRegion(machines);
+  const peers = machinePeers(machines);
   const rows = new Map<string, MachineRow>();
-  for (const m of machines) rows.set(m.id, emptyRow(m));
+  for (const m of machines) rows.set(m.id, emptyRow(m, peers.get(m.id) ?? []));
 
   const parse = makeParser(ctx.cfg.parse.pattern, ctx.cfg.parse.flags);
 

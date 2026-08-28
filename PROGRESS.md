@@ -2,6 +2,58 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the real rig, and it stores everything twice
+
+The user supplied the allocation region-first (*"r1 is on 101 and 207, r2 is on
+206 and 305, ..."*). Inverted, it has a shape worth stating:
+
+    14 actors       101-206   one slice each      r1-r14 covered once
+     7 understudies 207-305   two slices each     r1-r14 covered again
+     2 directors    306, 307  region 0 each       the whole canvas
+
+Every region sits on exactly two machines. So the rig stores **2.00× what the
+archive holds** — 133.29 TiB allocated, 266.59 TiB across the machines — which
+is the vindication of building the overlap handling before the data arrived
+rather than after. The totals line says both figures and never calls the sum
+"matched".
+
+    301  Understudy  6, 7   27.47 TiB   ← the heaviest machine
+    106  Actor       7      19.74 TiB   ← the heaviest actor
+    206  Actor       2       3.28 TiB   ← the lightest
+
+A six-fold spread across actors that each carry exactly one slice, which is the
+unequal-slices rule made concrete for the rig rather than for the archive.
+
+### The boundary that was given twice
+
+The rig arrived as "101-206 are actors" and "206-305 are understudies", putting
+206 in both. The region map already settled it — 206 holds one slice exactly as
+every other actor holds one, and reading it as an understudy would leave r2 as
+the only region with no actor — and the user confirmed directly: *"101-206 are
+actors, 207-305 are understudies"*. Recorded in `src/machines.ts` because the
+off-by-one is exactly what someone re-reading the original message reintroduces.
+
+### Two things the real data changed
+
+**The placeholder warning had to go.** It read "these machine names and their
+regions are invented". They are not any more, and leaving it would have been a
+lie in the other direction. `allocationSource` is `'built-in'` and the line now
+just says where the allocation lives.
+
+**`Also elsewhere` became `Mirrored on`.** On a fully mirrored rig `sharedBytes`
+equals `totalBytes` on every row, so a column of it restated Total and said
+nothing. What an operator wants when a machine fails is WHICH machine covers it,
+so the column lists peers — 106 → 301, 301 → 105, 106 — and the byte figure
+rides along as the tooltip.
+
+### A test I got wrong before the code
+
+The first peer assertion demanded exactly one peer per machine. An understudy
+carries two slices and therefore has two peers; the code was right and the test
+was wrong. The invariant that actually holds is one peer PER SLICE, plus mutual
+pairing — if 207 covers 101 then 101 is covered by 207 — which is the property
+worth protecting anyway.
+
 ## 2026-08-27 — a fourth Browse mode: what each machine has to hold
 
 > *"we'll need to understand the file size allocation across multiple machines
