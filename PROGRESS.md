@@ -2,6 +2,50 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the report says which option rescues machine 301
+
+> *"add this graph to the html manifest. add this just below the current + 3
+> version bar info"* — the user
+
+A **Where it lands: the playback machines** section on page one, directly under
+the options table and its reading key. Because the report's first page is
+option-neutral, every machine is costed at EVERY option rather than at the one
+this export happens to use — which turns out to be the whole value of putting it
+there:
+
+    301   6, 7   27.47 TiB   99% full now   keep-1 62%   keep-2 86%   keep-3 95%   keep-4 98%
+
+Only the most aggressive option meaningfully rescues 301. Keep-4 moves it from
+99% to 98%, which is the sort of thing a table of archive-wide totals cannot
+tell you and a per-machine one states immediately.
+
+The bar's freed band is drawn at the most aggressive option, because that is the
+largest claim any row on the page makes about that drive; the four columns give
+the rest. Drawing any single option would have meant picking one on a page that
+deliberately does not pick one.
+
+Rows are in rig order with the full ones marked, not sorted by fullness — same
+reasoning as the Browse view, a per-machine table is read as a floor plan.
+
+### Sharing the region logic rather than re-deriving it
+
+`buildMachineFill` parses the region from the filename with the SAME parser the
+scan used, and the pattern is now threaded from `ctx.cfg.parse` through the
+export route into `writeExport`. A CLI caller that omits it gets the built-in
+default, which is what the shipped config carries — but the server no longer
+depends on those two agreeing.
+
+Costing 23 machines at 4 options is one pass over the file table plus four
+verdict-set lookups per file, not four passes. `includeMachines: false` skips it
+for a caller that does not want the section.
+
+### What the section had to say out loud
+
+Every slice is on two machines, so the drives together store more than the
+archive contains. The section says so under the table: those rows are storage
+and must not be added up as archive. Same rule as `/api/machines`, restated
+where somebody might otherwise sum a column.
+
 ## 2026-08-27 — rig order, and a quieter reserve
 
 > *"sort the per-machine page by machine numer by default. 101 at the top"*

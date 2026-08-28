@@ -44,6 +44,7 @@ import { formatBytes } from './markdown.ts';
 import type {
   ExportAssetLadder,
   ExportDataset,
+  ExportMachineFill,
   ExportScenario,
   ExportSongRollup,
   ExportVersionRow,
@@ -184,6 +185,7 @@ const STYLE = `
   --accent: #5c9dff;
   --accent-soft: #1b2a44;
   --go: #45d495;
+  --hold: #e8b356;
   --warn: #ff8c72;
   --warn-soft: #2e1b17;
   --shadow: rgba(0,0,0,.5);
@@ -283,6 +285,30 @@ tfoot td { font-weight: 700; border-top: 1px solid var(--ink); border-bottom: no
 .bar > i { display: block; height: 100%; background: var(--accent); }
 .bar.kept > i { background: var(--ink-soft); }
 
+/* --- the drive meters ---------------------------------------------------
+ * The track IS one machine's drive, so the reserved headroom is a visible
+ * slice of it rather than a number taken off the top. Segments left to right:
+ * what stays even under the most aggressive option, what that option would
+ * free, unused space, reserve. Every band is named in the legend -- with more
+ * than one series, identity may not rest on colour alone, least of all in a
+ * document that will be printed in greyscale. */
+.drives td { padding: 5px 8px; }
+.drives .m { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 600; }
+.drives .r { color: var(--ink-faint); font-size: 11px; }
+.meter { display: flex; height: 11px; width: 100%; border-radius: 2px; overflow: hidden; background: var(--rule-soft); }
+.meter > span { display: block; height: 100%; }
+.meter > span + span { border-left: 1.5px solid var(--paper); }
+.m-stay { background: var(--go); }
+.m-free-up { background: var(--hold); }
+.m-unused { background: transparent; }
+.m-reserve { background: repeating-linear-gradient(-45deg, var(--ink-faint) 0 1px, transparent 1px 4px); }
+.m-over { background: var(--warn); }
+.drives .pct { font-variant-numeric: tabular-nums; }
+.drives tr.hot .pct { color: var(--warn); font-weight: 700; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--ink-faint); margin: 8px 0 2px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid var(--rule); }
+
 .pill { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; letter-spacing: .4px; font-weight: 700; }
 .pill.move { background: var(--warn); color: var(--paper); }
 .pill.keep { background: var(--rule-soft); color: var(--ink-soft); }
@@ -324,6 +350,7 @@ ul.warn li { margin-bottom: 6px; }
     --accent: #1d5fd6;
     --accent-soft: #e5edfb;
     --go: #1f7a4d;
+    --hold: #9a6b00;
     --warn: #a3341f;
     --warn-soft: #fdeeeb;
     --shadow: transparent;
@@ -389,6 +416,113 @@ function choiceTable(scenarios: readonly ExportScenario[]): string {
     </thead>
     <tbody>${rows}</tbody>
   </table>`;
+}
+
+/**
+ * The per-machine drive section.
+ *
+ * The options table above says what each choice frees across the archive. This
+ * says where that lands: which machines are close to full now, and which option
+ * brings them back. It is the same question the table asks, asked of the thing
+ * that actually runs out of space.
+ *
+ * ORDERED BY THE RIG, not by fullness. A per-machine table is read as a floor
+ * plan; the fullest rows are marked instead, so they are findable without the
+ * order being rearranged around them.
+ *
+ * The bar's freed band is the MOST AGGRESSIVE option, because that is the
+ * largest claim any row on this page makes about that drive; the per-option
+ * columns beside it give the rest. Anything else would have meant picking one
+ * option to draw, on a page that deliberately does not pick one.
+ */
+function drivesSection(d: ExportDataset): string {
+  const rows = d.machines;
+  if (!rows.length) return '';
+
+  const best = d.scenarios[0] as ExportScenario; // most aggressive = frees most
+  const hot = rows.filter((m) => m.state === 'critical' || m.state === 'over');
+  const first = rows[0] as ExportMachineFill;
+
+  const head = d.scenarios
+    .map((sc) => `<th class="num">After keep ${n(sc.keepN)}</th>`)
+    .join('');
+
+  const body = rows
+    .map((m) => {
+      const cap = m.capacityBytes || 1;
+      const freedByBest = m.options.find((o) => o.keepN === best.keepN)?.recoverableBytes ?? 0;
+      const stay = Math.max(0, m.totalBytes - freedByBest);
+      const unused = Math.max(0, m.usableBytes - m.totalBytes);
+      const spill = m.totalBytes > m.usableBytes ? Math.min(m.totalBytes - m.usableBytes, m.reserveBytes) : 0;
+      const reserve = Math.max(0, m.reserveBytes - spill);
+      const seg = (cls: string, bytes: number) =>
+        bytes > 0 ? `<span class="${cls}" style="width:${((bytes / cap) * 100).toFixed(3)}%"></span>` : '';
+
+      const cells = d.scenarios
+        .map((sc) => {
+          const o = m.options.find((x) => x.keepN === sc.keepN);
+          if (!o) return '<td class="num">—</td>';
+          const cls = o.state === 'critical' || o.state === 'over' ? ' style="color:var(--warn)"' : '';
+          return `<td class="num pct"${cls}>${(o.remainingFraction * 100).toFixed(0)}%</td>`;
+        })
+        .join('');
+
+      return `<tr class="${m.state === 'critical' || m.state === 'over' ? 'hot' : ''}">
+        <td class="m">${esc(m.name)}</td>
+        <td class="r">${esc(m.regions.join(', '))}</td>
+        <td class="num">${esc(formatBytes(m.totalBytes))}</td>
+        <td style="width:24%">
+          <div class="meter">${seg('m-stay', stay)}${seg('m-free-up', freedByBest)}${seg(
+            'm-unused',
+            unused,
+          )}${seg('m-over', spill)}${seg('m-reserve', reserve)}</div>
+        </td>
+        <td class="num pct">${(m.usedFraction * 100).toFixed(0)}%</td>
+        ${cells}
+      </tr>`;
+    })
+    .join('');
+
+  const headline = hot.length
+    ? `<strong>${n(hot.length)} machine${hot.length === 1 ? '' : 's'} ${
+        hot.length === 1 ? 'is' : 'are'
+      } at or past ${
+        hot.length === 1 ? 'its' : 'their'
+      } usable limit — ${hot
+        .map((m) => `${esc(m.name)} at ${(m.usedFraction * 100).toFixed(0)}%`)
+        .join(', ')}.</strong> The columns on the right show what each option above would bring ${
+        hot.length === 1 ? 'it' : 'them'
+      } back to.`
+    : 'No machine is close to its usable limit today.';
+
+  return `
+    <h2>Where it lands: the playback machines</h2>
+    <p class="small muted" style="margin-top:0">
+      ${headline}
+      Each drive holds ${esc(formatBytes(first.capacityBytes))} as labelled, of which
+      ${esc(formatBytes(first.reserveBytes))} is kept back as working headroom, leaving
+      ${esc(formatBytes(first.usableBytes))} for content — every percentage here is of that.
+    </p>
+    <div class="legend">
+      <span><i class="m-stay"></i>stays under the most aggressive option</span>
+      <span><i class="m-free-up"></i>that option would free</span>
+      <span><i class="m-unused"></i>unused</span>
+      <span><i class="m-reserve"></i>reserved headroom</span>
+    </div>
+    <table class="drives">
+      <thead>
+        <tr>
+          <th>Machine</th><th>Regions</th><th class="num">On the drive</th>
+          <th>Drive</th><th class="num">Full now</th>${head}
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+    <p class="tiny muted">
+      Every canvas slice is held by two machines, so these drives together store more than the
+      archive contains. That is the redundancy working, not double counting — but it means these
+      rows are storage and must not be added up as archive.
+    </p>`;
 }
 
 function decisionPage(d: ExportDataset): string {
@@ -479,6 +613,8 @@ function decisionPage(d: ExportDataset): string {
       belongs to no version, is never proposed for removal, and stays on the archive whichever
       option is chosen.
     </p>
+
+    ${drivesSection(d)}
 
     <h2>What holds whichever option is chosen</h2>
     <table class="kv">

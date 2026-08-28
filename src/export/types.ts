@@ -9,6 +9,7 @@
  */
 
 import type { KeepReason } from '../scan/reclaim.ts';
+import type { DriveState, MachineRole } from '../machines.ts';
 
 /** Only these two. `Permanent` is not representable -- see `ffs.ts`. */
 export type DeletionPolicy = 'Versioning' | 'RecycleBin';
@@ -212,6 +213,43 @@ export interface ExportStorageTotals {
   proxyBytes: number;
 }
 
+/** One machine costed at one keep-N option. */
+export interface ExportMachineOption {
+  keepN: number;
+  /** Bytes this option would free ON THIS DRIVE. */
+  recoverableBytes: number;
+  /** What would still be on the drive afterwards. */
+  remainingBytes: number;
+  /** `remainingBytes` as a fraction of USABLE space. May exceed 1. */
+  remainingFraction: number;
+  state: DriveState;
+}
+
+/**
+ * One playback machine's drive, costed at every option on the report's first
+ * page.
+ *
+ * `totalBytes` is what is on the drive today and does NOT move with the option
+ * -- the media is there until somebody removes it. Only the per-option figures
+ * move. Rows OVERLAP: a region held by two machines is on both drives, so
+ * summing these gives storage, never archive.
+ */
+export interface ExportMachineFill {
+  machineId: string;
+  name: string;
+  role: MachineRole;
+  regions: number[];
+  capacityBytes: number;
+  reserveBytes: number;
+  usableBytes: number;
+  totalBytes: number;
+  /** `totalBytes / usableBytes` today. May exceed 1. */
+  usedFraction: number;
+  state: DriveState;
+  /** One entry per option on page one, in the same order. */
+  options: ExportMachineOption[];
+}
+
 export interface ExportSnapshotProvenance {
   snapshotId: number;
   /** Absolute scan root the relative paths are relative to. */
@@ -256,6 +294,11 @@ export interface ExportDataset {
   scenarioBasis: ExportScenarioBasis;
   /** The storage location as it stands, independent of every option. */
   storage: ExportStorageTotals;
+  /**
+   * Per-machine drive fill, costed at each of `scenarios`. Empty when the
+   * caller asked for no machine breakdown.
+   */
+  machines: ExportMachineFill[];
   deletionPolicy: DeletionPolicy;
   versioningFolder: string | null;
   note: string | null;

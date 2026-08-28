@@ -80,6 +80,12 @@ export interface ExportRequest {
   jobLayout?: JobLayout;
   /** `null`/absent leaves the job's `<Right>` folder blank. */
   rightFolder?: string | null;
+  /**
+   * The scan's filename grammar, so the report reads a file's region exactly
+   * as the scanner did rather than falling back to the built-in default.
+   */
+  parsePattern?: string;
+  parseFlags?: string;
   /** Roots the writer must refuse to write into. The archive, always. */
   forbiddenRoots: string[];
   /** Test-only override of the export directory; omitted in normal operation. */
@@ -297,6 +303,8 @@ export function registerExportRoutes(app: FastifyInstance, ctx: AppContext): voi
       formats,
       deletionPolicy,
       keepN,
+      parsePattern: ctx.cfg.parse.pattern,
+      parseFlags: ctx.cfg.parse.flags,
       // The archive itself is never a legal write target, whatever else is.
       forbiddenRoots: [...ctx.cfg.allowedRoots, ctx.cfg.root],
       ...(jobLayout === undefined ? {} : { jobLayout }),

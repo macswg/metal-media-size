@@ -169,7 +169,9 @@ superseded. That is what this tool works out.
   know an export was ever selected. The pages after it are the detail: which
   option the job is and what it contains, where the numbers come from, the
   per-song split, every affected asset showing what goes next to what stays,
-  and the file list. One self-contained file, no scripts and no external
+  and the file list. Page one also carries the per-machine drive fill, costed at
+  every option, so it is visible which option rescues a machine that is nearly
+  full. One self-contained file, no scripts and no external
   references, so it opens offline on any machine. Dark on screen; the print
   stylesheet inverts the whole palette, so *Save as PDF* still gives ink on
   paper.

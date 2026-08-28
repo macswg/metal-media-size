@@ -490,6 +490,95 @@ describe('the rendered report', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('the per-machine drive section', () => {
+  /**
+   * The fixture's regions land on the real rig: region1 -> 101 and 207,
+   * region2 -> 206 and 305, region0 -> 306 and 307. The byte totals below are
+   * summed from the fixture spec rather than read back off the code.
+   *
+   *   region 1  10+11+12+13+14+3 (asset A, incl. the patch) + 5+6+7 (asset B) = 81 GiB
+   *   region 2  10+11+12+13+14                                               = 60 GiB
+   *   region 0  2 (v004 proxy) + 1 (v006 proxy)                              =  3 GiB
+   */
+  let d: ExportDataset;
+  let byId: Map<string, ExportDataset['machines'][number]>;
+
+  beforeAll(() => {
+    d = dataset();
+    byId = new Map(d.machines.map((m) => [m.machineId, m]));
+  });
+
+  it('puts a region on every machine holding it', () => {
+    expect(byId.get('101')?.totalBytes).toBe(81 * GIB);
+    expect(byId.get('207')?.totalBytes).toBe(81 * GIB);
+    expect(byId.get('206')?.totalBytes).toBe(60 * GIB);
+    expect(byId.get('305')?.totalBytes).toBe(60 * GIB);
+    expect(byId.get('306')?.totalBytes).toBe(3 * GIB);
+    expect(byId.get('307')?.totalBytes).toBe(3 * GIB);
+    // A machine holding a region the fixture never uses is reported at zero
+    // rather than dropped -- a rig with an idle drive is a fact, not a gap.
+    expect(byId.get('104')?.totalBytes).toBe(0);
+  });
+
+  it('costs every machine at every option on page one, in the same order', () => {
+    // The report puts a row's figures under the four rows of the table above
+    // it; if the orders diverged, each column would be labelled with the wrong
+    // option and the whole section would read plausibly and be wrong.
+    for (const m of d.machines) {
+      expect(m.options.map((o) => o.keepN)).toEqual(d.scenarios.map((sc) => sc.keepN));
+    }
+  });
+
+  it('never frees more on a drive by keeping more versions', () => {
+    for (const m of d.machines) {
+      for (let i = 1; i < m.options.length; i += 1) {
+        expect((m.options[i] as { recoverableBytes: number }).recoverableBytes).toBeLessThanOrEqual(
+          (m.options[i - 1] as { recoverableBytes: number }).recoverableBytes,
+        );
+      }
+    }
+  });
+
+  it('leaves behind exactly what it did not free', () => {
+    for (const m of d.machines) {
+      for (const o of m.options) {
+        expect(o.recoverableBytes + o.remainingBytes).toBe(m.totalBytes);
+        expect(o.remainingFraction).toBeCloseTo(o.remainingBytes / m.usableBytes, 12);
+      }
+    }
+  });
+
+  it('does not move what is ON the drive when the option moves', () => {
+    // Only the reclaim varies with keep-N. The media is on the disk until
+    // somebody removes it.
+    const other = dataset({ keepN: 1 });
+    for (const m of other.machines) {
+      expect(m.totalBytes).toBe(byId.get(m.machineId)?.totalBytes);
+    }
+  });
+
+  it('renders the section below the options table and above what holds', () => {
+    const html = renderReport(d);
+    const options = html.indexOf('The options');
+    const drives = html.indexOf('Where it lands: the playback machines');
+    const holds = html.indexOf('What holds whichever option is chosen');
+    expect(options).toBeGreaterThan(-1);
+    expect(drives).toBeGreaterThan(options);
+    expect(holds).toBeGreaterThan(drives);
+    expect(html).toContain('reserved headroom');
+    // Rows overlap by design, so the section must say so where it draws them.
+    expect(html).toContain('must not be added up as archive');
+  });
+
+  it('can be left out when a caller does not want the extra pass', () => {
+    const without = dataset({ includeMachines: false });
+    expect(without.machines).toEqual([]);
+    expect(renderReport(without)).not.toContain('Where it lands');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe('writeExport emits the report', () => {
   it('produces report.html and nothing else when only the report is asked for', async () => {
     const res = await writeExport({

@@ -58,6 +58,8 @@ import { renderJsonExport } from './json.ts';
 import { renderMarkdown } from './markdown.ts';
 import { renderReport, reportFileName } from './report.ts';
 import { buildScenarios, REPORT_KEEP_NS, scenarioBasis } from './scenarios.ts';
+import { buildMachineFill } from './machine-fill.ts';
+import { resolveMachines } from '../machines.ts';
 import type {
   DeletionPolicy,
   ExportArtifact,
@@ -97,6 +99,7 @@ export {
 export { buildJsonExport, renderJsonExport } from './json.ts';
 export { renderMarkdown, formatBytes } from './markdown.ts';
 export { renderReport, reportFileName, MAX_REPORT_PATHS, MAX_REPORT_LADDERS } from './report.ts';
+export { buildMachineFill } from './machine-fill.ts';
 export {
   buildScenarios,
   scenarioBasis,
@@ -189,6 +192,19 @@ export interface WriteExportOptions {
   forbiddenRoots?: readonly string[];
   /** Injected clock, for deterministic tests. */
   now?: Date;
+  /**
+   * The scan's filename grammar, so the region a file belongs to is read the
+   * SAME way the scanner read it. The server passes `cfg.parse`; a CLI caller
+   * that omits it gets the built-in default, which is what the shipped config
+   * carries.
+   */
+  parsePattern?: string;
+  parseFlags?: string;
+  /**
+   * Set false to leave the per-machine drive section out of the report. It
+   * costs a pass over every file in the snapshot.
+   */
+  includeMachines?: boolean;
   /** Override the run id (and therefore the directory name). Tests only. */
   runId?: string;
   maxPathsPerChunk?: number;
@@ -511,6 +527,24 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
   // the operator had applied. See `scenarios.ts`.
   const scenarios = buildScenarios(reclaimInput, REPORT_KEEP_NS, keepN);
 
+  // Per-machine drive fill, costed at every option in `scenarios` and in the
+  // same order, so the report can put a row's four figures under the four rows
+  // of the table above it without re-deriving which is which.
+  const machines =
+    opts.includeMachines === false
+      ? []
+      : buildMachineFill(
+          db,
+          snapshotId,
+          resolveMachines().machines,
+          reclaimInput,
+          scenarios.map((sc) => sc.keepN),
+          {
+            parsePattern: opts.parsePattern,
+            parseFlags: opts.parseFlags,
+          },
+        );
+
   // The storage location as it stands. Summed straight out of the index rather
   // than off `reclaimInput`, because region0 is not part of what the reclaim
   // policy needs to rank a version and has no business on that input.
@@ -741,6 +775,7 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
     keepN,
     scenarios,
     scenarioBasis: scenarioBasis(reclaimInput, snap.total_bytes),
+    machines,
     storage: {
       totalBytes: snap.total_bytes,
       fileCount: snap.file_count,
