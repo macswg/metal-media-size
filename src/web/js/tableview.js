@@ -870,7 +870,6 @@ export class TableView {
               })
             : h('span.muted', { text: 'nothing covers it' }),
       },
-      { key: 'latestMtime', label: 'Latest', width: '96px', align: 'right', render: (row) => fmtDate(row.latestMtime) },
     ];
   }
 }

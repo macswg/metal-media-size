@@ -2,6 +2,26 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the Latest column came off the per-machine table
+
+> *"what does the latest column mean on the per-machine page?"* — the user
+
+It meant the newest file that machine holds. Checked against the real index, all
+23 machines landed within two hours of one day, so at day resolution every row
+read the same date.
+
+That is structural, not a quirk of this snapshot: a version writes all fourteen
+region files at once, so every delivery touches every machine within the same
+minutes. A song folder has a meaningful last-delivery date; a machine cannot.
+Another column inherited from the Song folders set that did not survive contact
+with what a machine row is for.
+
+Removed outright — the column, the `latestMtime` field and the accumulation
+behind it — rather than left as an always-identical column somebody would keep
+wondering about. Why it went is recorded in the route header, and a test asserts
+the field is gone so it does not creep back in by symmetry with the other
+rollups.
+
 ## 2026-08-27 — the report says which option rescues machine 301
 
 > *"add this graph to the html manifest. add this just below the current + 3

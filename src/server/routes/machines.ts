@@ -31,6 +31,12 @@
  * A caller that renders per-machine bytes as shares of a pie is wrong, and the
  * UI says so on the page instead of hoping.
  *
+ * NO 'LATEST' COLUMN. A song folder has a meaningful last-delivery date; a
+ * machine does not. A version writes all fourteen region files at once, so every
+ * delivery lands on every machine within the same minutes -- the figure was
+ * identical on all 23 rows by construction, not by coincidence, and a column
+ * that always says the same thing is worse than no column.
+ *
  * THE VERDICT IS NOT COMPUTED HERE. `status` arrives on each file row from
  * `selectFilesFiltered`, which annotates it from the whole-snapshot reclaim
  * exactly as every other route does. This route never ranks anything.
@@ -88,7 +94,6 @@ export interface MachineRow {
    * cannot disagree with them.
    */
   peers: string[];
-  latestMtime: number | null;
 
   // --- the drive ---------------------------------------------------------
   /** The whole drive, as labelled. 32 TB means 32e12 bytes, not 32 TiB. */
@@ -157,7 +162,6 @@ const SORT_COLUMNS = [
   'supersededBytes',
   'supersededFiles',
   'sharedBytes',
-  'latestMtime',
 ];
 
 function emptyRow(m: MachineSpec, peers: string[], reserveFraction: number): MachineRow {
@@ -182,7 +186,6 @@ function emptyRow(m: MachineSpec, peers: string[], reserveFraction: number): Mac
     supersededBytes: 0,
     supersededFiles: 0,
     sharedBytes: 0,
-    latestMtime: null,
   };
 }
 
@@ -275,7 +278,6 @@ export function buildMachineRows(
         row.supersededBytes += f.size;
         row.supersededFiles += 1;
       }
-      if (row.latestMtime === null || f.mtime > row.latestMtime) row.latestMtime = f.mtime;
     }
   }
 

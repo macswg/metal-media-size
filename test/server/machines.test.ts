@@ -270,7 +270,7 @@ describe('rolling the media up by machine', () => {
     expect(spare).toBeDefined();
     expect(spare?.totalBytes).toBe(0);
     expect(spare?.fileCount).toBe(0);
-    expect(spare?.latestMtime).toBeNull();
+    expect(spare?.driveState).toBe('ok');
   });
 });
 
@@ -513,6 +513,14 @@ describe('GET /api/machines', () => {
     expect(body.rows.map((r: MachineRow) => r.machineId)).toEqual(
       [...body.rows.map((r: MachineRow) => r.machineId)].sort(),
     );
+  });
+
+  it('carries no last-delivery date, because a machine cannot have a useful one', () => {
+    // A version writes all fourteen region files at once, so every delivery
+    // lands on every machine within the same minutes. The figure was identical
+    // on all 23 rows by construction, not by coincidence.
+    const row = rowsOf([{ id: 'm1', name: 'One', role: 'actor', regions: [1] }]).get('m1');
+    expect(row).not.toHaveProperty('latestMtime');
   });
 
   it('sorts and pages like the other rollups', async () => {
