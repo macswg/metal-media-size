@@ -907,7 +907,12 @@ function driveMeter(row) {
     bytes > 0 ? h(`span.${cls}`, { style: { width: pctOf(bytes) } }) : null;
 
   const pctText = `${(row.usedFraction * 100).toFixed(row.usedFraction >= 1 ? 0 : 1)}%`;
-  const flag = row.driveState === 'over' ? 'OVER' : row.driveState === 'critical' ? 'FULL' : null;
+  // No badge for 'critical'. The bar shows it, and the threshold behind the
+  // word is an approximation built on an assumed capacity and an assumed
+  // reserve -- a label reads as a finding, which is more certainty than the
+  // number deserves. 'over' is kept because it is the one state the bar CANNOT
+  // show: a full track looks the same whether a machine just fits or does not.
+  const flag = row.driveState === 'over' ? 'OVER' : null;
 
   return h(
     'div.meter',

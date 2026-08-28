@@ -2,6 +2,20 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — the FULL badge came off
+
+> *"get rid of the FULL pill. the graph is enough and the full is an
+> approximation anyway"* — the user
+
+Right on both counts. The threshold behind the word sits on an assumed capacity
+and an assumed reserve, and a badge reads as a finding — more certainty than
+either number earns. The bar already shows it, and the percentage is still
+coloured, which is redundant emphasis on a figure that states its own magnitude
+rather than a category encoded in colour alone.
+
+`OVER` stays, and only because it is the one state the bar cannot show: a track
+filled to its end looks identical whether a machine just fits or does not.
+
 ## 2026-08-27 — how full each drive is, and 301 is nearly out
 
 > *"each machine has a 32TB drive, so show me how full the drive is with a
