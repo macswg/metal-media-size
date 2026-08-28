@@ -305,7 +305,13 @@ export function registerMachineRoutes(app: FastifyInstance, ctx: AppContext): vo
     const filters = parseFilters(q);
     const keepN = parseKeepN(q);
     const paging = parsePaging(q);
-    const sort = parseSort(q, SORT_COLUMNS, { key: 'totalBytes', dir: 'desc' });
+    // Rig order by default -- 101 first -- because a per-machine table is read
+    // as a floor plan before it is read as a ranking. Sorting by name rather
+    // than machineId so the caret lands on the column the reader can see; the
+    // two are the same string today. The ids are fixed-width, so a plain string
+    // compare is already numeric order; a machine named '98' would sort after
+    // '307', which is worth knowing before anyone adds one.
+    const sort = parseSort(q, SORT_COLUMNS, { key: 'name', dir: 'asc' });
 
     const { machines, source } = resolveMachines();
     const { rows, reconcile } = buildMachineRows(ctx, snapshot.id, filters, keepN, machines);

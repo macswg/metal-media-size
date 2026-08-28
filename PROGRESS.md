@@ -2,6 +2,27 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-27 — rig order, and a quieter reserve
+
+> *"sort the per-machine page by machine numer by default. 101 at the top"*
+> *"also make the 5% shading grey and more subtle"* — the user
+
+Default sort is now `name` ascending. Sorted by `name` rather than `machineId`
+so the caret lands on the column a reader can see; the two are the same string
+today. A per-machine table is read as a floor plan before it is read as a
+ranking, and biggest-first was the Song folders habit carried over again.
+
+The ids are fixed-width, so a plain string compare is already numeric order —
+108 before 201, 206 before 301. A machine named `98` would sort after `307`,
+which is worth knowing before anyone adds one. Noted in the route and pinned by
+a test.
+
+The reserve hatch was orange, which came from an earlier fix for it being
+invisible in a neighbouring grey. Orange overshot: the reserve is a fact about
+the volume, not a warning. It is neutral now, lifted off the track by lightness
+rather than by hue — still distinguishable from the empty space beside it, which
+is the only thing that failure mode requires.
+
 ## 2026-08-27 — the FULL badge came off
 
 > *"get rid of the FULL pill. the graph is enough and the full is an

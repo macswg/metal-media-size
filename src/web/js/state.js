@@ -24,7 +24,7 @@ const DEFAULT_SORT = {
   versions: { sort: 'bytes', dir: 'desc' },
   files: { sort: 'size', dir: 'desc' },
   songs: { sort: 'totalBytes', dir: 'desc' },
-  machines: { sort: 'totalBytes', dir: 'desc' },
+  machines: { sort: 'name', dir: 'asc' },
 };
 
 function emptyFilters() {

@@ -498,6 +498,23 @@ describe('GET /api/machines', () => {
     expect(r.allocatedBytes + r.unallocatedBytes + r.regionlessBytes + r.unparsedBytes).toBe(TOTAL);
   });
 
+  it('comes back in rig order by default, 101 first', async () => {
+    const { body } = await get('/api/machines?keepN=3');
+    expect(body.sort).toBe('name');
+    expect(body.dir).toBe('asc');
+    expect(body.rows.map((r: MachineRow) => r.machineId).slice(0, 4)).toEqual([
+      '101',
+      '102',
+      '103',
+      '104',
+    ]);
+    // The ids are fixed-width, so a plain string compare is numeric order --
+    // 108 before 201, and 206 before 301.
+    expect(body.rows.map((r: MachineRow) => r.machineId)).toEqual(
+      [...body.rows.map((r: MachineRow) => r.machineId)].sort(),
+    );
+  });
+
   it('sorts and pages like the other rollups', async () => {
     const { body } = await get('/api/machines?sort=totalBytes&dir=desc&limit=2');
     expect(body.rows).toHaveLength(2);
