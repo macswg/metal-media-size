@@ -27,12 +27,13 @@ const TABS = [
   // itself, not a list of defects. It measures in SLICES where everything to
   // its left measures in bytes.
   ['coverage', 'Region gaps'],
+  // Directly after Region gaps, and named for it: the same question — which
+  // slices of the canvas are actually here — asked of the PLAYBACK MACHINES
+  // instead of the archive. The id stays `rig`, so saved links and the API
+  // keep working; only the label pairs it with the tab it belongs beside.
+  ['rig', 'Region Gaps (cluster)'],
   ['anomalies', 'Anomalies'],
   ['duplicates', 'Duplicates'],
-  // The only tab that describes the RIG rather than the archive. Last of the
-  // analysis tabs, before the snapshot diff, because it is the one you reach
-  // for once you already know what the archive says.
-  ['rig', 'Rig'],
   ['diff', 'Snapshot diff'],
 ];
 
@@ -345,8 +346,9 @@ function buildPanes() {
   });
   app.duplicates = new DuplicatesPanel(app.panes.duplicates);
   app.rig = new RigPanel(app.panes.rig, {
-    // Machines missing current media. The one thing on that tab that is an
-    // alarm rather than an observation.
+    // Machines that PLAY media they have not got. An understudy short of a
+    // file has lost a spare, which is not an alarm, so it is deliberately not
+    // in this number — see `rollUpMissing`.
     onCounts: (c) => setTabBadge('rig', c.high ?? 0, 0),
   });
   app.diff = new DiffPanel(app.panes.diff, { snapshotBar: app.snapshotBar });

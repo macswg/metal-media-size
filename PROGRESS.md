@@ -2,6 +2,300 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-30 — append d3 VideoFile path
+
+> *"give me a checkbox that adds /objects/VideoFile after the selected or typed
+> directory"* · *"the checkbox should probably be to the right of the browse
+> button and should default checked"* — the user
+
+On a playback machine the media lives at `<project>/objects/VideoFile`, so the
+survey directory is nearly always a project folder plus those two fixed
+segments. The checkbox sits to the right of Browse — it acts on what Browse
+produced — and is ticked by default.
+
+The typed directory and the checkbox are two ways of writing ONE path, and only
+`surveyDirectory()` composes them; everything that surveys or stores a path
+calls it. Three things that would each have been a quiet wrong answer:
+
+- **Appending is idempotent.** Type the suffix yourself with the box ticked and
+  you still get one copy of it, not `.../objects/VideoFile/objects/VideoFile`.
+- **The session stores the composed path, and `splitVideoFile` takes it back
+  apart on load.** Otherwise a reloaded tab shows the suffix in the box beside
+  an unticked checkbox, and ticking it appends a second copy.
+- **The line under the field states the whole path** — `Surveying
+  SHOW_2026/METALLICA/objects/VideoFile on every machine` — written on every
+  keystroke and on the checkbox rather than at the next render. A control whose
+  effect the screen does not show is a control somebody surveys the wrong folder
+  with, and the first cut of this had exactly that bug: the hint stayed on the
+  old path until something else redrew the card. It also cannot re-render the
+  whole card on input, or the box loses focus mid-word.
+
+Verified over CDP: checkbox checked on load, label reads `append d3 VideoFile
+path`, DOM order is input → Browse → checkbox, and the hint tracks both controls
+live.
+
+## 2026-08-30 — the missing list as a file, and the plainer word
+
+> *"allow me to export the missing across the rig data as csv"* · *"make the
+> gone state missing instead"* — the user
+
+**Export CSV**, in the master list's header. `GET /api/rig/missing.csv` renders
+it, the browser saves it — the same shape as the target YAML, and for the same
+reason: **the rig session is not persisted**, and an export landing in
+`exports/` would be the first thing to break that promise. Nothing in this
+application writes the file; where it goes is the operator's dialog. The
+download helper both files now share is verified end-to-end in the real app
+(blob `text/yaml`, 373 bytes, `rig-targets.yaml`).
+
+Three decisions in the format:
+
+- **The whole roll-up, not the 500 rows on screen.** An export that stopped
+  where the table stops would be a list of findings with findings missing from
+  it. The toast says so.
+- **Bytes, not `2.06 TiB`.** A spreadsheet can sum and sort a number; the tab is
+  where sizes are for reading.
+- **No formula-injection guard**, deliberately: every field comes from the
+  archive's grammar or is a machine id, so none can begin with `=`, `+` or `@`,
+  and defensively prefixing a `'` would corrupt the one thing the file is for —
+  looking a file name up. Written down in the module, with the condition under
+  which to revisit it.
+
+It carries machine **ids** and no address or credential, because the roll-up has
+neither. Asserted the way the YAML's absence of a credential is asserted:
+behaviourally, against a session that actually holds both.
+
+**And `gone` is now `missing`.** The key was renamed with the label rather than
+just the display string — the state now appears in the CSV and in the API, and a
+payload saying `gone` under a screen saying `missing` is exactly the drift this
+codebase spends its comments avoiding. `unplayable` is `missing + recoverable`.
+The region chip's alarm modifier, which was named after the state, is now
+`.alarm`, which is what it always meant.
+
+## 2026-08-30 — Edit list, and the reason it was needed
+
+> *"give me an edit list button that puts the current list back in the text box
+> so i can edit it"* — the user
+
+The button is in the Machines card header: it writes the list the SERVER is
+holding back into the box in the plain `id host` form the parser reads, focuses
+it, and puts the caret at the end. One formatter (`targetLines`) now serves both
+that and the tab's own load, so a round trip through the box cannot change the
+list's spelling.
+
+**Then the reason the button was wanted turned out to be a bug.** The box was
+built with `value: this.draft.text` — and `h()` sets a string attribute, while a
+`<textarea>` takes its value from its CONTENT. So the attribute was set and
+ignored: the box came up empty on every single render, however much the list had
+in it. The table underneath showed three machines and the box above it showed
+nothing, and every re-draw — pressing Use this list, a survey poll ticking —
+emptied whatever had been typed.
+
+An `<input>` hides this, because there the attribute IS the initial value, which
+is why every other field on the tab was fine. Fixed by assigning `box.value`
+after building it, with the trap written down on `h()` where the next person
+will look.
+
+Verified over CDP: the box now comes up carrying `101 10.10.1.53 / 102
+10.10.1.54 / 10.10.1.99`; scribbling over it and pressing Edit list puts all
+three back, focused, caret at the end.
+
+## 2026-08-30 — a machine we did not look at is not an answer
+
+> *"for the still on column, don't put 207? if you can't check 207, just put -"*
+> — the user
+
+`Still on` answers one question: where can I still get this file? `207?` was not
+an answer to it. It named a machine while saying nothing about it, which at a
+glance reads as a finding — and down a column of 1,292 rows it said "we did not
+look at 207" 1,292 times, which the card's own warning already says once.
+
+So an unsurveyed holder is an em dash now. The id is on the tooltip. The other
+three readings stay as distinct as they were: green ids for a good copy,
+`NNN (wrong size)`, and `nowhere` — which keeps its precise meaning of *every
+holder was surveyed and none has it*, as opposed to *we could not tell*.
+
+## 2026-08-30 — read by song, chosen by size
+
+> *"in the file list sort by song, also get rid of the not in the archive at all
+> section, that is not helpful"* — the user
+
+**Which rows and which order turned out to be two decisions**, and conflating
+them would have quietly broken the cap. Every list is capped — 300 per section,
+500 on the master list — and the cap only means something if it keeps the rows
+that cost the most to be wrong about. So `gridTable` now takes rows in the
+server's order (biggest first, alarms first), takes `max` from the top of THAT,
+and applies `order` to the survivors. A capped list is still the largest 300 and
+still reads by song. The note says so: *"Showing the largest 300 of 1,292, by
+song."*
+
+**Song order never crosses a state on the master list.** A `gone` file sorted
+under a late song, below a screenful of `spare lost`, is the exact failure the
+four states exist to prevent. `bySongWithinState` derives the group order from
+the rows it was handed rather than restating the ranking, so it cannot drift
+from `rollUpMissing`. Verified in a browser with rows fed in deliberately out of
+song order: four `gone` rows came back song-ordered, then the two `recoverable`,
+then `spare lost`.
+
+**"Not in the archive at all" is gone from the card.** It now means something
+narrow — media carrying a region this machine PLAYS that the archive has no row
+for — and it is the one bucket the archive can form no opinion about, so it could
+only be read and wondered at. On the real rig it is empty: what used to fill that
+section was `regionless`, ignored since this morning. Still counted in
+`totals.extraUnknownFiles`; only the section is gone, like `missingSuperseded`
+before it.
+
+## 2026-08-30 — the understudy is a backup, so the actor decides
+
+> *"ok the understudy machines are backups, so if files are not found on the
+> main (actor) machine they are missing."* — the user
+
+This reverses the reading the master list was built on, and it is worth being
+plain about what was wrong. The roll-up treated a region's two holders as
+equivalent: any good copy anywhere meant the show played. So a file missing from
+its **actor** but present on its **understudy** came back as `reduced` —
+"redundancy lost, the show plays" — when in fact the machine that puts it on
+screen has not got it. That is the sort of wrong answer this instrument exists
+to prevent: quiet, plausible, and reassuring.
+
+Four states now, decided by the **primary** holder (the actor, or the director
+for region 0), with the backup deciding only what the repair costs:
+
+- **`gone`** — not on its primary and on no surveyed machine. The archive is the
+  only source left.
+- **`recoverable`** — not on its primary, so it will not play; the understudy has
+  it, so it can be restored from the rig. **Still an alarm** — this is the state
+  that used to read as fine.
+- **`unconfirmed`** — the **primary** was not surveyed. No finding to make.
+- **`spareLost`** — the primary has it, a backup does not. The show plays.
+
+`unplayable` (`gone + recoverable`) is what the header pill and the region chips
+count now, not `gone` alone.
+
+**The honesty rule did not go away; it moved onto the machine that decides.** It
+used to say "never call it gone when a holder was not surveyed", and on the
+first real run that made all 1,293 findings `unconfirmed` against one surveyed
+machine of a mirrored pair. Under the user's rule those files are missing from
+the actor, full stop — surveying 207 could only ever have moved them from `gone`
+to `recoverable`, never to fine. So `unconfirmed` is now exactly "the primary
+was not read", and the two omissions are reported differently: an unread ACTOR
+is a loud warning (findings this list cannot make), an unread BACKUP is a quiet
+hint (some of what is listed as gone may be restorable).
+
+**`role` now decides something.** It was documented as display and grouping only.
+`isPrimaryRole` in `src/machines.ts` is the one exception, and it is fenced to
+it: the roll-up cannot answer "will the show play this?" without knowing which
+holder plays. With no roles to go on — an allocation naming none, or ids this rig
+does not know — every holder decides, which is exactly the old behaviour and the
+only safe reading without them. Pinned by a test.
+
+Verified against the real card in a browser, with all four states on screen at
+once: the alarms share the warning colour and differ in weight, `spare lost`
+keeps the muted amber it had, and the region chip for a region whose actor is
+short reads `3 unplayable`.
+
+## 2026-08-30 — four questions, four columns, and a bucket that was inventing findings
+
+> *"for all the file lists i like seeing the song filename version and region in
+> separate columns for readibility. also need to be able to resize the columns"*
+> — the user
+
+**Every list on the rig tab is a grid now.** Song, file, version and region are
+four different questions, and reading them out of one `·`-delimited line means
+counting delimiters. `src/web/js/gridtable.js` paints rows that are already in
+memory — no pool, no page cache, no sort, because a survey result is a few
+hundred rows and its biggest-first order is deliberate.
+
+The drag came out into `src/web/js/colsize.js` and **`vtable.js` now uses it
+too**. Two tables that resize differently is worse than either: one minimum
+width, one grip, one double-click-to-reset, one place widths are remembered.
+Verified end-to-end by driving headless Chrome over CDP — press, move, release
+on the `File` grip took the track from `minmax(220px, 3fr)` to a pinned `594px`
+on both the header and the rows, wrote `{"file":594}` to that table's own
+storage key, and a double-click put the declared width back and cleared it.
+
+**Names now carry their own columns.** A file the index has no row for still has
+a version and a region *in its name* — that is how `extraForeign` is told from
+`extraUnknown` at all. `regionOfName` became `describeName` and returns the base,
+the region and a label; `formatVerLabel` moved to `src/scan/parse.ts` so the
+survey and `asset_version.ver_label` compose a version the same way. Anything
+with a stored label still reads the stored one.
+
+**And the bucket that was inventing findings.**
+
+> *"if not in the archive at all just means content without a region ignore
+> these files in the region gaps (cluster) section"* — the user
+
+It did, mostly. "Not in the archive at all" held 433 files on machine 101, and
+the heading was wrong about 305 of them — they *are* in the archive. They carry
+no `_regionN`, and the allocation is by region, so they belong to no machine and
+the comparison had no expectation to match them against. A file that belongs to
+no machine is neither missing from one nor extra on one. Reporting it as either
+is a finding that is not there.
+
+So `regionless` is its own bucket: counted, stated in one quiet line, never
+listed. 388 files, 0.63 TiB on that machine.
+
+The other 45 are **`extraUnparsed`** — names this grammar cannot read — and they
+are kept apart on purpose, exactly as `/api/machines` keeps regionless and
+unparsed apart. Merging them would have hidden the interesting half:
+`120_LIQUID_CUE_H_LL180_v006_region0_proxy3.mov` writes `region` before `proxy`,
+`210_GRADIENTS_VERSE_A_LL180_002_v_proxy3_region0.mov` has its version token
+inside out, and `RORSCHACH_IMAG_Processed_260723_1325.mov` is a stray. What is
+left in `extraUnknown` is now what the name always claimed: a region THIS machine
+holds, that the archive has no file for.
+
+**Also:** the tab moved to sit directly after **Region gaps** and is now labelled
+**Region Gaps (cluster)** — the same question asked of the machines rather than
+the archive. The id stays `rig`, so nothing else moved. And **"Already cleaned
+off (superseded, absent)" is gone** from the per-machine card: media already off
+a machine is the one bucket with nothing to do about it. Still counted, so the
+arithmetic closes; `totals.missingSupersededFiles` is untouched.
+
+## 2026-08-30 — the directory you can point at instead of remembering
+
+> *"in the survey section, in addition to typing a path, allow me to browse for
+> a path and select the path."* — the user
+
+The survey takes one directory, relative to the share root, and applies it to
+every machine. Until now the only way to supply one was to type it exactly
+right, and **the failure mode of getting it wrong is silence**: a directory that
+is not there walks as an empty machine, and an empty machine reports as one with
+nothing on it — or, where the archive expects nothing of that machine, as a
+clean one. Of every input on that tab it is the one whose mistake does not
+announce itself, so it is now pickable.
+
+`GET /api/rig/browse` lists ONE directory, ONE level deep, on ONE mounted
+machine — `src/rig/browse.ts`. It is strictly less than the survey already does:
+`readdir` and nothing else, no recursion, no `lstat`, no file opened at any
+point, through the same `ReadOnlyFs` fenced to that machine's mountpoint. Sizes
+are deliberately absent from the payload; they would cost a round trip per file
+on an SMB share, and comparing sizes is the survey's job.
+
+One machine, and the dialog says which. The survey applies the chosen path to
+every machine, so browsing is *choosing a path*, not inspecting a rig — a
+directory that exists on 301 and not on 302 is a finding the **survey** makes,
+and a picker that quietly listed elsewhere would pre-empt it.
+
+Three things the picker refuses to guess:
+
+- **A symlink is not a folder here.** It is not descended into and not counted
+  as a file. Following one is how a listing leaves the share.
+- **A cut-short list says so.** 500 subdirectories is the cap; past it
+  `truncated` is set and the dialog says to type the path, because a truncated
+  list that reads as a complete one is how a folder gets concluded absent.
+- **A directory that is not there is an error, not an empty list** —
+  `no_such_directory` rather than a listing with nothing in it, for the same
+  reason the feature exists at all.
+
+Escape is refused twice, as it already was for the typed path: the route's
+`assertRelativeDirectory` gives the readable message, and `ReadOnlyFs` gives the
+guarantee. `test/server/rig.test.ts` asserts both, plus the symlink rule, the
+cap, and that a browse leaves the sandbox untouched.
+
+Typing still works, and is still the fast path. The button is beside the field,
+disabled with a reason when nothing is mounted — the list comes from the machine
+itself, so there is nothing to show before a machine is connected.
+
 ## 2026-08-30 — three things that were broken on a PC and silent on a Mac
 
 > *"other than the remote directory walk, will this work on a pc?"* — the user

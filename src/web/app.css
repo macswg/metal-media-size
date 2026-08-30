@@ -890,6 +890,42 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
 .inline-check { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); cursor: pointer; }
 
 
+/* ------------------------------------------------- in-memory grid table
+
+   The plain sibling of `.vt`: same header, same grip, same drag (colsize.js),
+   but the rows are in flow rather than absolutely positioned against a canvas,
+   because these lists are a few hundred rows that are already in memory. Head
+   and body share ONE scroller, so a sideways drag moves both with no JS.
+   -------------------------------------------------------------------------- */
+
+.gt { position: relative; }
+.gt-scroll {
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+.gt-inner { min-width: 100%; }
+.gt-head { position: sticky; top: 0; z-index: 2; }
+.gt-row {
+  display: grid; align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+  min-height: 24px;
+}
+.gt-row:last-child { border-bottom: 0; }
+.gt-row:nth-child(even) { background: rgba(255, 255, 255, 0.014); }
+.gt-row:hover { background: #1a212b; }
+.gt .vt-td { padding: 3px 8px; font-size: 11.8px; line-height: 1.45; }
+/* Hold the resize cursor for the whole drag, not just over the grip. */
+.gt.is-resizing, .gt.is-resizing * { cursor: col-resize !important; }
+
+/* Rows carrying a verdict colour it the way the rest of the app does. */
+.gt-row.warn .cell-file { color: var(--warn); }
+.gt-row.super .cell-file { color: var(--superseded); }
+.cell-file { font-family: var(--mono); }
+.cell-song { font-family: var(--mono); color: var(--text-2); }
+.cell-ver { font-family: var(--mono); color: var(--text-2); }
+
 /* ------------------------------------------------------------------- rig
 
    The one tab that describes the machines rather than the archive. It is a
@@ -932,6 +968,50 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
 .rig-input.wide { min-width: 360px; }
 .rig-input:focus { outline: none; border-color: var(--accent-dim); }
 
+/* The directory picker. A path that is typed wrong surveys an empty directory
+   and reports the rig as clean, so choosing one off the machine is worth a
+   dialog. It lists folders; it opens nothing. */
+.rig-dir { display: flex; align-items: center; gap: 8px; }
+/* The suffix checkbox, beside Browse. It is a statement about d3's own layout
+   — media lives at <project>/objects/VideoFile — not a preference, so it reads
+   as a label rather than as an option. */
+.rig-check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--text-2); white-space: nowrap; cursor: pointer;
+}
+.rig-check input { accent-color: var(--accent); cursor: pointer; margin: 0; }
+.rig-check:hover { color: var(--text); }
+
+.rig-browse-machine {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--text-2); margin-bottom: 10px;
+}
+.rig-browse-machine select { min-width: 200px; }
+.rig-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-bottom: 8px; }
+.rig-crumb-sep { display: inline-flex; align-items: center; gap: 2px; color: var(--faint); }
+.rig-crumb {
+  background: none; border: 0; padding: 2px 4px; border-radius: 3px; cursor: pointer;
+  font-family: var(--mono); font-size: 12px; color: var(--accent);
+}
+.rig-crumb:hover { background: var(--panel-3); }
+.rig-crumb.here { color: var(--text); cursor: default; font-family: var(--mono); font-size: 12px; padding: 2px 4px; }
+.rig-browse-list { display: grid; gap: 1px; max-height: 320px; overflow-y: auto; }
+.rig-browse-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: var(--bg-2); border: 0; border-radius: 2px; cursor: pointer;
+  padding: 5px 8px; text-align: left;
+  font-family: var(--mono); font-size: 12px; color: var(--text-2);
+}
+.rig-browse-row:hover { background: var(--panel-3); color: var(--text); }
+.rig-browse-row.up { color: var(--dim); }
+.rig-browse-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rig-browse-go { color: var(--faint); }
+.rig-browse-empty {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 4px; font-size: 11.5px; color: var(--faint);
+}
+.rig-browse-chosen { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); }
+
 .rig-warn {
   margin-top: 10px;
   padding: 8px 10px;
@@ -956,31 +1036,27 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
 .rig-sec-t.super { color: var(--superseded); }
 .rig-sec-t.quiet { color: var(--dim); }
 .rig-sec-n { font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
-.rig-list { margin-top: 6px; display: grid; gap: 1px; max-height: 320px; overflow-y: auto; }
-.rig-item {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--text-2);
-  padding: 2px 6px;
-  background: var(--bg-2);
-  border-radius: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* A finding list is a resizable grid (gridtable.js), not a run of text: song,
+   file, version and region are four questions and get four columns. */
+.rig-grid { margin-top: 6px; }
 
 /* The master missing list. Three states, in the order they matter, and each
-   coloured for what it means rather than for variety: gone is the alarm,
+   coloured for what it means rather than for variety: missing is the alarm,
    unconfirmed is an unanswered question, spare-lost is a warning. */
 .miss-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
 .miss-legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-2); cursor: help; }
 .miss-dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; background: var(--dim); }
-.miss-legend-item.gone .miss-dot { background: var(--warn); }
-.miss-legend-item.gone b { color: var(--warn); }
+/* The first two are both alarms — the machine that PLAYS the file has not got
+   it — so they share the warning colour and differ in weight, not in hue. An
+   understudy is a backup, not a second place the file plays from. */
+.miss-legend-item.missing .miss-dot { background: var(--warn); }
+.miss-legend-item.missing b { color: var(--warn); }
+.miss-legend-item.recoverable .miss-dot { background: var(--warn); opacity: 0.55; }
+.miss-legend-item.recoverable b { color: var(--warn); opacity: 0.85; }
 .miss-legend-item.unconfirmed .miss-dot { background: var(--patch); }
 .miss-legend-item.unconfirmed b { color: var(--patch); }
-.miss-legend-item.reduced .miss-dot { background: var(--superseded); }
-.miss-legend-item.reduced b { color: var(--superseded); }
+.miss-legend-item.spareLost .miss-dot { background: var(--superseded); }
+.miss-legend-item.spareLost b { color: var(--superseded); }
 
 .miss-regions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
 .miss-region {
@@ -988,38 +1064,25 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   background: var(--panel-3); border: 1px solid var(--line);
   border-radius: 3px; padding: 3px 7px; cursor: help;
 }
-.miss-region.gone { border-color: var(--warn); color: var(--warn); }
+.miss-region.alarm { border-color: var(--warn); color: var(--warn); }
 .miss-region b { color: var(--text); margin-right: 4px; }
-.miss-gone-n { margin-left: 6px; color: var(--warn); font-weight: 600; }
+.miss-alarm-n { margin-left: 6px; color: var(--warn); font-weight: 600; }
 
-/* The list scrolls inside itself, with its header pinned. Without this a rig
-   missing a thousand files pushes every other card off the bottom of the tab. */
-.miss-scroll {
-  max-height: 440px;
-  overflow: auto;
-  margin-top: 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-}
-.miss-table { font-size: 11.5px; }
-.miss-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--panel-2);
-  box-shadow: inset 0 -1px 0 var(--line);
-}
-.miss-table td { white-space: nowrap; }
-/* The file name is the widest thing here and the least load-bearing -- the
-   song, version and region already identify the row, and the full name is in
-   the title. Letting it push the "still on" column off the edge would hide the
-   one column that says whether anything can still play the file. */
-.miss-file { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
-.pill.miss-gone { color: var(--warn); background: rgba(224, 112, 58, 0.14); }
+/* The master list scrolls inside itself with its header pinned (gridtable.js).
+   Without that, a rig missing a thousand files pushes every other card off the
+   bottom of the tab. Every column here can be dragged, including `File` --
+   which is why nothing needs to cap its width any more: widen it and the row
+   scrolls sideways rather than the "still on" column being pushed off the edge.
+   That column says whether anything can still play the file, so losing it was
+   the one thing the old fixed layout could not be allowed to do. */
+.pill.miss-missing { color: var(--warn); background: rgba(224, 112, 58, 0.14); }
+.pill.miss-recoverable { color: var(--warn); background: rgba(224, 112, 58, 0.07); }
 .pill.miss-unconfirmed { color: var(--patch); background: var(--patch-bg); }
-.pill.miss-reduced { color: var(--superseded); background: var(--superseded-bg); }
-/* A file nothing can play gets the only loud row in the table. */
-.miss-table tr.miss-gone td { background: rgba(224, 112, 58, 0.06); }
+.pill.miss-spareLost { color: var(--superseded); background: var(--superseded-bg); }
+/* Both alarm rows are tinted; the one the archive is the only source for is
+   tinted harder. Nothing else in the table is tinted at all. */
+.gt-row.miss-missing { background: rgba(224, 112, 58, 0.06); }
+.gt-row.miss-recoverable { background: rgba(224, 112, 58, 0.03); }
 
 .kv-inline { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 8px; }
 .kvi { font-size: 11.5px; color: var(--text-2); }

@@ -14,6 +14,7 @@ import type { Database as Db } from 'better-sqlite3';
 import { SCHEMA_SQL, VIEWS_SQL, SCHEMA_VERSION } from './schema.ts';
 import type { FileRecord } from '../scan/walk.ts';
 import type { DerivedAsset } from '../scan/derive.ts';
+import { formatVerLabel } from '../scan/parse.ts';
 import type { ReclaimAssetInput } from '../scan/reclaim.ts';
 
 export interface SnapshotRow {
@@ -144,19 +145,6 @@ export function finishSnapshot(db: Db, snapshotId: number, a: FinishSnapshotArgs
 }
 
 /**
- * Human-readable version label: `v008`, `v008d`, `v004 frame00000` for a patch.
- */
-function verLabel(v: {
-  verNum: number;
-  subLetter: string | null;
-  isPatch: boolean;
-  patchFrame: number | null;
-}): string {
-  const n = `v${String(v.verNum).padStart(3, '0')}${v.subLetter ?? ''}`;
-  return v.isPatch ? `${n} frame${String(v.patchFrame ?? 0).padStart(5, '0')}` : n;
-}
-
-/**
  * Write files, assets and asset-versions for a snapshot in one transaction.
  *
  * `files` and `assets` must come from the same walk: `DerivedVersion.fileIndexes`
@@ -223,7 +211,7 @@ export function writeSnapshotData(
             v.region0Bytes,
             v.regionCount,
             Math.round(v.latestMtime),
-            verLabel(v),
+            formatVerLabel(v),
           ).lastInsertRowid,
         );
         for (const idx of v.fileIndexes) {

@@ -184,8 +184,14 @@ export const api = {
   rigConnect: (payload) => impl.post('/api/rig/connect', payload),
   rigDisconnect: () => impl.post('/api/rig/disconnect', {}),
   rigMounts: () => impl.get('/api/rig/mounts'),
+  // Directory entries on ONE mounted machine, one level deep, so the survey
+  // path can be picked rather than typed. Lists directories; opens no file.
+  rigBrowse: (params) => impl.get('/api/rig/browse', params),
   rigSurvey: (payload) => impl.post('/api/rig/survey', payload),
   rigCancelSurvey: () => impl.post('/api/rig/survey/cancel', {}),
   rigForget: () => impl.del('/api/rig/session'),
   rigTargetsYaml: () => impl.text('/api/rig/targets.yaml'),
+  // The master missing list, rendered server-side and saved by the browser —
+  // like the YAML above, nothing is written by this application.
+  rigMissingCsv: () => impl.text('/api/rig/missing.csv'),
 };

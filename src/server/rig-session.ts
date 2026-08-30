@@ -44,6 +44,7 @@ import {
   type ExpectedFile,
   type MachineComparison,
   type MachineTotals,
+  type NameDescription,
   type MissingRollup,
   type RemoteFile,
 } from '../rig/survey.ts';
@@ -91,7 +92,7 @@ export interface SurveyPlan {
   snapshotId: number;
   exclusions: ExclusionMatcher;
   dirTimeoutMs: number;
-  regionOfName: (name: string) => number | null;
+  describeName: (name: string) => NameDescription | null;
   /**
    * Every machine that CARRIES each region, from the rig allocation -- not just
    * the ones being surveyed. The difference is what lets the master list say
@@ -99,6 +100,12 @@ export interface SurveyPlan {
    * holder", which are very different findings.
    */
   regionHolders: Map<number, string[]>;
+  /**
+   * Of those, the machines that PLAY what they carry rather than backing it up.
+   * A file absent from its primary is missing whatever the backup has -- see
+   * the header of `rollUpMissing`.
+   */
+  primaryHolders: Set<string>;
   concurrency?: number | undefined;
 }
 
@@ -168,6 +175,7 @@ export class RigSession {
   private error: string | null = null;
   private results: MachineResult[] = [];
   private regionHolders: Map<number, string[]> = new Map();
+  private primaryHolders: Set<string> = new Set();
   private inFlight: Promise<void> | undefined;
 
   isRunning(): boolean {
@@ -280,6 +288,7 @@ export class RigSession {
     this.snapshotId = plan.snapshotId;
     this.directory = plan.directory;
     this.regionHolders = plan.regionHolders;
+    this.primaryHolders = plan.primaryHolders;
 
     this.inFlight = this.run(plan)
       .catch((err: unknown) => {
@@ -380,7 +389,7 @@ export class RigSession {
         // Recomputed per call rather than cached, so it stays truthful while a
         // survey is still filling `results` in. It is a roll-up of a few
         // hundred rows at most; the payload costs more than the arithmetic.
-        missing: rollUpMissing(this.results, this.regionHolders),
+        missing: rollUpMissing(this.results, this.regionHolders, this.primaryHolders),
       },
     };
   }
@@ -483,7 +492,7 @@ export class RigSession {
 
       const comparison = compareMachine(files, job.expected, {
         regions: job.regions,
-        regionOfName: plan.regionOfName,
+        describeName: plan.describeName,
       });
       return { ...out, comparison, totals: totalsOf(comparison) };
     } catch (err) {

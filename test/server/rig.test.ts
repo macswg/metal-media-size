@@ -32,6 +32,9 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../src/server/app.ts';
 import type { AppContext } from '../../src/server/context.ts';
@@ -57,6 +60,8 @@ import {
   type ExpectedFile,
   type RemoteFile,
 } from '../../src/rig/survey.ts';
+import { browseDirectory, MAX_BROWSE_ENTRIES } from '../../src/rig/browse.ts';
+import { csvField, formatMissingCsv, MISSING_CSV_COLUMNS } from '../../src/rig/missing-csv.ts';
 import { RigSession } from '../../src/server/rig-session.ts';
 import { assertRelativeDirectory } from '../../src/server/routes/rig.ts';
 
@@ -413,12 +418,14 @@ describe('comparing a machine with the archive', () => {
     size,
     mtime: 1,
   });
-  // Region 1 and 2 are this machine's; anything else belongs elsewhere.
+  // Region 1 and 2 are this machine's; anything else belongs elsewhere. The
+  // real one is the scan's parser; this reads the same two tokens off a name.
   const opts = {
     regions: [1, 2],
-    regionOfName: (n: string) => {
-      const m = /_region(\d+)\./.exec(n);
-      return m?.[1] ? Number(m[1]) : null;
+    describeName: (n: string) => {
+      const m = /_(v\d+[a-z]?)_region(\d+)\./.exec(n);
+      if (!m) return null;
+      return { region: Number(m[2]), verLabel: m[1] as string, base: n.split('_v')[0] as string };
     },
   };
 
@@ -474,12 +481,20 @@ describe('comparing a machine with the archive', () => {
 
   it("separates another machine's media from media the archive never saw", () => {
     const c = compareMachine(
-      [onDisk('a_v004_region7.mov', 10), onDisk('holiday-photo.jpg', 20)],
+      [
+        onDisk('a_v004_region7.mov', 10),
+        onDisk('b_v004_region1.mov', 15),
+        onDisk('holiday-photo.jpg', 20),
+      ],
       [],
       opts,
     );
+    // Region 7 is somebody else's; region 1 is this machine's, so a file the
+    // archive has no row for is unexpected media HERE; the photo is a name
+    // nothing in this grammar can read.
     expect(c.extraForeign.map((x) => x.name)).toEqual(['a_v004_region7.mov']);
-    expect(c.extraUnknown.map((x) => x.name)).toEqual(['holiday-photo.jpg']);
+    expect(c.extraUnknown.map((x) => x.name)).toEqual(['b_v004_region1.mov']);
+    expect(c.extraUnparsed.map((x) => x.name)).toEqual(['holiday-photo.jpg']);
   });
 
   it('counts a correct machine as correct and says nothing else about it', () => {
@@ -546,9 +561,59 @@ describe('comparing a machine with the archive', () => {
       c.presentSuperseded.length +
       c.sizeMismatch.length +
       c.extraForeign.length +
-      c.extraUnknown.length;
+      c.extraUnknown.length +
+      c.extraUnparsed.length +
+      c.regionless.length;
     expect(bucketed).toBe(actual.length);
     expect(c.actual).toEqual({ count: 5, bytes: 150 });
+  });
+
+  /**
+   * A file with no region belongs to no machine, because the allocation is BY
+   * region. Reporting one as extra on a machine is a finding that is not there,
+   * and on the real rig it was 388 of them on one machine -- 0.63 TiB of
+   * whole-canvas deliverables read as strangers. Confirmed with the user:
+   * *"if not in the archive at all just means content without a region ignore
+   * these files"*.
+   */
+  it('does not treat a file with no region as extra: it belongs to no machine', () => {
+    const c = compareMachine(
+      [onDisk('888_IMAG_LARS_EDIT_RECT_v001.mov', 10)],
+      [],
+      {
+        regions: [1, 2],
+        // A valid name the grammar reads -- it simply carries no region.
+        describeName: () => ({ region: null, verLabel: 'v001', base: '888_IMAG_LARS_EDIT_RECT' }),
+      },
+    );
+    expect(c.regionless.map((x) => x.name)).toEqual(['888_IMAG_LARS_EDIT_RECT_v001.mov']);
+    expect(c.extraUnknown).toEqual([]);
+    expect(c.extraForeign).toEqual([]);
+    // Still counted, or the arithmetic would stop closing.
+    expect(totalsOf(c).regionlessFiles).toBe(1);
+    expect(c.actual.count).toBe(1);
+  });
+
+  /**
+   * A name nothing here can read is NOT the same as a name with no region.
+   * `120_LIQUID_CUE_H_LL180_v006_region0_proxy3.mov` writes its tokens in the
+   * wrong order and is real, on the real rig; so is a stray with no version at
+   * all. Merging them into the regionless pile would hide both.
+   */
+  it('keeps an unreadable name apart from a name with no region', () => {
+    const c = compareMachine([onDisk('RORSCHACH_Processed_260723.mov', 10)], [], {
+      regions: [1, 2],
+      describeName: () => null,
+    });
+    expect(c.extraUnparsed.map((x) => x.name)).toEqual(['RORSCHACH_Processed_260723.mov']);
+    expect(c.regionless).toEqual([]);
+  });
+
+  it('reads the region, version and base off a name the archive does not have', () => {
+    const c = compareMachine([onDisk('b_v009_region7.mov', 10)], [], opts);
+    // Region 7 is another machine's, so this is a copy in the wrong place --
+    // and the row can say which version and which slice without the index.
+    expect(c.extraForeign[0]).toMatchObject({ region: 7, verLabel: 'v009', base: 'b' });
   });
 });
 
@@ -724,64 +789,116 @@ describe('the master list of what is missing across the rig', () => {
     [4, ['103', '208']],
     [5, ['104', '208']],
   ]);
+  /**
+   * The actors. THE UNDERSTUDY IS A BACKUP, and that is what decides every
+   * state below. Confirmed by the user: *"the understudy machines are backups,
+   * so if files are not found on the main (actor) machine they are missing."*
+   */
+  const primaries = new Set(['103', '104']);
 
-  it('is GONE when no surveyed holder has it and both were looked at', () => {
-    // The finding that matters most: nothing on the rig can put this on screen.
+  it('is MISSING when the machine that plays it has not got it, and nothing else has either', () => {
+    // The finding that matters most: the show cannot play it and the rig cannot
+    // supply it, so it has to come back from the archive.
     const r = rollUpMissing(
       [machine('103', [file('a_region4.mov', 4)]), machine('208', [file('a_region4.mov', 4)])],
       holders,
+      primaries,
     );
     expect(r.rows).toHaveLength(1);
     expect(r.rows[0]).toMatchObject({
-      state: 'gone',
+      state: 'missing',
       missingFrom: ['103', '208'],
       presentOn: [],
       unknownOn: [],
+      primaryOn: ['103'],
     });
-    expect(r.counts.gone).toBe(1);
+    expect(r.counts.missing).toBe(1);
+    expect(r.unplayable.files).toBe(1);
   });
 
-  it('is REDUCED when the other holder still has it — the show still plays', () => {
+  /**
+   * THE RULE THAT REPLACED `reduced`. A copy on the understudy does not put the
+   * file on screen: the actor is what plays. The old reading called this "the
+   * show still plays", which was wrong, and it was wrong quietly.
+   */
+  it('is RECOVERABLE, not fine, when only the backup has it — the actor is what plays', () => {
     const r = rollUpMissing(
       [machine('103', [file('a_region4.mov', 4)]), machine('208', [])],
       holders,
+      primaries,
     );
     expect(r.rows[0]).toMatchObject({
-      state: 'reduced',
+      state: 'recoverable',
       missingFrom: ['103'],
       presentOn: ['208'],
     });
-    expect(r.counts.gone).toBe(0);
+    // Still an alarm, and still not `missing`: it can be restored from the rig
+    // rather than from the archive, which is the only difference.
+    expect(r.counts.missing).toBe(0);
+    expect(r.unplayable.files).toBe(1);
   });
 
-  it('is UNCONFIRMED, never gone, when a holder was not surveyed', () => {
-    // THE HONESTY RULE. 208 was offline; we did not look. Calling this `gone`
-    // would be reporting a finding we did not make, and it is the difference
-    // between "copy this file tonight" and "the rig is fine".
-    const r = rollUpMissing([machine('103', [file('a_region4.mov', 4)])], holders);
+  it('is SPARE LOST when the actor has it and the backup does not — the one state that is not an alarm', () => {
+    const r = rollUpMissing(
+      [machine('103', []), machine('208', [file('a_region4.mov', 4)])],
+      holders,
+      primaries,
+    );
+    expect(r.rows[0]).toMatchObject({
+      state: 'spareLost',
+      missingFrom: ['208'],
+      presentOn: ['103'],
+    });
+    expect(r.unplayable.files).toBe(0);
+  });
+
+  it('is UNCONFIRMED when the machine that PLAYS it was not surveyed', () => {
+    // THE HONESTY RULE, now correctly scoped. 103 is the actor and was not
+    // read; 208 is a backup and its answer cannot settle the question.
+    const r = rollUpMissing([machine('208', [file('a_region4.mov', 4)])], holders, primaries);
     expect(r.rows[0]).toMatchObject({
       state: 'unconfirmed',
-      missingFrom: ['103'],
-      unknownOn: ['208'],
+      missingFrom: ['208'],
+      unknownOn: ['103'],
       presentOn: [],
     });
-    expect(r.counts.gone).toBe(0);
+    expect(r.counts.missing).toBe(0);
+    expect(r.unsurveyedHolders).toEqual(['103']);
+    // And it says the omission is one that matters: an unread ACTOR is a
+    // finding this list cannot make at all.
+    expect(r.unsurveyedPrimaries).toEqual(['103']);
+  });
+
+  /**
+   * The real rig, first run: one actor surveyed, its understudy not. Under the
+   * old reading all 1,292 files came back `unconfirmed` — "we did not look at
+   * 207". Under the user's rule they are missing from the machine that plays
+   * them, and 207 could only have made them recoverable, never fine.
+   */
+  it('is an alarm when the actor is missing it and only the BACKUP was unsurveyed', () => {
+    const r = rollUpMissing([machine('103', [file('a_region4.mov', 4)])], holders, primaries);
+    expect(r.rows[0]).toMatchObject({ state: 'missing', missingFrom: ['103'], unknownOn: ['208'] });
+    expect(r.unsurveyedPrimaries).toEqual([]);
+    // The list still says a machine was not read: `missing` here means "no machine
+    // we looked at has it", and the UI must not upgrade that to "it exists
+    // nowhere". 208 stays visible as an unanswered question.
     expect(r.unsurveyedHolders).toEqual(['208']);
   });
 
   it('does not treat a wrong-sized copy as a copy', () => {
     // Whatever that file is, it is not the one the archive recorded. Counting
-    // it as a spare would turn a `gone` into a `reduced` and hide the worst
-    // finding the survey can make.
+    // it as a copy would turn a `missing` into a `recoverable` and hide the fact
+    // that the archive is the only place left to get it from.
     const r = rollUpMissing(
       [
         machine('103', [file('a_region4.mov', 4)]),
         machine('208', [], [{ name: 'a_region4.mov' }]),
       ],
       holders,
+      primaries,
     );
     expect(r.rows[0]).toMatchObject({
-      state: 'gone',
+      state: 'missing',
       wrongSizeOn: ['208'],
       presentOn: [],
     });
@@ -791,33 +908,41 @@ describe('the master list of what is missing across the rig', () => {
     const r = rollUpMissing(
       [machine('103', [file('a_region4.mov', 4)]), machine('208', [file('a_region4.mov', 4)])],
       holders,
+      primaries,
     );
     expect(r.rows).toHaveLength(1);
     expect(r.rows[0]?.missingFrom).toEqual(['103', '208']);
   });
 
   it('ignores a machine that failed, rather than reading it as complete', () => {
-    const failed = { machineId: '208', error: 'not reachable', comparison: null };
-    const r = rollUpMissing([machine('103', [file('a_region4.mov', 4)]), failed], holders);
-    // 208 errored, so it is unknown -- not a holder that "has" the file.
+    const failed = { machineId: '103', error: 'not reachable', comparison: null };
+    const r = rollUpMissing([machine('208', [file('a_region4.mov', 4)]), failed], holders, primaries);
+    // The actor errored, so it is unknown -- and unknown on the machine that
+    // decides is the whole of what `unconfirmed` now means.
     expect(r.rows[0]?.state).toBe('unconfirmed');
-    expect(r.rows[0]?.unknownOn).toEqual(['208']);
+    expect(r.rows[0]?.unknownOn).toEqual(['103']);
   });
 
-  it('orders gone first, then unconfirmed, then reduced, biggest first', () => {
+  it('orders missing first, then recoverable, then unconfirmed, then spare lost, biggest first', () => {
     const r = rollUpMissing(
       [
-        machine('103', [file('gone.mov', 4, 10), file('small-gone.mov', 4, 1), file('reduced.mov', 5, 999)]),
-        machine('208', [file('gone.mov', 4, 10), file('small-gone.mov', 4, 1)]),
+        machine('103', [file('missing.mov', 4, 10), file('small-missing.mov', 4, 1), file('recoverable.mov', 4, 999)]),
+        machine('208', [file('missing.mov', 4, 10), file('small-missing.mov', 4, 1), file('spare-lost.mov', 5, 5000)]),
         machine('104', []),
       ],
       holders,
+      primaries,
     );
-    expect(r.rows.map((x) => x.name)).toEqual(['gone.mov', 'small-gone.mov', 'reduced.mov']);
-    expect(r.rows.map((x) => x.state)).toEqual(['gone', 'gone', 'reduced']);
+    expect(r.rows.map((x) => x.name)).toEqual([
+      'missing.mov',
+      'small-missing.mov',
+      'recoverable.mov',
+      'spare-lost.mov',
+    ]);
+    expect(r.rows.map((x) => x.state)).toEqual(['missing', 'missing', 'recoverable', 'spareLost']);
   });
 
-  it('rolls up per region, worst region first, naming who carries it', () => {
+  it('rolls up per region, worst region first, naming who carries it and who plays it', () => {
     const r = rollUpMissing(
       [
         machine('103', [file('a_region4.mov', 4, 10)]),
@@ -825,16 +950,41 @@ describe('the master list of what is missing across the rig', () => {
         machine('104', []),
       ],
       holders,
+      primaries,
     );
-    expect(r.byRegion[0]).toMatchObject({ region: 4, holders: ['103', '208'], files: 1, gone: 1 });
-    expect(r.byRegion[1]).toMatchObject({ region: 5, gone: 0 });
+    expect(r.byRegion[0]).toMatchObject({
+      region: 4,
+      holders: ['103', '208'],
+      primaries: ['103'],
+      files: 1,
+      missing: 1,
+      unplayable: 1,
+    });
+    // Region 5's actor has it; only the spare is gone, so the region is not an
+    // alarm however many bytes it is.
+    expect(r.byRegion[1]).toMatchObject({ region: 5, missing: 0, unplayable: 0 });
+  });
+
+  /**
+   * With no roles to go on -- an allocation that names none, or machine ids
+   * this rig does not know -- every holder decides. That is the old
+   * any-copy-will-do behaviour, and it is the only safe reading without them.
+   */
+  it('falls back to treating every holder as equal when none is a primary', () => {
+    const r = rollUpMissing(
+      [machine('103', [file('a_region4.mov', 4)]), machine('208', [])],
+      holders,
+      new Set(),
+    );
+    expect(r.rows[0]?.state).toBe('spareLost');
   });
 
   it('is clean when nothing is missing anywhere', () => {
-    const r = rollUpMissing([machine('103', []), machine('208', [])], holders);
+    const r = rollUpMissing([machine('103', []), machine('208', [])], holders, primaries);
     expect(r.clean).toBe(true);
     expect(r.rows).toEqual([]);
     expect(r.unsurveyedHolders).toEqual([]);
+    expect(r.unplayable).toEqual({ files: 0, bytes: 0 });
   });
 
   it('is served by the status route even before a survey has run', async () => {
@@ -842,3 +992,285 @@ describe('the master list of what is missing across the rig', () => {
     expect(body.survey.missing).toMatchObject({ rows: [], clean: true });
   });
 });
+
+/**
+ * ============================================================================
+ *  THE MASTER LIST AS A CSV
+ * ============================================================================
+ *
+ * Two things could go wrong here and neither would be loud. The export could
+ * carry something the rig session promises never to write down -- an address,
+ * a password -- or it could quietly stop where the TABLE stops and hand over a
+ * list of findings with findings missing from it.
+ */
+describe('exporting the master list', () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    name: 'a_v004_region4.mov',
+    size: 100,
+    region: 4,
+    songFolder: '100_ALPHA',
+    base: '100_ALPHA_MAIN_LL180',
+    verLabel: 'v004',
+    missingFrom: ['103'],
+    wrongSizeOn: [],
+    presentOn: ['208'],
+    unknownOn: [],
+    primaryOn: ['103'],
+    state: 'recoverable',
+    ...over,
+  }) as unknown as Parameters<typeof formatMissingCsv>[0]['rows'][number];
+
+  it('writes a header and one line per row, CRLF, ending on a row boundary', () => {
+    const csv = formatMissingCsv({ rows: [row(), row({ name: 'b_v004_region4.mov' })] });
+    const lines = csv.split('\r\n');
+    expect(lines[0]).toBe(MISSING_CSV_COLUMNS.join(','));
+    expect(lines).toHaveLength(4); // header, two rows, and the trailing break
+    expect(lines[3]).toBe('');
+    expect(lines[1]).toBe('recoverable,100_ALPHA,a_v004_region4.mov,v004,4,100,103,208,,');
+  });
+
+  it('carries BYTES, not a formatted size — a sheet can add up a number', () => {
+    const csv = formatMissingCsv({ rows: [row({ size: 51114466479 })] });
+    expect(csv).toContain(',51114466479,');
+    expect(csv).not.toMatch(/TiB|GiB/);
+  });
+
+  it('puts several machines in one cell without breaking the row', () => {
+    const csv = formatMissingCsv({ rows: [row({ missingFrom: ['103', '208'], presentOn: [] })] });
+    // Space-separated: a machine id cannot contain a space, so no quoting is
+    // needed and no comma is introduced into a comma-separated file.
+    expect(csv).toContain(',103 208,');
+    expect(csv.trimEnd().split('\r\n')).toHaveLength(2);
+  });
+
+  it('escapes a quote, a comma and a line break rather than corrupting the file', () => {
+    expect(csvField('plain')).toBe('plain');
+    expect(csvField('a,b')).toBe('"a,b"');
+    expect(csvField('say "hi"')).toBe('"say ""hi"""');
+    expect(csvField('two\nlines')).toBe('"two\nlines"');
+    const csv = formatMissingCsv({ rows: [row({ name: 'weird,name "quoted".mov' })] });
+    expect(csv).toContain('"weird,name ""quoted"".mov"');
+  });
+
+  it('exports EVERY row, never the visible ones — the tab caps at 500, this does not', () => {
+    const rows = Array.from({ length: 900 }, (_, i) => row({ name: `f${i}_v004_region4.mov` }));
+    const csv = formatMissingCsv({ rows });
+    expect(csv.trimEnd().split('\r\n')).toHaveLength(901);
+  });
+
+  it('keeps the roll-up\'s order, which is the order the findings matter in', () => {
+    const csv = formatMissingCsv({
+      rows: [row({ state: 'missing', name: 'first.mov' }), row({ state: 'spareLost', name: 'last.mov' })],
+    });
+    const lines = csv.split('\r\n');
+    expect(lines[1]).toContain('first.mov');
+    expect(lines[2]).toContain('last.mov');
+  });
+
+  describe('the route', () => {
+    it('serves it as an attachment, without writing a file', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/rig/missing.csv' });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+      expect(res.headers['content-disposition']).toContain('attachment');
+      // An empty session still answers with a well-formed file: a header and
+      // nothing else, rather than a 404 or an empty body.
+      expect(res.body).toBe(`${MISSING_CSV_COLUMNS.join(',')}\r\n`);
+    });
+
+    /**
+     * THE ONE THAT MATTERS. Addresses and the credential live in `RigSession`
+     * and are promised never to be written anywhere; this is the only file the
+     * rig tab can produce besides the target YAML, so it is asserted the same
+     * way that one is -- behaviourally, against a session that actually holds
+     * both.
+     */
+    it('NEVER contains an address or a credential', async () => {
+      await req('POST', '/api/rig/targets', { text: '103 10.10.1.53\n208 10.10.1.54' });
+      await req('POST', '/api/rig/credentials', { username: 'd3', password: 'hunter2' });
+      const res = await app.inject({ method: 'GET', url: '/api/rig/missing.csv' });
+      expect(res.body).not.toContain('10.10.1.53');
+      expect(res.body).not.toContain('10.10.1.54');
+      expect(res.body).not.toContain('hunter2');
+      await req('DELETE', '/api/rig/session');
+    });
+  });
+});
+
+/**
+ * ============================================================================
+ *  BROWSING FOR THE DIRECTORY
+ * ============================================================================
+ *
+ * The survey takes one directory and applies it to every machine, and until
+ * this existed the only way to supply one was to type it from memory. That is
+ * the one input on this tab whose mistake is SILENT: a directory that is not
+ * there surveys as an empty machine, and an empty machine compares as a rig
+ * with nothing on it -- or, if the archive expects nothing of it, as a clean
+ * one. So the picker matters, and so does the fence around it.
+ *
+ * Nothing here mounts anything. The mountpoint is a local sandbox directory,
+ * which is exactly what `browseDirectory` is handed in production: a path this
+ * Mac can read, fenced to itself by `ReadOnlyFs`.
+ */
+describe('choosing the directory off the machine instead of typing it', () => {
+  let sandbox: string;
+
+  beforeAll(() => {
+    sandbox = mkdtempSync(join(tmpdir(), 'metal-media-size-browse-'));
+    mkdirSync(join(sandbox, 'share', 'SHOW_2026', '01_Media'), { recursive: true });
+    mkdirSync(join(sandbox, 'share', 'SHOW_2026', '02_Backup'), { recursive: true });
+    mkdirSync(join(sandbox, 'share', 'SHOW_2026', '10_Late'), { recursive: true });
+    mkdirSync(join(sandbox, 'share', 'SHOW_2026', '2_Middle'), { recursive: true });
+    mkdirSync(join(sandbox, 'outside-the-share'), { recursive: true });
+    writeFileSync(join(sandbox, 'share', 'SHOW_2026', '01_Media', 'a_v001_region1.mov'), 'x');
+    writeFileSync(join(sandbox, 'share', 'SHOW_2026', '01_Media', 'a_v001_region2.mov'), 'xx');
+  });
+
+  afterAll(() => {
+    rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  const share = (): string => join(sandbox, 'share');
+
+  it('lists the folders one level down, with the path the survey takes', async () => {
+    const listing = await browseDirectory({ mountPoint: share(), directory: 'SHOW_2026' });
+    expect(listing.directories.map((d) => d.name)).toEqual([
+      '01_Media',
+      '02_Backup',
+      '2_Middle',
+      '10_Late',
+    ]);
+    // Relative to the SHARE ROOT, not to the directory listed: it goes straight
+    // into the survey field, which is defined that way.
+    expect(listing.directories[0]?.path).toBe('SHOW_2026/01_Media');
+  });
+
+  it('orders 10 after 2, because a show numbers its folders', async () => {
+    const listing = await browseDirectory({ mountPoint: share(), directory: 'SHOW_2026' });
+    const names = listing.directories.map((d) => d.name);
+    expect(names.indexOf('2_Middle')).toBeLessThan(names.indexOf('10_Late'));
+  });
+
+  it('counts the files sitting here without opening one', async () => {
+    const listing = await browseDirectory({
+      mountPoint: share(),
+      directory: 'SHOW_2026/01_Media',
+    });
+    expect(listing.fileCount).toBe(2);
+    expect(listing.directories).toEqual([]);
+    // No size anywhere in the payload: sizes would cost a round trip per file
+    // on an SMB share, and comparing them is the survey's job.
+    expect(JSON.stringify(listing)).not.toMatch(/size/i);
+  });
+
+  it('knows where the way back up is, and that the share root has none', async () => {
+    expect((await browseDirectory({ mountPoint: share(), directory: '' })).parent).toBeNull();
+    expect((await browseDirectory({ mountPoint: share(), directory: 'SHOW_2026' })).parent).toBe('');
+    expect(
+      (await browseDirectory({ mountPoint: share(), directory: 'SHOW_2026/01_Media' })).parent,
+    ).toBe('SHOW_2026');
+  });
+
+  it('cannot be walked out of the share, even given a path that tries', async () => {
+    // The route refuses `..` with a readable message; this is the structural
+    // refusal underneath it, which holds whatever the route does.
+    await expect(
+      browseDirectory({ mountPoint: share(), directory: '../outside-the-share' }),
+    ).rejects.toMatchObject({ code: 'PATH_NOT_ALLOWED' });
+  });
+
+  it('does not follow a symlink out, and does not offer one as a folder', async () => {
+    symlinkSync(join(sandbox, 'outside-the-share'), join(share(), 'escape-hatch'), 'dir');
+    const listing = await browseDirectory({ mountPoint: share(), directory: '' });
+    expect(listing.directories.map((d) => d.name)).toEqual(['SHOW_2026']);
+    // Nor is it quietly counted as a file, which would misdescribe the place.
+    expect(listing.fileCount).toBe(0);
+  });
+
+  it('says when the list is cut short, rather than reading as complete', async () => {
+    const many = join(sandbox, 'many');
+    for (let i = 0; i < MAX_BROWSE_ENTRIES + 5; i += 1) {
+      mkdirSync(join(many, `d${String(i).padStart(4, '0')}`), { recursive: true });
+    }
+    const listing = await browseDirectory({ mountPoint: sandbox, directory: 'many' });
+    expect(listing.directories).toHaveLength(MAX_BROWSE_ENTRIES);
+    expect(listing.truncated).toBe(true);
+  });
+
+  describe('the route', () => {
+    afterAll(async () => {
+      // Leave the shared session exactly as it was found: the other route
+      // tests read a rig with nothing mounted.
+      await req('DELETE', '/api/rig/session');
+    });
+
+    it('refuses to browse when no machine is mounted', async () => {
+      await req('DELETE', '/api/rig/session');
+      const { status, body } = await req('GET', '/api/rig/browse');
+      expect(status).toBe(400);
+      expect(body.error.code).toBe('not_connected');
+    });
+
+    it('refuses a directory that tries to leave the share', async () => {
+      const { status, body } = await req('GET', '/api/rig/browse?directory=../..');
+      expect(status).toBe(400);
+      expect(body.error.code).toBe('bad_directory');
+    });
+
+    it('lists one machine, and says which one it read', async () => {
+      await req('POST', '/api/rig/targets', { text: '301 10.10.1.53\n302 10.10.1.54' });
+      mountAt(ctx, '10.10.1.53', share());
+      mountAt(ctx, '10.10.1.54', join(sandbox, 'outside-the-share'));
+
+      const { status, body } = await req('GET', '/api/rig/browse?directory=SHOW_2026');
+      expect(status).toBe(200);
+      // Named, never inferred by the UI: the survey applies this path to every
+      // machine, and a path present on 301 and absent on 302 is a finding the
+      // SURVEY makes. Browsing must not stand in for it.
+      expect(body.host).toBe('10.10.1.53');
+      expect(body.machineId).toBe('301');
+      expect(body.mountedHosts).toHaveLength(2);
+      expect(body.directories.map((d: { name: string }) => d.name)).toContain('01_Media');
+    });
+
+    it('reads the machine that was asked for', async () => {
+      const { body } = await req('GET', '/api/rig/browse?host=10.10.1.54');
+      expect(body.machineId).toBe('302');
+      expect(body.directories).toEqual([]);
+    });
+
+    it('refuses a machine that is not mounted, rather than picking another', async () => {
+      const { status, body } = await req('GET', '/api/rig/browse?host=10.10.1.99');
+      expect(status).toBe(400);
+      expect(body.error.code).toBe('unknown_host');
+    });
+
+    it('says a directory is not there, instead of reporting it empty', async () => {
+      const { status, body } = await req('GET', '/api/rig/browse?directory=SHOW_2027');
+      expect(status).toBe(400);
+      expect(body.error.code).toBe('no_such_directory');
+    });
+
+    it('never touches a file: the sandbox is unchanged afterwards', () => {
+      // Names and directory entries only -- the same promise the survey makes.
+      expect(readdirSync(join(share(), 'SHOW_2026', '01_Media')).sort()).toEqual([
+        'a_v001_region1.mov',
+        'a_v001_region2.mov',
+      ]);
+    });
+  });
+});
+
+/**
+ * Put a mountpoint on a target without mounting anything.
+ *
+ * `connect()` runs `mount_smbfs`, which needs a rig on the other end of a
+ * network. The browse route only ever reads `mountPoint`, so a local directory
+ * stands in for one exactly.
+ */
+function mountAt(context: AppContext, host: string, mountPoint: string): void {
+  const target = context.rig.getTargets().find((t) => t.host === host);
+  if (!target) throw new Error(`No target ${host} in the session`);
+  (target as { mountPoint: string | null }).mountPoint = mountPoint;
+}

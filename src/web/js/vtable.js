@@ -26,15 +26,11 @@
  */
 
 import { h, clear } from './dom.js';
+import { ColumnSizer } from './colsize.js';
 import { isNarrow, onBreakpointChange } from './viewport.js';
 
 const PAGE_SIZE = 500;
 const OVERSCAN = 12;
-
-/** Narrowest a column may be dragged. Below this a header reads as a smudge. */
-const MIN_COL_PX = 36;
-/** Where per-layout column widths live between visits. */
-const WIDTH_STORE = 'aa.colWidths';
 
 export class VirtualTable {
   /**
@@ -51,9 +47,16 @@ export class VirtualTable {
     this.inflight = new Map();
     this.generation = 0;
     this.pool = new Map();
-    /** Column key -> pixel width the user dragged it to. */
-    this.widths = new Map();
-    this.loadWidths();
+    // Column widths, the drag and its storage live in `colsize.js` — shared
+    // with the Rig tab's lists, which resize the same way and must not acquire
+    // a second idea of what that means.
+    this.sizer = new ColumnSizer({
+      storageKey: () => this.opts.layoutKey?.() ?? 'default',
+      columns: () => this.opts.columns,
+      apply: () => this.applyTemplate(),
+      host: () => this.host,
+      bounds: () => this.headEl,
+    });
     this.build();
   }
 
@@ -147,74 +150,21 @@ export class VirtualTable {
   }
 
   // -------------------------------------------------------------------------
-  // Column widths
-  //
-  // A column keeps the width declared in tableview.js until the user drags it;
-  // from then on that one column is pinned in pixels and the flexible columns
-  // around it absorb the difference, which is why a drag neither overflows the
-  // pane nor disturbs anything to its left. Double-clicking a grip gives the
-  // declared width back.
+  // Column widths are `colsize.js`. What stays here is the part that is this
+  // table's own: what its widths are filed under, and where the resulting grid
+  // template has to be written.
   // -------------------------------------------------------------------------
 
-  storageKey() {
-    return `${WIDTH_STORE}.${this.opts.layoutKey?.() ?? 'default'}`;
-  }
-
   loadWidths() {
-    this.widths = new Map();
-    try {
-      const raw = localStorage.getItem(this.storageKey());
-      if (!raw) return;
-      for (const [key, px] of Object.entries(JSON.parse(raw))) {
-        if (Number.isFinite(px) && px >= MIN_COL_PX) this.widths.set(key, px);
-      }
-    } catch {
-      // A corrupt or unavailable store is not worth failing a table over.
-    }
-  }
-
-  saveWidths() {
-    try {
-      if (this.widths.size === 0) localStorage.removeItem(this.storageKey());
-      else localStorage.setItem(this.storageKey(), JSON.stringify(Object.fromEntries(this.widths)));
-    } catch {
-      // Private mode, quota, no storage: the drag still worked for this visit.
-    }
+    this.sizer.load();
   }
 
   gridTemplate() {
-    return this.opts.columns
-      .map((c) => (this.trackOf(c)))
-      .join(' ');
+    return this.sizer.gridTemplate();
   }
 
-  /** The grid track for one column: a dragged pixel width wins over the declared one. */
-  trackOf(col) {
-    const px = this.widths.get(col.key);
-    return px ? `${px}px` : col.width || '1fr';
-  }
-
-  /**
-   * The narrowest the row can be drawn without a column going below what it
-   * was declared to need. Columns flex down to this as the window narrows;
-   * past it the table scrolls sideways rather than swallowing the columns on
-   * its right-hand end.
-   *
-   * It has to be computed rather than measured. The canvas takes `contain:
-   * strict`, which clips as well as isolates, so a row left to overflow it is
-   * not merely hidden but absent from the scrollable area -- the scroller
-   * would have nothing to scroll to. So the minimum is read off the track
-   * list: `120px` and `minmax(120px, 2fr)` both floor at 120, a bare `1fr`
-   * floors at 0, and a dragged column floors at the width it was dragged to.
-   */
   contentMinWidth() {
-    let total = 0;
-    for (const col of this.opts.columns) {
-      const track = this.trackOf(col);
-      const m = /^minmax\(\s*([\d.]+)px/.exec(track) || /^([\d.]+)px$/.exec(track);
-      total += m ? Number.parseFloat(m[1]) : 0;
-    }
-    return Math.ceil(total);
+    return this.sizer.contentMinWidth();
   }
 
   /** Push the current template into the head and every live row. */
@@ -257,50 +207,6 @@ export class VirtualTable {
     if (this.headEl.style.paddingRight !== px) this.headEl.style.paddingRight = px;
   }
 
-  setColumnWidth(key, px) {
-    this.widths.set(key, Math.round(px));
-    this.applyTemplate();
-  }
-
-  resetColumnWidth(key) {
-    if (!this.widths.delete(key)) return;
-    this.applyTemplate();
-    this.saveWidths();
-  }
-
-  /**
-   * Drag one column edge. The pointer is captured, so the drag survives the
-   * cursor leaving the 6px grip -- without that, a fast drag stops dead.
-   */
-  beginResize(event, col, cell) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startW = cell.getBoundingClientRect().width;
-    // Never let a column be dragged wider than the pane it lives in.
-    const maxW = Math.max(MIN_COL_PX, this.headEl.getBoundingClientRect().width - MIN_COL_PX);
-    const grip = event.currentTarget;
-    grip.setPointerCapture(event.pointerId);
-    grip.classList.add('dragging');
-    this.host.classList.add('is-resizing');
-
-    const move = (e) => {
-      this.setColumnWidth(col.key, Math.min(maxW, Math.max(MIN_COL_PX, startW + (e.clientX - startX))));
-    };
-    const end = () => {
-      grip.removeEventListener('pointermove', move);
-      grip.removeEventListener('pointerup', end);
-      grip.removeEventListener('pointercancel', end);
-      grip.classList.remove('dragging');
-      this.host.classList.remove('is-resizing');
-      this.saveWidths();
-    };
-    grip.addEventListener('pointermove', move);
-    grip.addEventListener('pointerup', end);
-    grip.addEventListener('pointercancel', end);
-  }
-
   renderHead() {
     const { columns, getSort, onSort } = this.opts;
     const sort = getSort ? getSort() : {};
@@ -317,19 +223,7 @@ export class VirtualTable {
         col.head ? col.head() : col.label,
         active ? h('span.sort-arrow', { text: sort.dir === 'asc' ? '▲' : '▼' }) : null,
       );
-      cell.appendChild(
-        h('div.vt-grip', {
-          title: 'Drag to resize this column · double-click to reset it',
-          onPointerDown: (e) => this.beginResize(e, col, cell),
-          // The grip sits inside a sortable header; a click that got through
-          // would re-sort the table the moment a drag ended.
-          onClick: (e) => e.stopPropagation(),
-          onDblClick: (e) => {
-            e.stopPropagation();
-            this.resetColumnWidth(col.key);
-          },
-        }),
-      );
+      cell.appendChild(this.sizer.grip(col, cell));
       this.headEl.appendChild(cell);
     }
     this.canvas.style.minWidth = `${this.contentMinWidth()}px`;

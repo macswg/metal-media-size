@@ -8,6 +8,8 @@
  *   POST   /api/rig/credentials      a user name and password, for this session
  *   POST   /api/rig/connect          mount every target's share, READ-ONLY
  *   POST   /api/rig/disconnect       unmount the ones we mounted
+ *   GET    /api/rig/browse           list the directories on one machine
+ *   GET    /api/rig/missing.csv      the master missing list, as a file to save
  *   POST   /api/rig/survey           walk them all and compare (cancellable)
  *   POST   /api/rig/survey/cancel    stop before the next machine
  *   GET    /api/rig/status           targets, mounts, progress, results
@@ -30,6 +32,13 @@
  * See `src/rig/mounts.ts`. A share the operator separately connected in Finder
  * is read-write, and `alsoWritableElsewhere` says so rather than hiding it.
  *
+ * THE DIRECTORY MAY BE PICKED RATHER THAN TYPED. `browse` lists one directory,
+ * one level deep, on ONE mounted machine, so the operator can choose the path
+ * the survey will use on ALL of them. It reads directory entries and nothing
+ * else -- no file is opened, no tree is walked. A mistyped directory surveys
+ * clean, and a clean survey is the answer an operator hopes for, which is what
+ * makes the typo worth removing. See `src/rig/browse.ts`.
+ *
  * THE DIRECTORY CANNOT ESCAPE THE SHARE. It is relative by construction --
  * absolute paths and `..` segments are refused here with a plain message, and
  * `ReadOnlyFs` refuses them again structurally, fenced to the one mountpoint.
@@ -48,14 +57,16 @@ import type { FastifyInstance } from 'fastify';
 import { isAbsolute, join } from 'node:path';
 import type { AppContext } from '../context.ts';
 import { resolveSnapshot } from '../context.ts';
-import { badRequest } from '../errors.ts';
+import { badRequest, messageOf } from '../errors.ts';
 import { parseKeepN, type Query } from '../query.ts';
 import { ExclusionMatcher } from '../../scan/exclude.ts';
-import { makeParser } from '../../scan/parse.ts';
-import { machinesByRegion, resolveMachines } from '../../machines.ts';
+import { formatVerLabel, makeParser } from '../../scan/parse.ts';
+import { machinesByRegion, primaryMachineIds, resolveMachines } from '../../machines.ts';
 import { formatTargetsYaml, parseTargetList, type RigTarget } from '../../rig/targets.ts';
+import { browseDirectory } from '../../rig/browse.ts';
+import { formatMissingCsv } from '../../rig/missing-csv.ts';
 import { listSmbMounts } from '../../rig/mounts.ts';
-import type { ExpectedFile } from '../../rig/survey.ts';
+import type { ExpectedFile, NameDescription } from '../../rig/survey.ts';
 import type { SurveyJob } from '../rig-session.ts';
 
 /** The share every d3 machine offers, unless the operator says otherwise. */
@@ -153,6 +164,26 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
       .send(yaml);
   });
 
+  /**
+   * The master missing list as the file the operator saves.
+   *
+   * Rendered into the response body and never written here -- the same shape as
+   * the target YAML above, and for the same reason: the rig session is not
+   * persisted, and an export that landed in `exports/` would be the first thing
+   * to break that. The browser offers it as a download, so it goes wherever the
+   * operator chooses, outside this project.
+   *
+   * The WHOLE list, not the 500 rows the tab paints. Machine ids only; the
+   * roll-up has no address and no credential in it to leak.
+   */
+  app.get('/api/rig/missing.csv', (_req, reply) => {
+    const csv = formatMissingCsv(ctx.rig.status().survey.missing);
+    void reply
+      .header('content-type', 'text/csv; charset=utf-8')
+      .header('content-disposition', 'attachment; filename="rig-missing.csv"')
+      .send(csv);
+  });
+
   /** Hold a credential for this session only. Never stored, never returned. */
   app.post('/api/rig/credentials', (req) => {
     const body = (req.body ?? {}) as CredentialsBody;
@@ -203,6 +234,66 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
   /** SMB shares mounted on this Mac right now, whether or not we mounted them. */
   app.get('/api/rig/mounts', async () => ({ mounts: await listSmbMounts() }));
 
+  /**
+   * List the directories inside one directory, on ONE mounted machine, so the
+   * survey path can be picked instead of typed.
+   *
+   * ONE machine, because the survey takes ONE directory and applies it to every
+   * machine -- the operator is choosing a path, not inspecting a rig. The
+   * machine listed is named in the response so the UI can say whose directories
+   * these are; a path that exists on 301 and not on 302 is a finding the survey
+   * makes, and this must not pre-empt it by quietly listing somewhere else.
+   *
+   * This reads directory entries. It opens no file, walks no tree, and is
+   * fenced to that machine's mountpoint by `ReadOnlyFs`.
+   */
+  app.get('/api/rig/browse', async (req) => {
+    const q = req.query as Query & { host?: string; directory?: string };
+    const directory = assertRelativeDirectory(q.directory);
+
+    const mounted = ctx.rig.getTargets().filter((t) => t.mountPoint !== null);
+    if (mounted.length === 0) {
+      throw badRequest('not_connected', 'No machine is mounted. Connect first, then browse.');
+    }
+    const wanted = typeof q.host === 'string' ? q.host.trim() : '';
+    const target = wanted === '' ? mounted[0] : mounted.find((t) => t.host === wanted);
+    if (!target?.mountPoint) {
+      throw badRequest(
+        'unknown_host',
+        `${wanted || 'That machine'} is not mounted right now, so there is nothing to list.`,
+      );
+    }
+
+    let listing: Awaited<ReturnType<typeof browseDirectory>>;
+    try {
+      listing = await browseDirectory({
+        mountPoint: target.mountPoint,
+        directory,
+        dirTimeoutMs: ctx.cfg.dirTimeoutMs,
+      });
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        throw badRequest(
+          'no_such_directory',
+          directory === ''
+            ? `The share root on ${target.host} could not be read.`
+            : `There is no directory \`${directory}\` on ${target.host}.`,
+        );
+      }
+      throw badRequest('browse_failed', messageOf(err));
+    }
+
+    return {
+      /** Whose directories these are. Never inferred by the UI. */
+      host: target.host,
+      machineId: target.machineId,
+      /** Every machine the same path could have been read from. */
+      mountedHosts: mounted.map((t) => ({ host: t.host, machineId: t.machineId })),
+      ...listing,
+    };
+  });
+
   /** Walk every mounted target and compare it with the archive. */
   app.post('/api/rig/survey', (req) => {
     const q = req.query as Query;
@@ -223,12 +314,30 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
     }
 
     const parse = makeParser(ctx.cfg.parse.pattern, ctx.cfg.parse.flags);
-    const regionOfName = (name: string): number | null => {
+    // One reading of a name, used for two things: which machine a file belongs
+    // to, and what a row says about it. The label is composed by the same
+    // function that composes `ver_label` at index time -- see `formatVerLabel`.
+    const describeName = (name: string): NameDescription | null => {
       const p = parse(name);
-      return p.ok ? p.region : null;
+      if (!p.ok) return null;
+      return {
+        region: p.region,
+        verLabel: formatVerLabel({
+          verNum: p.ver,
+          subLetter: p.sub,
+          isPatch: p.isPatch,
+          patchFrame: p.patchFrame,
+        }),
+        base: p.base,
+      };
     };
+    const regionOfName = (name: string): number | null => describeName(name)?.region ?? null;
 
     const { machines } = resolveMachines();
+    // Which holders PLAY their regions. An understudy is a backup, so a file
+    // absent from its actor is missing whether or not the understudy has it --
+    // confirmed by the user, and the reason `role` is consulted here at all.
+    const primaryHolders = primaryMachineIds(machines);
     const regionsById = new Map(machines.map((m) => [m.id, [...m.regions]]));
     // Every machine that carries each region, from the allocation rather than
     // from the target list: a region whose second holder was not surveyed must
@@ -261,8 +370,9 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
       snapshotId: snapshot.id,
       exclusions: new ExclusionMatcher(ctx.cfg.exclusions.globs, ctx.cfg.exclusions.caseInsensitive),
       dirTimeoutMs: ctx.cfg.dirTimeoutMs,
-      regionOfName,
+      describeName,
       regionHolders,
+      primaryHolders,
       ...(typeof body.concurrency === 'number' ? { concurrency: body.concurrency } : {}),
     });
 

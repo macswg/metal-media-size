@@ -22,7 +22,8 @@
  * removes anything, and it produces no manifest.
  */
 
-import { h, clear, toast } from './dom.js';
+import { h, append, clear, modal, toast } from './dom.js';
+import { gridTable } from './gridtable.js';
 import { state } from './state.js';
 import { api } from './api.js';
 import { bytes as fmtBytes, count } from './format.js';
@@ -46,21 +47,39 @@ export class RigPanel {
     this.timer = null;
     this.busy = false;
     /** Kept out of `status` on purpose — it is never echoed by the server. */
-    this.draft = { text: '', share: 'd3 Projects', directory: '', username: '', password: '' };
+    this.draft = {
+      text: '',
+      share: 'd3 Projects',
+      directory: '',
+      /**
+       * Append d3's own media path to the directory. See `VIDEO_FILE_SUFFIX`.
+       * ON by default: on a d3 machine that is where the media is, so it is
+       * what the operator wants nearly every time.
+       */
+      appendVideoFile: true,
+      username: '',
+      password: '',
+    };
   }
 
   async load() {
     try {
       this.status = await api.rigStatus();
       if (this.status.share) this.draft.share = this.status.share;
-      if (this.status.directory != null) this.draft.directory = this.status.directory;
+      if (this.status.directory) {
+        // The server holds ONE directory: the whole path that was surveyed. The
+        // two controls are a way of typing it, so it is split back into them —
+        // otherwise a reloaded tab shows the suffix in the box AND an unticked
+        // checkbox, and ticking it would append the suffix a second time.
+        const { base, append } = splitVideoFile(this.status.directory);
+        this.draft.directory = base;
+        this.draft.appendVideoFile = append;
+      }
       if (this.status.username) this.draft.username = this.status.username;
       // Show the list the SERVER actually holds, not an empty box beside a
       // populated table — otherwise a reloaded tab looks like it lost the list.
       if (!this.draft.text && this.status.targets?.length) {
-        this.draft.text = this.status.targets
-          .map((t) => (t.machineId ? `${t.machineId} ${t.host}` : t.host))
-          .join('\n');
+        this.draft.text = targetLines(this.status.targets);
       }
     } catch (err) {
       this.status = null;
@@ -102,17 +121,53 @@ export class RigPanel {
 
   /* ---------------------------------------------------------------- actions */
 
+  /**
+   * The directory that will actually be walked: what is typed, plus d3's own
+   * media path when the box is ticked.
+   *
+   * ONE function, used by the survey, by what is stored in the session and by
+   * every line of copy that names the path — a checkbox whose effect the screen
+   * does not show is a checkbox somebody surveys the wrong directory with.
+   */
+  surveyDirectory() {
+    return withVideoFile(this.draft.directory, this.draft.appendVideoFile);
+  }
+
   async submitTargets(text) {
     const res = await api.rigTargets({
       text,
       share: this.draft.share,
-      directory: this.draft.directory,
+      directory: this.surveyDirectory(),
     });
     this.parseErrors = res.errors || [];
     this.unknownMachineIds = res.unknownMachineIds || [];
     this.status = await api.rigStatus();
     const n = (res.targets || []).length;
     if (n) toast(`${n} machine${n === 1 ? '' : 's'} in the list`, 'info');
+  }
+
+  /**
+   * Put the list the SERVER is holding back in the box, ready to be edited.
+   *
+   * The box and the list are not the same thing: the box is a draft, and after
+   * an import it holds the raw YAML, after an edit it holds whatever was typed,
+   * and after enough of either it holds something nobody would want to press
+   * "Use this list" on. This is how you get back to what is actually loaded,
+   * written in the plain `id host` form the parser reads, without a round trip
+   * through the YAML file.
+   */
+  editList() {
+    const targets = this.status?.targets || [];
+    if (!targets.length) return;
+    this.draft.text = targetLines(targets);
+    this.render();
+    const box = this.host.querySelector('#rigTargets');
+    if (box) {
+      box.focus();
+      // Cursor at the end, not at the top: the usual edit is another machine.
+      box.setSelectionRange(box.value.length, box.value.length);
+    }
+    toast('The loaded list is in the box — edit it, then press Use this list', 'info');
   }
 
   async connect() {
@@ -132,11 +187,184 @@ export class RigPanel {
 
   async survey() {
     await api.rigSurvey({
-      directory: this.draft.directory,
+      directory: this.surveyDirectory(),
       keepN: state.keepN,
       snapshotId: state.snapshotId ?? undefined,
     });
     this.status = await api.rigStatus();
+  }
+
+  /**
+   * Pick the survey directory off a machine instead of typing it.
+   *
+   * ONE machine is listed, and the modal says which — the survey applies one
+   * directory to every machine, so this is choosing a path, not inspecting the
+   * rig. A path that exists on 301 and not on 302 is a finding the SURVEY
+   * makes, and browsing must not quietly stand in for it.
+   *
+   * Nothing here reads a file. The route lists directory entries one level
+   * deep, through the same read-only mount everything else on this tab uses.
+   */
+  openBrowser() {
+    const mounted = (this.status?.targets || []).filter((t) => t.mountPoint);
+    if (!mounted.length) {
+      toast('Connect a machine first — the list comes from the machine itself', 'error');
+      return;
+    }
+
+    let host = mounted[0].host;
+    let dir = this.draft.directory || '';
+    let listing = null;
+    let error = null;
+    let loading = true;
+
+    const body = h('div.rig-browse');
+    const chosen = h('span.rig-browse-chosen');
+    const dlg = modal(
+      'Choose the directory to survey',
+      body,
+      [
+        chosen,
+        h('span.spacer'),
+        h('button.btn.sm.ghost', { text: 'Cancel', onClick: () => dlg.close() }),
+        h('button.btn.primary', {
+          text: 'Use this directory',
+          onClick: () => {
+            this.draft.directory = dir;
+            dlg.close();
+            this.render();
+          },
+        }),
+      ],
+      { width: '660px' },
+    );
+
+    /**
+     * Load one directory. `dir` only moves once the machine has answered, and a
+     * reply that arrives after a newer request is dropped — clicking twice on a
+     * slow share must not land you in the first folder you left.
+     */
+    let generation = 0;
+    const go = async (next) => {
+      const mine = ++generation;
+      loading = true;
+      error = null;
+      draw();
+      let got = null;
+      let failed = null;
+      try {
+        got = await api.rigBrowse({ host, directory: next });
+      } catch (err) {
+        failed = err.message;
+      }
+      if (mine !== generation) return;
+      if (got) {
+        listing = got;
+        dir = got.directory;
+        host = got.host;
+      }
+      error = failed;
+      loading = false;
+      draw();
+    };
+
+    const crumb = (text, path, current) =>
+      current
+        ? h('span.rig-crumb.here', { text })
+        : h('button.rig-crumb', { text, onClick: () => go(path) });
+
+    const draw = () => {
+      clear(body);
+      const segments = dir === '' ? [] : dir.split('/');
+      const label = mounted.find((t) => t.host === host);
+
+      append(body, [
+        mounted.length > 1
+          ? h(
+              'div.rig-browse-machine',
+              h('span', { text: 'Listing' }),
+              h(
+                'select.rig-input',
+                {
+                  value: host,
+                  onChange: (e) => {
+                    host = e.target.value;
+                    go(dir);
+                  },
+                },
+                ...mounted.map((t) =>
+                  h('option', {
+                    value: t.host,
+                    selected: t.host === host,
+                    text: t.machineId ? `${t.machineId} — ${t.host}` : t.host,
+                  }),
+                ),
+              ),
+              h('span.muted', { text: 'the path you choose is used on every machine' }),
+            )
+          : h('div.rig-browse-machine', h('span.muted', {
+              text: `Listing ${label?.machineId ? `${label.machineId} — ` : ''}${host}`,
+            })),
+        h(
+          'div.rig-crumbs',
+          crumb('share root', '', segments.length === 0),
+          ...segments.map((seg, i) =>
+            h(
+              'span.rig-crumb-sep',
+              h('span', { text: '/' }),
+              crumb(seg, segments.slice(0, i + 1).join('/'), i === segments.length - 1),
+            ),
+          ),
+        ),
+        error ? h('div.rig-warn', h('b', 'Could not read that directory. '), error) : null,
+        loading
+          ? h('div.rig-browse-empty', h('span.spinner'), h('span', { text: 'Reading…' }))
+          : null,
+      ]);
+
+      if (!loading && !error && listing) {
+        // Read off the listing NOW: `listing` is reassigned on every load, and a
+        // click handler that read it later would navigate from the wrong place.
+        const { parent } = listing;
+        const rows = [];
+        if (parent !== null) {
+          rows.push(
+            h('button.rig-browse-row.up', { onClick: () => go(parent) },
+              h('span.rig-browse-name', { text: '↑ up one level' })),
+          );
+        }
+        for (const d of listing.directories) {
+          rows.push(
+            h('button.rig-browse-row', { onClick: () => go(d.path) },
+              h('span.rig-browse-name', { text: d.name }),
+              h('span.rig-browse-go', { text: '›' })),
+          );
+        }
+        append(body, [
+          rows.length
+            ? h('div.rig-browse-list', ...rows)
+            : h('div.rig-browse-empty', h('span', { text: 'No folders here.' })),
+          h(
+            'div.rig-hint',
+            { style: { marginTop: '8px', marginBottom: '0' } },
+            listing.fileCount
+              ? `${count(listing.fileCount)} file${listing.fileCount === 1 ? '' : 's'} sit directly in this directory. `
+              : 'No files sit directly in this directory. ',
+            'Names only — nothing here is opened, and sizes are the survey’s job.',
+          ),
+          listing.truncated
+            ? h('div.rig-warn', h('b', 'This list is cut short. '), 'There are more folders here than the picker shows; type the path if the one you want is missing.')
+            : null,
+        ]);
+      }
+
+      // The same path the field will show, suffix included: the picker chooses
+      // the project folder, and the checkbox is part of what gets surveyed.
+      const effective = withVideoFile(dir, this.draft.appendVideoFile);
+      chosen.textContent = effective === '' ? 'Will survey: the share root' : `Will survey: ${effective}`;
+    };
+
+    go(dir);
   }
 
   async disconnect() {
@@ -166,13 +394,22 @@ export class RigPanel {
    * — nothing is written by this application. The file carries addresses only.
    */
   async saveYaml() {
-    const text = await api.rigTargetsYaml();
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/yaml' }));
-    const a = h('a', { href: url, download: 'rig-targets.yaml' });
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    download('rig-targets.yaml', await api.rigTargetsYaml(), 'text/yaml');
+  }
+
+  /**
+   * Save the master missing list as a CSV.
+   *
+   * The WHOLE list, not the 500 rows on screen — an export that stopped where
+   * the table stops would be a list of findings with findings missing from it.
+   * Rendered by the server, saved by the browser: nothing is written here, and
+   * the rig session stays unpersisted. Machine ids only; no address, no
+   * credential.
+   */
+  async saveMissingCsv() {
+    const text = await api.rigMissingCsv();
+    download(`rig-missing_${stamp()}.csv`, text, 'text/csv');
+    toast('Saved the whole list, not just the rows on screen', 'info');
   }
 
   /** Read a YAML file back in. Parsed by the same parser that reads a paste. */
@@ -198,8 +435,23 @@ export class RigPanel {
     const survey = s?.survey || {};
     const results = survey.results || [];
 
-    const alarms = results.reduce((n, r) => n + (r.totals?.missingKeptFiles ? 1 : 0), 0);
-    this.onCounts?.({ high: alarms, low: 0 });
+    // The tab badge counts MACHINES THAT PLAY something they have not got, not
+    // machines with anything missing: an understudy short of a file is a lost
+    // spare, and a badge that cannot tell those apart cries wolf at a rig that
+    // is fine. A wrong-sized copy on any machine counts too — whatever that
+    // file is, it is not the one the archive recorded.
+    const alarmMachines = new Set();
+    const spareMachines = new Set();
+    for (const r of survey.missing?.rows || []) {
+      const primaries = r.primaryOn?.length ? r.primaryOn : r.missingFrom;
+      if (r.state === 'missing' || r.state === 'recoverable') {
+        for (const id of r.missingFrom) if (primaries.includes(id)) alarmMachines.add(id);
+      } else if (r.state === 'spareLost') {
+        for (const id of r.missingFrom) spareMachines.add(id);
+      }
+    }
+    for (const r of results) if (r.totals?.sizeMismatchFiles) alarmMachines.add(r.machineId || r.host);
+    this.onCounts?.({ high: alarmMachines.size, low: spareMachines.size });
 
     this.host.append(
       this.caveat(),
@@ -238,11 +490,16 @@ export class RigPanel {
       rows: 7,
       spellcheck: false,
       placeholder: PLACEHOLDER,
-      value: this.draft.text,
       onInput: (e) => {
         this.draft.text = e.target.value;
       },
     });
+    // Assigned, NOT passed as an attribute. A textarea takes its value from its
+    // content, so `value=` on one sets an attribute the browser ignores — the
+    // box came up empty on every render, which is why the list kept vanishing
+    // out of it the moment anything re-drew the card. An `<input>` hides this
+    // bug, because there the attribute IS the initial value.
+    box.value = this.draft.text;
     const fileInput = h('input', {
       type: 'file',
       accept: '.yaml,.yml,text/yaml',
@@ -261,6 +518,12 @@ export class RigPanel {
         h('h3', { text: 'Machines' }),
         h('span.n', { text: `${count(targets.length)} in the list` }),
         h('span.spacer'),
+        h('button.btn.sm.ghost', {
+          text: 'Edit list',
+          title: 'Put the loaded list back in the box, in the form the parser reads',
+          disabled: this.busy || targets.length === 0,
+          onClick: () => this.editList(),
+        }),
         h('button.btn.sm.ghost', {
           text: 'Import YAML…',
           disabled: this.busy,
@@ -438,6 +701,14 @@ export class RigPanel {
     const running = !!survey.running;
     const mounted = targets.filter((t) => t.mountPoint).length;
     const pct = survey.total ? Math.round((survey.done / survey.total) * 100) : 0;
+    // The one place the directory and the checkbox are shown as the single path
+    // they add up to. Written imperatively because both controls change it and
+    // neither may cost the box its focus.
+    const pathEl = h('code');
+    const showPath = () => {
+      pathEl.textContent = this.surveyDirectory() || 'the share root';
+    };
+    showPath();
     return h(
       'div.card',
       h(
@@ -450,19 +721,65 @@ export class RigPanel {
         'div.card-body',
         h(
           'div.rig-fields',
-          field(
-            'Directory on each machine',
-            h('input.rig-input.wide', {
-              type: 'text',
-              value: this.draft.directory,
-              placeholder: 'leave blank for the share root',
-              onInput: (e) => {
-                this.draft.directory = e.target.value;
-              },
-            }),
+          // Not `field()`: that wraps the control in a <label>, and a button
+          // inside a label is a second thing for a click on it to do.
+          h(
+            'div.rig-field',
+            h('label', { for: 'rigDirectory', text: 'Directory on each machine' }),
+            h(
+              'div.rig-dir',
+              h('input#rigDirectory.rig-input.wide', {
+                type: 'text',
+                value: this.draft.directory,
+                placeholder: 'leave blank for the share root',
+                onInput: (e) => {
+                  this.draft.directory = e.target.value;
+                  // The line below says what will be surveyed, so it is written
+                  // on every keystroke rather than on the next render. A full
+                  // render here would take the focus out of the box mid-word.
+                  showPath();
+                },
+              }),
+              // Typing it is still the fast path. Browsing is for the first
+              // time, and for the case a typo would otherwise survey an empty
+              // directory and report the rig as clean.
+              h('button.btn.sm.ghost', {
+                text: 'Browse…',
+                disabled: this.busy || mounted === 0,
+                title: mounted
+                  ? 'List the directories on a mounted machine and pick one'
+                  : 'Connect a machine first — the list comes from the machine itself',
+                onClick: () => this.openBrowser(),
+              }),
+              // To the right of Browse, because it acts on what Browse produced.
+              h(
+                'label.rig-check',
+                {
+                  title: `Survey <directory>/${VIDEO_FILE_SUFFIX} — where d3 keeps its media inside a project folder. Browse to the project; this adds the rest.`,
+                },
+                h('input', {
+                  type: 'checkbox',
+                  checked: this.draft.appendVideoFile,
+                  onChange: (e) => {
+                    this.draft.appendVideoFile = e.target.checked;
+                    showPath();
+                  },
+                }),
+                h('span', { text: 'append d3 VideoFile path' }),
+              ),
+            ),
           ),
         ),
-        h('div.rig-hint', 'Relative to the share root, and the same on every machine. Compared at the current keep-latest-', h('b', { text: String(state.keepN) }), ' policy.'),
+        // Says the whole path, not the parts: a checkbox whose effect the screen
+        // does not show is a checkbox somebody surveys the wrong folder with.
+        h(
+          'div.rig-hint',
+          'Surveying ',
+          pathEl,
+          ' on every machine. Compared at the current keep-latest-',
+          h('b', { text: String(state.keepN) }),
+          ' policy.',
+        ),
         h(
           'div.rig-row',
           running
@@ -539,19 +856,41 @@ export class RigPanel {
       body.appendChild(
         h(
           'div.miss-legend',
-          legend('gone', `${count(counts.gone || 0)} gone from the rig`, fmtBytes(bytes.gone || 0), 'No surveyed machine has a good copy, and every machine that carries it was looked at. Nothing can play these.'),
-          legend('unconfirmed', `${count(counts.unconfirmed || 0)} unconfirmed`, fmtBytes(bytes.unconfirmed || 0), 'No surveyed machine has a good copy, but a machine that carries it was not surveyed. It may be safe there.'),
-          legend('reduced', `${count(counts.reduced || 0)} redundancy lost`, fmtBytes(bytes.reduced || 0), 'At least one machine still has a good copy, so the show plays — but the spare is gone.'),
+          // Ordered by what they cost. The first two are both alarms: the
+          // machine that PLAYS the file has not got it, and an understudy is a
+          // backup, not a second place it plays from.
+          legend('missing', `${count(counts.missing || 0)} missing from the rig`, fmtBytes(bytes.missing || 0), 'Not on the machine that plays it, and no surveyed machine has a good copy. The archive is the only place left to get it from.'),
+          legend('recoverable', `${count(counts.recoverable || 0)} on the backup only`, fmtBytes(bytes.recoverable || 0), 'Not on the machine that plays it, so the show cannot play it — but its understudy has a good copy, so it can be restored from the rig rather than from the archive.'),
+          legend('unconfirmed', `${count(counts.unconfirmed || 0)} unconfirmed`, fmtBytes(bytes.unconfirmed || 0), 'The machine that PLAYS this was not surveyed, so there is no finding to make. A backup we did not read would leave the alarm settled and only the repair route unknown; this is the other case.'),
+          legend('spareLost', `${count(counts.spareLost || 0)} spare lost`, fmtBytes(bytes.spareLost || 0), 'The machine that plays it has it, at the right size. The show plays; the backup copy is gone.'),
         ),
       );
 
-      if (m.unsurveyedHolders?.length) {
+      // Two different omissions, and only the first can hide an alarm: a
+      // machine that PLAYS a region and was not read is a finding this list
+      // cannot make at all, where an unread BACKUP leaves every verdict intact
+      // and only the repair route unknown.
+      const unreadPrimaries = m.unsurveyedPrimaries || [];
+      const unreadBackups = (m.unsurveyedHolders || []).filter((id) => !unreadPrimaries.includes(id));
+      if (unreadPrimaries.length) {
         body.appendChild(
           h(
             'div.rig-warn',
-            `This list cannot be complete: ${m.unsurveyedHolders.join(', ')} ` +
-              `${m.unsurveyedHolders.length === 1 ? 'carries' : 'carry'} some of these regions and ` +
-              `${m.unsurveyedHolders.length === 1 ? 'was' : 'were'} not surveyed.`,
+            h('b', 'This list cannot be complete. '),
+            `${unreadPrimaries.join(', ')} ${unreadPrimaries.length === 1 ? 'plays' : 'play'} some of these regions and ` +
+              `${unreadPrimaries.length === 1 ? 'was' : 'were'} not surveyed, so findings about ` +
+              `${unreadPrimaries.length === 1 ? 'that machine' : 'those machines'} cannot be made at all.`,
+          ),
+        );
+      }
+      if (unreadBackups.length) {
+        body.appendChild(
+          h(
+            'div.rig-hint',
+            { style: { marginTop: '8px' } },
+            `${unreadBackups.join(', ')} ${unreadBackups.length === 1 ? 'backs' : 'back'} up some of these regions and ` +
+              `${unreadBackups.length === 1 ? 'was' : 'were'} not surveyed. That does not change any verdict above — ` +
+              'it means some of what is listed as missing may in fact be restorable from the rig.',
           ),
         );
       }
@@ -562,81 +901,42 @@ export class RigPanel {
             'div.miss-regions',
             ...m.byRegion.map((r) =>
               h(
-                `span.miss-region${r.gone ? '.gone' : ''}`,
+                `span.miss-region${r.unplayable ? '.alarm' : ''}`,
                 {
                   title:
-                    `Region ${r.region} is carried by ${r.holders.join(' and ') || 'no machine'}. ` +
-                    `${r.files} file(s) missing, ${r.gone} of them from every surveyed holder.`,
+                    `Region ${r.region} is played by ${r.primaries?.join(' and ') || '—'} and backed up by ` +
+                    `${(r.holders || []).filter((id) => !(r.primaries || []).includes(id)).join(' and ') || 'nothing'}. ` +
+                    `${r.files} file(s) missing somewhere, ${r.unplayable} of them not on the machine that plays them.`,
                 },
                 h('b', { text: `r${r.region}` }),
                 ` ${count(r.files)} · ${fmtBytes(r.bytes)}`,
-                r.gone ? h('span.miss-gone-n', { text: `${count(r.gone)} gone` }) : null,
+                r.unplayable ? h('span.miss-alarm-n', { text: `${count(r.unplayable)} unplayable` }) : null,
               ),
             ),
           ),
         );
       }
 
-      const shown = rows.slice(0, 500);
       body.appendChild(
-        h(
-          // Scrolls inside itself. At 1,293 rows an uncapped table is 27,000px
-          // tall and buries every per-machine card under it.
-          'div.miss-scroll',
-          h(
-            'table.grid.miss-table',
-            h(
-              'thead',
-              h(
-                'tr',
-                h('th', 'State'),
-                h('th', 'Song'),
-                h('th', 'File'),
-                h('th', 'Ver'),
-                h('th.num', 'Region'),
-                h('th.num', 'Size'),
-                h('th', 'Missing from'),
-                h('th', 'Still on'),
-              ),
-            ),
-            h(
-              'tbody',
-              ...shown.map((r) =>
-                h(
-                  `tr.miss-${r.state}`,
-                  h('td', h(`span.pill.miss-${r.state}`, { text: STATE_LABEL[r.state] || r.state })),
-                  h('td.mono', { text: r.songFolder }),
-                  h('td.mono.miss-file', { text: r.name, title: r.name }),
-                  h('td.mono', { text: r.verLabel }),
-                  h('td.num', { text: String(r.region) }),
-                  h('td.num', { text: fmtBytes(r.size) }),
-                  h('td.mono', { text: r.missingFrom.join(', ') || '—' }),
-                  h(
-                    'td.mono',
-                    r.presentOn.length
-                      ? h('span', { style: { color: 'var(--kept)' }, text: r.presentOn.join(', ') })
-                      : null,
-                    r.wrongSizeOn.length
-                      ? h('span', { style: { color: 'var(--warn)' }, text: ` ${r.wrongSizeOn.join(', ')} (wrong size)` })
-                      : null,
-                    r.unknownOn.length
-                      ? h('span.muted', {
-                          text: ` ${r.unknownOn.join(', ')}?`,
-                          title: `${r.unknownOn.join(', ')} carries this region but was not surveyed`,
-                        })
-                      : null,
-                    !r.presentOn.length && !r.wrongSizeOn.length && !r.unknownOn.length
-                      ? h('span', { style: { color: 'var(--warn)' }, text: 'nowhere' })
-                      : null,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
+        // Scrolls inside itself. At 1,293 rows an uncapped table is 27,000px
+        // tall and buries every per-machine card under it.
+        h('div.rig-grid', gridTable({
+          key: 'rig.missing',
+          columns: missingCols(),
+          rows,
+          max: 500,
+          // By song, but never across the state groups: the alarms stay at the
+          // top, which is the entire reason the states exist.
+          order: bySongWithinState(rows),
+          maxHeight: 440,
+          rowClass: (r) => `miss-${r.state}`,
+        })),
       );
-      if (rows.length > shown.length) {
-        body.appendChild(h('div.card-note', `Showing the first ${count(shown.length)} of ${count(rows.length)}.`));
+      const shown = Math.min(rows.length, 500);
+      if (rows.length > shown) {
+        body.appendChild(
+          h('div.card-note', `Showing the worst ${count(shown)} of ${count(rows.length)}, listed by song within each state.`),
+        );
       }
     }
 
@@ -645,11 +945,22 @@ export class RigPanel {
       h(
         'header',
         h('h3', { text: 'Missing across the rig' }),
-        counts.gone
-          ? h('span.pill.broken', { text: `${count(counts.gone)} unplayable` })
+        m.unplayable?.files
+          ? h('span.pill.broken', {
+              text: `${count(m.unplayable.files)} unplayable`,
+              title: 'Not on the machine that plays them. An understudy holding a copy is a backup, not a second place the file plays from.',
+            })
           : h('span.n', { text: m.clean ? 'nothing missing' : 'nothing unplayable' }),
         h('span.spacer'),
         h('span.n', { text: rows.length ? `${count(rows.length)} files` : '' }),
+        rows.length
+          ? h('button.btn.sm.ghost', {
+              text: 'Export CSV',
+              title: `Save all ${count(rows.length)} rows — not just the ones shown. Machine ids only; no address and no password.`,
+              disabled: this.busy,
+              onClick: () => this.act(() => this.saveMissingCsv(), { rerender: false }),
+            })
+          : null,
       ),
       body,
     );
@@ -677,12 +988,42 @@ export class RigPanel {
             kv('Archive expects', `${count(t.expectedFiles)} · ${fmtBytes(t.expectedBytes)}`),
             kv('Walked in', `${(r.elapsedMs / 1000).toFixed(1)}s`),
           ),
-          section('Current media missing from this machine', c.missingKept, 'warn', (x) => `${x.name} · ${fmtBytes(x.size)} · ${x.verLabel}`),
-          section('Same name, different size', c.sizeMismatch, 'warn', (x) => `${x.name} · archive ${fmtBytes(x.archiveSize)} vs machine ${fmtBytes(x.machineSize)}`),
-          section('Superseded media still on the machine', c.presentSuperseded, 'super', (x) => `${x.name} · ${fmtBytes(x.machineSize)} · ${x.verLabel}`),
-          section('Belongs to another machine', c.extraForeign, 'super', (x) => `${x.name} · ${fmtBytes(x.size)}`),
-          section('Not in the archive at all', c.extraUnknown, 'super', (x) => `${x.name} · ${fmtBytes(x.size)}`),
-          section('Already cleaned off (superseded, absent)', c.missingSuperseded, 'quiet', (x) => `${x.name} · ${fmtBytes(x.size)}`),
+          section('Current media missing from this machine', c.missingKept, 'warn', archiveCols('size'), 'rig.archive'),
+          section('Same name, different size', c.sizeMismatch, 'warn', mismatchCols(), 'rig.mismatch'),
+          section('Superseded media still on the machine', c.presentSuperseded, 'super', archiveCols('machineSize'), 'rig.archive'),
+          // Read off the NAME, not out of the index — the index has no row for
+          // these, or none that belongs here. Same columns all the same,
+          // because the question an operator asks of them is the same one:
+          // which song, which version, which slice.
+          section('Belongs to another machine', c.extraForeign, 'super', foreignCols(), 'rig.foreign'),
+          // `extraUnknown` is deliberately NOT shown. It is media carrying a
+          // region this machine plays that the archive has no row for, and it
+          // is the one bucket the archive cannot form an opinion about — so it
+          // could only ever be read and wondered at. Removed at the user's
+          // request. Still counted: `totals.extraUnknownFiles`.
+          section('Names this grammar cannot read', c.extraUnparsed, 'quiet', foreignCols(), 'rig.foreign'),
+          // NOT a section. A file with no region belongs to no machine, because
+          // the allocation is BY region — so it is neither missing from this
+          // machine nor extra on it, and listing it as either is a finding that
+          // is not there. Confirmed with the user. Counted, so the totals still
+          // add up to what is on the drive, and said in one line so it cannot
+          // become an invisible omission.
+          t.regionlessFiles
+            ? h(
+                'div.rig-sec.empty',
+                h('span.rig-sec-t', {
+                  text: 'Whole-canvas media, carrying no region',
+                  title: 'The rig allocates by region, so a file with no region token belongs to no machine. Not compared, and not a finding.',
+                }),
+                h('span.rig-sec-n', { text: `${count(t.regionlessFiles)} · ${fmtBytes(t.regionlessBytes)} · not compared` }),
+              )
+            : null,
+          // `missingSuperseded` is deliberately NOT shown. Old media that is
+          // already off the machine is the one bucket an operator has nothing
+          // to do about, and on this rig it is hundreds of rows of it. The
+          // comparison still counts it — the arithmetic has to close, and
+          // `totals.missingSupersededFiles` is still there for anything that
+          // wants it. Only the section is gone. Removed at the user's request.
           t.nameCollisions
             ? h('div.rig-warn', `${count(t.nameCollisions)} archive file names appear more than once, so matching on this machine is not reliable.`)
             : null,
@@ -712,12 +1053,34 @@ export class RigPanel {
 }
 
 /** A collapsible list. Empty sections are drawn as a single quiet line. */
-function section(title, rows, tone, describe) {
+/**
+ * One finding list, collapsed until asked for.
+ *
+ * The rows are columned rather than run together into a line: song, file,
+ * version and region are four different questions, and reading them out of one
+ * string means reading the same delimiter four times. `columns` says which four
+ * (or six), and `widthKey` is what a dragged column is filed under — shared
+ * across lists of the same SHAPE, so widening `File` once widens it everywhere
+ * the same rows appear.
+ */
+function section(title, rows, tone, columns, widthKey) {
   rows = rows || [];
   if (rows.length === 0) {
     return h('div.rig-sec.empty', h('span.rig-sec-t', { text: title }), h('span.rig-sec-n', { text: 'none' }));
   }
-  const list = h('div.rig-list', ...rows.slice(0, 300).map((x) => h('div.rig-item', { text: describe(x) })));
+  const list = h(
+    'div.rig-grid',
+    gridTable({
+      key: widthKey,
+      columns,
+      rows,
+      max: 300,
+      // The 300 kept are the 300 biggest; the order they are READ in is by song.
+      order: bySong,
+      maxHeight: 320,
+      rowClass: () => tone,
+    }),
+  );
   list.hidden = true;
   const toggle = h(`button.btn.sm.ghost.rig-sec-toggle`, {
     text: 'show',
@@ -735,15 +1098,266 @@ function section(title, rows, tone, describe) {
       h('span.spacer'),
       toggle,
     ),
-    rows.length > 300 ? h('div.rig-hint', `Showing the first 300 of ${count(rows.length)}.`) : null,
+    rows.length > 300
+      ? h('div.rig-hint', `Showing the largest 300 of ${count(rows.length)}, by song.`)
+      : null,
     list,
   );
 }
 
+/* ------------------------------------------------------------------ columns
+
+   Song, file, version and region are four separate questions, so they are four
+   separate columns everywhere they appear. Widths are shared per SHAPE rather
+   than per list, so widening `File` on one list widens it on every list built
+   from the same kind of row.
+
+   `region` is the canvas slice. `0` is the whole canvas — the offline-edit copy
+   — and is never a slice, which is why it is printed as `0` rather than folded
+   in with the rest. A name with no region token at all is a legal whole-canvas
+   deliverable and shows an em dash, not a zero: they are different things.
+   ------------------------------------------------------------------------- */
+
+/** The song folder a machine path sits in. The rig mirrors the archive's shape. */
+function songOf(relPath) {
+  const i = String(relPath || '').indexOf('/');
+  return i > 0 ? relPath.slice(0, i) : '';
+}
+
+/**
+ * Song first, then file name.
+ *
+ * The lists are CHOSEN biggest-first — that is how a capped list keeps the rows
+ * that cost the most to be wrong about — and then READ by song, which is how an
+ * operator works through them: everything for one song together, and an asset's
+ * files next to each other because the name sorts them. Asked for by the user.
+ */
+function bySong(a, b) {
+  return (
+    songOfRow(a).localeCompare(songOfRow(b), undefined, { numeric: true, sensitivity: 'base' }) ||
+    String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' })
+  );
+}
+
+/**
+ * Where d3 keeps its media inside a project folder.
+ *
+ * The operator browses to (or types) the project directory; the media sits one
+ * fixed pair of folders below it. The checkbox is that fact, rather than four
+ * more segments to type correctly every time.
+ */
+const VIDEO_FILE_SUFFIX = 'objects/VideoFile';
+
+/**
+ * The path to survey. Idempotent on purpose: a directory that already ends in
+ * the suffix is left alone, so typing it out by hand AND ticking the box
+ * cannot produce `.../objects/VideoFile/objects/VideoFile`.
+ */
+function withVideoFile(directory, append) {
+  const dir = String(directory || '').trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!append || endsWithVideoFile(dir)) return dir;
+  return dir === '' ? VIDEO_FILE_SUFFIX : `${dir}/${VIDEO_FILE_SUFFIX}`;
+}
+
+/** Take a stored path back apart into the two controls that produced it. */
+function splitVideoFile(directory) {
+  const dir = String(directory || '').trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!endsWithVideoFile(dir)) return { base: dir, append: false };
+  return { base: dir.slice(0, -VIDEO_FILE_SUFFIX.length).replace(/\/+$/, ''), append: true };
+}
+
+/** Case-insensitive: an SMB share does not care, and neither should this. */
+function endsWithVideoFile(dir) {
+  return dir.toLowerCase().endsWith(VIDEO_FILE_SUFFIX.toLowerCase());
+}
+
+/**
+ * Hand text to the browser's save dialog.
+ *
+ * The one way anything on this tab reaches a disk, and it is the OPERATOR's
+ * dialog: the server renders the bytes into a response, this makes a blob of
+ * them, and where it lands is the operator's choice. Nothing in this
+ * application writes it, which is what keeps "the rig session is never stored"
+ * literally true.
+ */
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = h('a', { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** `20260830-0431`, local time — so two exports of a live rig are tellable apart. */
+function stamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+/**
+ * The target list as the box takes it: one machine per line, `id host`.
+ *
+ * One formatter, because the box is populated from two places — a tab that
+ * loads with a list already on the server, and the Edit list button — and two
+ * spellings of the same list is how a round trip through the box starts
+ * changing it.
+ */
+function targetLines(targets) {
+  return targets.map((t) => (t.machineId ? `${t.machineId} ${t.host}` : t.host)).join('\n');
+}
+
+/** The song a row belongs to, whichever kind of row it is. */
+function songOfRow(row) {
+  return row.songFolder || songOf(row.relPath) || '';
+}
+
+/**
+ * Song order WITHIN the grouping the server sent, for the master list.
+ *
+ * The groups are the four states, and they must stay in the order they arrived:
+ * a `missing` file sorted under a late song, below a screenful of `spare lost`, is
+ * the failure the states exist to prevent. The group order is read off the rows
+ * rather than restated here, so this cannot drift from `rollUpMissing`.
+ */
+function bySongWithinState(rows) {
+  const group = new Map();
+  for (const r of rows) if (!group.has(r.state)) group.set(r.state, group.size);
+  return (a, b) => (group.get(a.state) ?? 0) - (group.get(b.state) ?? 0) || bySong(a, b);
+}
+
+function regionCell(region) {
+  return region === null || region === undefined ? '—' : String(region);
+}
+
+const SONG_COL = { key: 'song', label: 'Song', width: 'minmax(110px, 1fr)', cls: 'cell-song' };
+const FILE_COL = { key: 'file', label: 'File', width: 'minmax(220px, 3fr)', cls: 'cell-file' };
+const VER_COL = { key: 'ver', label: 'Version', width: '110px', cls: 'cell-ver' };
+const REGION_COL = { key: 'region', label: 'Region', width: '76px', align: 'right' };
+
+/**
+ * A list of files the ARCHIVE knows about: every column is read out of the
+ * index, including the version label.
+ *
+ * @param {'size'|'machineSize'} sizeField which side's bytes this list reports.
+ */
+function archiveCols(sizeField) {
+  return [
+    { ...SONG_COL, cell: (x) => x.songFolder },
+    { ...FILE_COL, cell: (x) => x.name },
+    { ...VER_COL, cell: (x) => x.verLabel },
+    { ...REGION_COL, cell: (x) => regionCell(x.region) },
+    {
+      key: 'size',
+      label: sizeField === 'machineSize' ? 'On machine' : 'Size',
+      width: '96px',
+      align: 'right',
+      cell: (x) => fmtBytes(x[sizeField]),
+    },
+  ];
+}
+
+/** Both sizes, because with a mismatch neither reading is the answer. */
+function mismatchCols() {
+  return [
+    { ...SONG_COL, cell: (x) => x.songFolder },
+    { ...FILE_COL, cell: (x) => x.name },
+    { ...VER_COL, cell: (x) => x.verLabel },
+    { ...REGION_COL, cell: (x) => regionCell(x.region) },
+    { key: 'archive', label: 'Archive', width: '96px', align: 'right', cell: (x) => fmtBytes(x.archiveSize) },
+    { key: 'machine', label: 'On machine', width: '104px', align: 'right', cell: (x) => fmtBytes(x.machineSize) },
+  ];
+}
+
+/**
+ * A file the index has no row for here. Song comes from where it sits on the
+ * machine; version and region are what the NAME says, parsed by the scan's own
+ * grammar on the server. Nothing in these rows is an archive fact.
+ */
+function foreignCols() {
+  return [
+    { ...SONG_COL, label: 'Folder', title: 'The folder it sits in on the machine', cell: (x) => songOf(x.relPath) },
+    { ...FILE_COL, cell: (x) => x.name },
+    { ...VER_COL, title: 'What the file name says. The archive has no row for this file.', cell: (x) => x.verLabel || '—' },
+    { ...REGION_COL, title: 'What the file name says. An em dash means the name carries no region.', cell: (x) => regionCell(x.region) },
+    { key: 'size', label: 'On machine', width: '104px', align: 'right', cell: (x) => fmtBytes(x.size) },
+  ];
+}
+
+/**
+ * The master list's columns.
+ *
+ * `Missing from` and `Still on` are the two halves of the finding: which
+ * holders have not got it, and whether anything else has. `Still on` is
+ * deliberately three-coloured — a good copy, a wrong-sized one, and a machine
+ * nobody looked at are three different answers, and only the first means the
+ * show plays.
+ */
+function missingCols() {
+  return [
+    {
+      key: 'state',
+      label: 'State',
+      width: '108px',
+      cell: (r) => h(`span.pill.miss-${r.state}`, { text: STATE_LABEL[r.state] || r.state }),
+    },
+    { ...SONG_COL, cell: (r) => r.songFolder },
+    { ...FILE_COL, cell: (r) => r.name },
+    { ...VER_COL, cell: (r) => r.verLabel },
+    { ...REGION_COL, cell: (r) => regionCell(r.region) },
+    { key: 'size', label: 'Size', width: '96px', align: 'right', cell: (r) => fmtBytes(r.size) },
+    {
+      key: 'missingFrom',
+      label: 'Missing from',
+      width: 'minmax(110px, 1fr)',
+      cls: 'cell-ver',
+      cell: (r) => r.missingFrom.join(', ') || '—',
+    },
+    {
+      key: 'stillOn',
+      label: 'Still on',
+      width: 'minmax(120px, 1fr)',
+      /**
+       * Machines that actually have it. A machine we could not read is NOT
+       * named here: this column answers "where can I still get this?", and
+       * `207?` was answering a different question — it named a machine while
+       * saying nothing about it, which reads as a finding at a glance and is
+       * not one. An em dash says the honest thing, and the machine's name is on
+       * the tooltip and in the warning at the top of the card, where "we did not
+       * look at 207" is stated once instead of a thousand times. Asked for by
+       * the user.
+       */
+      cell: (r) => {
+        const nothingKnown = !r.presentOn.length && !r.wrongSizeOn.length;
+        if (nothingKnown && r.unknownOn.length) {
+          return h('span.mono.muted', {
+            text: '—',
+            title: `${r.unknownOn.join(', ')} also ${r.unknownOn.length === 1 ? 'carries' : 'carry'} this region but ${r.unknownOn.length === 1 ? 'was' : 'were'} not surveyed, so nothing is known about ${r.unknownOn.length === 1 ? 'it' : 'them'}.`,
+          });
+        }
+        if (nothingKnown) {
+          return h('span.mono', { style: { color: 'var(--warn)' }, text: 'nowhere' });
+        }
+        return h(
+          'span.mono',
+          r.presentOn.length
+            ? h('span', { style: { color: 'var(--kept)' }, text: r.presentOn.join(', ') })
+            : null,
+          r.wrongSizeOn.length
+            ? h('span', { style: { color: 'var(--warn)' }, text: ` ${r.wrongSizeOn.join(', ')} (wrong size)` })
+            : null,
+        );
+      },
+    },
+  ];
+}
+
 const STATE_LABEL = {
-  gone: 'gone',
+  missing: 'missing',
+  recoverable: 'backup only',
   unconfirmed: 'unconfirmed',
-  reduced: 'spare lost',
+  spareLost: 'spare lost',
 };
 
 function legend(kind, label, sub, title) {

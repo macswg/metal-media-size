@@ -139,6 +139,28 @@ export function makeParser(
 export const parseName = makeParser();
 
 /**
+ * The version as a person reads it: `v008`, `v008d`, `v004 frame00000`.
+ *
+ * ONE composer, because a version label is how a version is identified out
+ * loud. It lives here, with the grammar it spells out, and both callers use it:
+ * `src/db/index.ts` composes `asset_version.ver_label` with it at index time,
+ * and the rig survey uses it for a file the archive has never seen -- where
+ * there is no stored label to read, only the name.
+ *
+ * Everything that HAS a stored label still reads that label out of the
+ * database. See `src/export/index.ts`: nothing downstream re-composes one.
+ */
+export function formatVerLabel(v: {
+  verNum: number;
+  subLetter: string | null;
+  isPatch: boolean;
+  patchFrame: number | null;
+}): string {
+  const n = `v${String(v.verNum).padStart(3, '0')}${v.subLetter ?? ''}`;
+  return v.isPatch ? `${n} frame${String(v.patchFrame ?? 0).padStart(5, '0')}` : n;
+}
+
+/**
  * Informational display label derived from tokens in `base`.
  *
  * WARNING TO FUTURE AGENTS: `family` is a DISPLAY LABEL ONLY. It must never be

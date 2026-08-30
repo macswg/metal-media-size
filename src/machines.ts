@@ -262,6 +262,29 @@ export function resolveMachines(): { machines: MachineSpec[]; source: Allocation
 }
 
 /**
+ * The machines that actually PLAY their regions, as opposed to backing them up.
+ *
+ * Actors carry one canvas slice each and directors carry region 0; the
+ * understudies behind them are spares. **Confirmed by the user:** *"the
+ * understudy machines are backups, so if files are not found on the main
+ * (actor) machine they are missing."*
+ *
+ * This is the one thing `role` decides. Everywhere else it is a label — see
+ * CLAUDE.md — but the rig roll-up cannot answer "will the show play this?"
+ * without knowing which of a region's two holders is the one that plays it. A
+ * file present only on the understudy is still missing: the understudy is where
+ * you would copy it back FROM, not where it plays from.
+ */
+export function isPrimaryRole(role: MachineRole): boolean {
+  return role === 'actor' || role === 'director';
+}
+
+/** Ids of the machines that play, rather than back up, what they carry. */
+export function primaryMachineIds(specs: readonly MachineSpec[]): Set<string> {
+  return new Set(specs.filter((m) => isPrimaryRole(m.role)).map((m) => m.id));
+}
+
+/**
  * For each machine, the OTHER machines holding at least one of the same
  * regions. Derived rather than stated, so it cannot drift from `regions`.
  *

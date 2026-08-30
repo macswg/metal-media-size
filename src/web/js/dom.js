@@ -3,6 +3,11 @@
 /**
  * h('div.cls#id', {attrs}, ...children)
  * Attribute values that are functions become event listeners (onClick -> click).
+ *
+ * CAUTION with `value` on a <textarea>. A string attribute is set with
+ * setAttribute, and a textarea takes its value from its CONTENT — so `value:`
+ * on one silently does nothing, where on an <input> it works, because there the
+ * attribute is the initial value. Assign `el.value` after building it.
  */
 export function h(spec, attrs, ...children) {
   const [tagPart, ...rest] = String(spec).split(/(?=[.#])/);

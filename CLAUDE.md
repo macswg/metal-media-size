@@ -289,8 +289,12 @@ sits on exactly two machines and every playable byte is stored twice — the rig
 holds 2.00× what the archive does. `test/server/machines.test.ts` asserts that
 shape, including that the pairing is mutual.
 
-`role` is display and grouping only; nothing keys off it. `peers` is derived
-from the region lists, never stated, so it cannot drift from them.
+`role` decides exactly one thing, and only since the user confirmed it: **which
+of a region's two holders actually plays it.** `isPrimaryRole` says actors and
+directors do and understudies do not, and `rollUpMissing` keys off that — see
+"the master list" below. Nowhere else may read it; it is a label everywhere else,
+and it still decides nothing about supersession. `peers` is derived from the
+region lists, never stated, so it cannot drift from them.
 
 **101–206 vs 207–305 is a confirmed boundary.** It was first given with 206 in
 both ranges; the user then confirmed *"101-206 are actors, 207-305 are
@@ -319,8 +323,12 @@ Never use it to classify anything as removable.
 
 ## The rig survey — the one thing that leaves this machine
 
-`/api/rig/*` and the **Rig** tab read a directory on each playback machine over
-SMB and compare it with the archive. It is the only feature that touches
+`/api/rig/*` and the **Region Gaps (cluster)** tab read a directory on each
+playback machine over SMB and compare it with the archive. The tab sits directly
+after **Region gaps** and is named for it, at the user's request: it asks the
+same question — which slices of the canvas are actually here — of the machines
+instead of the archive. **The id stays `rig`** everywhere else (route, panel,
+tab id, saved links); only the label moved. It is the only feature that touches
 anything outside this Mac, and it is fenced accordingly.
 
 ### The mount is read-only, and the kernel enforces it
@@ -367,9 +375,22 @@ password makes `mount_smbfs` prompt on a terminal a server has not got.
 
 Addresses, mountpoints, results and the credential live in `RigSession`, an
 object in memory. Not in `data/index.db`, not in `config/`, not in `exports/`,
-not in a log. The **only** artefact that outlives the session is the YAML file
-the operator saves from the browser, which carries addresses and **never** a
-credential — `formatTargetsYaml` takes no credential argument, so it cannot.
+not in a log. The only artefacts that outlive the session are the two files the
+operator saves **from the browser**, and neither is written by this application
+— both are rendered into a response body and handed to the operator's own save
+dialog, so where they land is the operator's choice:
+
+- the **target YAML**, which carries addresses and **never** a credential —
+  `formatTargetsYaml` takes no credential argument, so it cannot;
+- the **missing-list CSV** (`GET /api/rig/missing.csv`,
+  `src/rig/missing-csv.ts`), which carries machine **ids** and no address or
+  credential, because the roll-up has neither in it. Asserted behaviourally
+  against a session that holds both, not left to inspection.
+
+The CSV is the WHOLE roll-up, not the 500 rows the tab paints: an export that
+stopped where the table stops would be a list of findings with findings missing
+from it. Sizes are raw bytes — a spreadsheet can sum and sort a number and can
+do neither with `2.06 TiB`.
 
 ### The survey never opens a file
 
@@ -377,42 +398,173 @@ It calls `readdir` and `lstat` and nothing else — not one byte of any file on 
 machine is read. Pinned by a test. Comparison is by name and size only, exactly
 like the duplicate detector, and results say so.
 
+### `objects/VideoFile` is where d3 keeps the media
+
+On a playback machine the media sits at `<project>/objects/VideoFile`, so the
+survey directory is nearly always a project folder plus those two segments. The
+**append d3 VideoFile path** checkbox beside Browse is that fact — ticked by
+default, because it is what the operator wants nearly every time.
+
+- The typed directory and the checkbox are two ways of writing ONE path.
+  `surveyDirectory()` is the only thing that composes them, and everything that
+  surveys or stores a path calls it.
+- **Appending is idempotent**: a directory already ending in the suffix is left
+  alone, so typing it out *and* ticking the box cannot produce
+  `.../objects/VideoFile/objects/VideoFile`.
+- **The session stores the composed path**, and `splitVideoFile` takes it back
+  apart on load. Without that, a reloaded tab would show the suffix in the box
+  beside an unticked checkbox, and ticking it would append a second copy.
+- The line under the field states the whole path, updated on every keystroke and
+  on the checkbox — a control whose effect the screen does not show is a control
+  somebody surveys the wrong folder with. The directory picker's footer says the
+  same composed path, for the same reason.
+
+### The directory may be browsed, and browsing is less than surveying
+
+`GET /api/rig/browse` (`src/rig/browse.ts`, the **Browse…** button beside the
+survey directory) lists **one directory, one level deep, on one mounted
+machine**, so the path can be picked instead of typed. Typing still works.
+
+It exists because that field's mistake is *silent*: a directory that is not
+there walks as an empty machine, and an empty machine reports as one with
+nothing on it — or, where the archive expects nothing of it, as a clean one.
+
+- **`readdir` and nothing else.** No recursion, no `lstat`, no file opened —
+  strictly less than the survey, through the same `ReadOnlyFs` fenced to that
+  machine's mountpoint. **No size is in the payload**: a size costs a round trip
+  per file on SMB, and comparing sizes is the survey's job.
+- **One machine, and the response names it.** The survey applies one directory
+  to every machine, so this is choosing a path, not inspecting a rig. A path on
+  301 and not on 302 is a finding the **survey** makes; a picker that listed
+  somewhere else would pre-empt it.
+- **A symlink is neither a folder nor a file here** — not descended into, not
+  counted. Following one is how a listing leaves the share.
+- **A cut-short list says so** (`truncated`, at 500 entries) and **a missing
+  directory is an error, not an empty listing** — either one reading as
+  complete would recreate the failure the feature removes.
+- Escape is refused twice, as for a typed path: `assertRelativeDirectory` for
+  the message, `ReadOnlyFs` for the guarantee.
+
 ### What the comparison means
 
 Buckets are named for what an operator would DO about them, and every file on a
 machine lands in exactly one: `missingKept` (the alarm — current media absent),
 `sizeMismatch` (same name, different size — both readings are bad),
 `presentSuperseded` (space a cleanup returns), `missingSuperseded` (already
-cleaned off, not a problem), `presentKept`, `extraForeign` (belongs to another
-machine), `extraUnknown`. `inSync` is deliberately about playback, not tidiness:
-old media on a drive is a space problem, not a show-stopper.
+cleaned off, not a problem), `presentKept`, `extraForeign` (a region another
+machine holds — a copy in the wrong place), `extraUnknown` (a region THIS
+machine holds, that the archive has no file for), `extraUnparsed` (a name the
+grammar cannot read), `regionless`. `inSync` is deliberately about playback, not
+tidiness: old media on a drive is a space problem, not a show-stopper.
 
-### The master list, and why `unconfirmed` is not `gone`
+**A file with no region is not a finding.** The allocation is *by region*, so a
+name carrying no `_regionN` belongs to no machine: it is neither missing from
+one nor extra on one, and reporting it as either invents a finding. It goes to
+`regionless`, which is counted (the buckets must still sum to what is on the
+drive) and stated in one quiet line, never listed as something to act on.
+Confirmed by the user: *"if not in the archive at all just means content without
+a region ignore these files"*. On the first real rig this was 388 files, 0.63
+TiB, on one machine — whole-canvas deliverables reading as strangers.
+
+**`regionless` and `extraUnparsed` are not the same thing**, for exactly the
+reason `/api/machines` keeps them apart: one is a legal whole-canvas deliverable,
+the other is a name nothing here understands. Merging them hides the second
+inside the first — and the second is real: `120_LIQUID_CUE_H_LL180_v006_region0_proxy3.mov`
+writes its tokens in the wrong order, and there are 45 such files on one machine.
+
+**Every list is columned, and every column resizes.** Song, file, version and
+region are four questions and get four columns — `src/web/js/gridtable.js`, with
+the drag itself in `src/web/js/colsize.js`, shared with the virtualized Files
+table so there is only one idea of what dragging a column edge means.
+
+**Which rows, then which order — two decisions, and `gridTable` keeps them
+apart.** Lists are capped (300 per section, 500 on the master list), so rows
+arrive in the SERVER's order — biggest first, alarms first — and `max` takes
+from the top of that; `order` then decides how the survivors are read. So a
+capped list is still the largest 300 *and* reads by song, which is what the user
+asked for. There is no sort control: a header that re-ordered the list would undo
+the first half silently and the cap would stop meaning anything.
+
+**"Still on" names machines that HAVE it, and nothing else.** A holder that was
+not surveyed shows an em dash, not its id: the column answers "where can I still
+get this?", and naming a machine while saying nothing about it reads as a
+finding at a glance and is not one. The id is on the tooltip, and "we did not
+look at 207" is stated once in the card's own warning rather than a thousand
+times down a column. Asked for by the user. The three other readings stay
+distinct: green ids (a good copy), `NNN (wrong size)`, and `nowhere` — which
+means every holder was surveyed and none has it.
+
+**On the master list, song order never crosses a state.** A `missing` file sorted
+under a late song, below a screenful of `spare lost`, is exactly the failure the
+states exist to prevent. `bySongWithinState` reads the group order off the rows
+rather than restating it, so it cannot drift from `rollUpMissing`'s ranking.
+
+For a file the index has no row for, the version and region columns are read off
+the NAME by the scan's own grammar (`describeName`, injected exactly as
+`regionOfName` was). The label is composed by `formatVerLabel` in
+`src/scan/parse.ts` — the same function that composes `asset_version.ver_label`
+at index time, so there is one spelling of a version in the whole application.
+Anything that HAS a stored label still reads that label out of the database.
+
+**Two buckets are counted but not displayed**, both at the user's request, and
+both still in `totals`:
+
+- `missingSuperseded` — media already off a machine. Nothing to do about it.
+- `extraUnknown` — media carrying a region this machine plays that the archive
+  has no row for. It is the one bucket the archive can form no opinion about, so
+  it could only ever be read and wondered at. (On the real rig it is empty: what
+  used to fill that section was `regionless`, which is now ignored outright.)
+
+### The master list: the actor decides, the understudy is a backup
 
 `rollUpMissing` folds every machine's `missingKept` into one list at the top of
-the Rig tab. It exists because a per-machine card answers *"what is wrong with
-301?"* and an operator asks *"what is wrong with the show?"* — and on this rig
-those differ, because **every region sits on exactly two machines**. Three
-states, and the distinction between the middle one and the first is the whole
-point:
+the tab. It exists because a per-machine card answers *"what is wrong with
+301?"* and an operator asks *"what is wrong with the show?"*.
 
-- **`gone`** — no surveyed holder has a good copy, and *every* holder was looked
-  at. Nothing on the rig can put this on screen.
-- **`unconfirmed`** — no surveyed holder has a good copy, but a holder was **not
-  surveyed**. It may be safe there. **Never report this as `gone`**: we did not
-  look, and saying otherwise invents a finding. On the first real run this was
-  1,293 files against one surveyed machine of a mirrored pair — every one
-  correctly `unconfirmed`, and reporting them as `gone` would have been 1,293
-  false alarms.
-- **`reduced`** — a good copy exists somewhere, but not everywhere. The show
-  plays; the spare is gone.
+**The two holders of a region are not equal.** **Confirmed by the user:** *"the
+understudy machines are backups, so if files are not found on the main (actor)
+machine they are missing."* So the verdict is decided by the **primary** holder
+— the actor, or the director for region 0 — and the backup decides only what it
+costs to fix:
+
+- **`missing`** — not on its primary, and no surveyed machine has a good copy.
+  The archive is the only place left to get it from. (Called `gone` until the
+  user asked for the plainer word; the state key was renamed with the label, so
+  the CSV and the API say what the screen says.)
+- **`recoverable`** — not on its primary, so the show cannot play it, but the
+  understudy has a good copy: restore from the rig, not from the archive.
+  **Still an alarm.** This is what used to be called `reduced` and read as "the
+  show still plays" — which was wrong, and wrong quietly.
+- **`unconfirmed`** — the **primary** was not surveyed. The machine that decides
+  was not read, so there is no finding to make. **Never report this as an
+  alarm.** Note the scope: an unread *backup* leaves every verdict intact and
+  only the repair route unknown, and is reported as a hint rather than a
+  warning. An unread *primary* is a finding the list cannot make at all, and
+  `unsurveyedPrimaries` is what the loud warning is keyed on.
+- **`spareLost`** — the primary has it; a backup does not. The show plays and
+  the redundancy is gone. The only state here that is not an alarm.
+
+`unplayable` is `missing + recoverable`: the files the show cannot play. That,
+not `missing` alone, is what the header pill and the per-region chips count.
+
+**When no holder is a primary** — an allocation naming no roles, or machine ids
+this rig does not know — every holder decides, which is the old
+any-copy-will-do behaviour and the only safe reading without them. Pinned by a
+test.
 
 **A wrong-sized copy is not a copy.** A holder carrying the right name at the
-wrong size does not count towards `presentOn` — counting it would turn a `gone`
-into a `reduced` and hide the worst finding the survey can make.
+wrong size does not count towards `presentOn` — that would turn a `missing` into
+a `recoverable` and hide the fact that the archive is the only source left.
 
-`unsurveyedHolders` is surfaced in the UI as "this list cannot be complete",
-because a master list that silently omits a machine is worse than no list.
+**What this replaced, and why the old numbers moved.** The first version treated
+both holders as equal, so a file missing from the actor but present on the
+understudy was `reduced` ("the show plays"), and a file missing from a surveyed
+actor with the understudy unsurveyed was `unconfirmed` ("we did not look"). On
+the first real run that made all 1,293 findings `unconfirmed`. Under the user's
+rule those are missing from the machine that plays them: surveying 207 could
+only ever have moved them from `missing` to `recoverable`, never to fine. The
+honesty rule did not go away — it moved onto the primary, which is the only
+machine whose absence is the finding.
 
 An address with no machine id is surveyed but **not compared** — expectations
 are keyed by machine, and guessing which machine an address is would invent the
