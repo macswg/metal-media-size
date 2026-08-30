@@ -273,3 +273,186 @@ export function totalsOf(c: MachineComparison): MachineTotals {
     inSync: c.missingKept.length === 0 && c.sizeMismatch.length === 0,
   };
 }
+
+/* ===========================================================================
+ *  THE MASTER LIST  --  EVERYTHING MISSING, ACROSS THE WHOLE RIG
+ * ===========================================================================
+ *
+ * A per-machine card answers "what is wrong with 301?". It cannot answer the
+ * question an operator asks first, which is "what is wrong with the SHOW?" --
+ * and on this rig those are genuinely different questions, because every region
+ * sits on exactly two machines. A file absent from one of its two holders still
+ * plays; the rig has lost its redundancy and nothing else. The same file absent
+ * from BOTH is media that nothing on the rig can put on screen.
+ *
+ * Only a cross-machine roll-up can tell those apart, and telling them apart is
+ * the entire reason this exists. Hence three states, in the order they matter:
+ *
+ *   gone         no surveyed holder has a good copy, and every holder was
+ *                looked at. Nothing can play this.
+ *   unconfirmed  no surveyed holder has a good copy, but a holder was NOT
+ *                surveyed -- offline, unreachable, or not in the list. It may
+ *                be safe on the machine we could not see. Never reported as
+ *                `gone`: we did not look, and saying otherwise would be
+ *                inventing the finding.
+ *   reduced      at least one good copy exists, but not on every holder. The
+ *                show plays; the redundancy is gone.
+ *
+ * A WRONG-SIZED COPY IS NOT A COPY. A holder carrying the right name at the
+ * wrong size does not count towards `presentOn` -- whatever that file is, it is
+ * not the one the archive recorded, and treating it as a spare would turn a
+ * `gone` into a `reduced` and hide the worst finding the survey can make.
+ * =========================================================================== */
+
+export type MissingState = 'gone' | 'unconfirmed' | 'reduced';
+
+export interface MissingRow {
+  name: string;
+  size: number;
+  region: number;
+  songFolder: string;
+  base: string;
+  verLabel: string;
+  /** Surveyed holders that do not have it at all. */
+  missingFrom: string[];
+  /** Surveyed holders carrying that name at a different size. Not a copy. */
+  wrongSizeOn: string[];
+  /** Surveyed holders that have it, at the right size. */
+  presentOn: string[];
+  /** Holders that were not surveyed, so nothing is known about them. */
+  unknownOn: string[];
+  state: MissingState;
+}
+
+export interface MissingByRegion {
+  region: number;
+  /** Machines that carry this region, whether or not they were surveyed. */
+  holders: string[];
+  files: number;
+  bytes: number;
+  /** Of those, how many no surveyed holder can play. */
+  gone: number;
+}
+
+export interface MissingRollup {
+  rows: MissingRow[];
+  counts: Record<MissingState, number>;
+  bytes: Record<MissingState, number>;
+  byRegion: MissingByRegion[];
+  /** Machines whose contents are unknown, so the roll-up cannot be complete. */
+  unsurveyedHolders: string[];
+  /** True when nothing is missing from any surveyed machine. */
+  clean: boolean;
+}
+
+/** One machine's contribution, in the shape the roll-up needs. */
+export interface MissingSource {
+  machineId: string | null;
+  comparison: MachineComparison | null;
+  error: string | null;
+}
+
+/**
+ * Roll every machine's missing list into one list for the rig.
+ *
+ * Pure: the caller supplies the results and the region allocation. `regionHolders`
+ * is every machine that CARRIES a region, not every machine that was surveyed --
+ * the difference is exactly what `unknownOn` is for.
+ */
+export function rollUpMissing(
+  machines: readonly MissingSource[],
+  regionHolders: ReadonlyMap<number, readonly string[]>,
+): MissingRollup {
+  /** machineId -> what that machine said, for the machines we actually read. */
+  const surveyed = new Map<string, { missing: Set<string>; wrongSize: Set<string> }>();
+  for (const m of machines) {
+    if (m.machineId === null || m.error !== null || !m.comparison) continue;
+    surveyed.set(m.machineId, {
+      missing: new Set(m.comparison.missingKept.map((f) => f.name)),
+      wrongSize: new Set(m.comparison.sizeMismatch.map((f) => f.name)),
+    });
+  }
+
+  // Every distinct file reported missing by anybody. Keyed by name, which is
+  // unique across the delivery because a base carries its song number.
+  const files = new Map<string, ExpectedFile>();
+  for (const m of machines) {
+    if (m.machineId === null || m.error !== null || !m.comparison) continue;
+    for (const f of m.comparison.missingKept) if (!files.has(f.name)) files.set(f.name, f);
+  }
+
+  const rows: MissingRow[] = [];
+  for (const f of files.values()) {
+    // Holders from the allocation, plus any machine that reported it missing --
+    // if a machine expected it, it holds that region by definition, and this
+    // way the row is right even if the two ever disagreed.
+    const holders = new Set(regionHolders.get(f.region) ?? []);
+    for (const [id, said] of surveyed) if (said.missing.has(f.name)) holders.add(id);
+
+    const missingFrom: string[] = [];
+    const wrongSizeOn: string[] = [];
+    const presentOn: string[] = [];
+    const unknownOn: string[] = [];
+
+    for (const id of [...holders].sort()) {
+      const said = surveyed.get(id);
+      if (!said) unknownOn.push(id);
+      else if (said.missing.has(f.name)) missingFrom.push(id);
+      else if (said.wrongSize.has(f.name)) wrongSizeOn.push(id);
+      else presentOn.push(id);
+    }
+
+    const state: MissingState =
+      presentOn.length > 0 ? 'reduced' : unknownOn.length > 0 ? 'unconfirmed' : 'gone';
+
+    rows.push({
+      name: f.name,
+      size: f.size,
+      region: f.region,
+      songFolder: f.songFolder,
+      base: f.base,
+      verLabel: f.verLabel,
+      missingFrom,
+      wrongSizeOn,
+      presentOn,
+      unknownOn,
+      state,
+    });
+  }
+
+  // Worst first, then biggest first: the operator reads from the top, and the
+  // top should be what costs the most to be wrong about.
+  const rank: Record<MissingState, number> = { gone: 0, unconfirmed: 1, reduced: 2 };
+  rows.sort((a, b) => rank[a.state] - rank[b.state] || b.size - a.size || a.name.localeCompare(b.name));
+
+  const counts: Record<MissingState, number> = { gone: 0, unconfirmed: 0, reduced: 0 };
+  const bytes: Record<MissingState, number> = { gone: 0, unconfirmed: 0, reduced: 0 };
+  const regions = new Map<number, MissingByRegion>();
+  for (const r of rows) {
+    counts[r.state] += 1;
+    bytes[r.state] += r.size;
+    const entry = regions.get(r.region) ?? {
+      region: r.region,
+      holders: [...(regionHolders.get(r.region) ?? [])].sort(),
+      files: 0,
+      bytes: 0,
+      gone: 0,
+    };
+    entry.files += 1;
+    entry.bytes += r.size;
+    if (r.state === 'gone') entry.gone += 1;
+    regions.set(r.region, entry);
+  }
+
+  const unsurveyed = new Set<string>();
+  for (const r of rows) for (const id of r.unknownOn) unsurveyed.add(id);
+
+  return {
+    rows,
+    counts,
+    bytes,
+    byRegion: [...regions.values()].sort((a, b) => b.gone - a.gone || b.bytes - a.bytes || a.region - b.region),
+    unsurveyedHolders: [...unsurveyed].sort(),
+    clean: rows.length === 0,
+  };
+}

@@ -52,7 +52,7 @@ import { badRequest } from '../errors.ts';
 import { parseKeepN, type Query } from '../query.ts';
 import { ExclusionMatcher } from '../../scan/exclude.ts';
 import { makeParser } from '../../scan/parse.ts';
-import { resolveMachines } from '../../machines.ts';
+import { machinesByRegion, resolveMachines } from '../../machines.ts';
 import { formatTargetsYaml, parseTargetList, type RigTarget } from '../../rig/targets.ts';
 import { listSmbMounts } from '../../rig/mounts.ts';
 import type { ExpectedFile } from '../../rig/survey.ts';
@@ -230,6 +230,13 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
 
     const { machines } = resolveMachines();
     const regionsById = new Map(machines.map((m) => [m.id, [...m.regions]]));
+    // Every machine that carries each region, from the allocation rather than
+    // from the target list: a region whose second holder was not surveyed must
+    // read as "not looked at", never as "gone from the rig".
+    const regionHolders = new Map<number, string[]>();
+    for (const [region, holders] of machinesByRegion(machines)) {
+      regionHolders.set(region, holders.map((m) => m.id));
+    }
     const expectedByRegion = expectationsByRegion(ctx, snapshot.id, keepN, regionOfName);
 
     const jobs: SurveyJob[] = targets.map((target) => {
@@ -255,6 +262,7 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
       exclusions: new ExclusionMatcher(ctx.cfg.exclusions.globs, ctx.cfg.exclusions.caseInsensitive),
       dirTimeoutMs: ctx.cfg.dirTimeoutMs,
       regionOfName,
+      regionHolders,
       ...(typeof body.concurrency === 'number' ? { concurrency: body.concurrency } : {}),
     });
 

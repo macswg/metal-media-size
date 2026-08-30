@@ -969,6 +969,58 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   white-space: nowrap;
 }
 
+/* The master missing list. Three states, in the order they matter, and each
+   coloured for what it means rather than for variety: gone is the alarm,
+   unconfirmed is an unanswered question, spare-lost is a warning. */
+.miss-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
+.miss-legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-2); cursor: help; }
+.miss-dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; background: var(--dim); }
+.miss-legend-item.gone .miss-dot { background: var(--warn); }
+.miss-legend-item.gone b { color: var(--warn); }
+.miss-legend-item.unconfirmed .miss-dot { background: var(--patch); }
+.miss-legend-item.unconfirmed b { color: var(--patch); }
+.miss-legend-item.reduced .miss-dot { background: var(--superseded); }
+.miss-legend-item.reduced b { color: var(--superseded); }
+
+.miss-regions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.miss-region {
+  font-size: 11px; font-family: var(--mono); color: var(--text-2);
+  background: var(--panel-3); border: 1px solid var(--line);
+  border-radius: 3px; padding: 3px 7px; cursor: help;
+}
+.miss-region.gone { border-color: var(--warn); color: var(--warn); }
+.miss-region b { color: var(--text); margin-right: 4px; }
+.miss-gone-n { margin-left: 6px; color: var(--warn); font-weight: 600; }
+
+/* The list scrolls inside itself, with its header pinned. Without this a rig
+   missing a thousand files pushes every other card off the bottom of the tab. */
+.miss-scroll {
+  max-height: 440px;
+  overflow: auto;
+  margin-top: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+}
+.miss-table { font-size: 11.5px; }
+.miss-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.miss-table td { white-space: nowrap; }
+/* The file name is the widest thing here and the least load-bearing -- the
+   song, version and region already identify the row, and the full name is in
+   the title. Letting it push the "still on" column off the edge would hide the
+   one column that says whether anything can still play the file. */
+.miss-file { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.pill.miss-gone { color: var(--warn); background: rgba(224, 112, 58, 0.14); }
+.pill.miss-unconfirmed { color: var(--patch); background: var(--patch-bg); }
+.pill.miss-reduced { color: var(--superseded); background: var(--superseded-bg); }
+/* A file nothing can play gets the only loud row in the table. */
+.miss-table tr.miss-gone td { background: rgba(224, 112, 58, 0.06); }
+
 .kv-inline { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 8px; }
 .kvi { font-size: 11.5px; color: var(--text-2); }
 .kvi b { display: block; color: var(--faint); font-weight: 500; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; }

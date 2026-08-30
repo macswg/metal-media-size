@@ -50,7 +50,13 @@ import {
   parseMountTable,
 } from '../../src/rig/mounts.ts';
 import { formatTargetsYaml, parseTargetList, MAX_TARGETS } from '../../src/rig/targets.ts';
-import { compareMachine, totalsOf, type ExpectedFile, type RemoteFile } from '../../src/rig/survey.ts';
+import {
+  compareMachine,
+  rollUpMissing,
+  totalsOf,
+  type ExpectedFile,
+  type RemoteFile,
+} from '../../src/rig/survey.ts';
 import { RigSession } from '../../src/server/rig-session.ts';
 import { assertRelativeDirectory } from '../../src/server/routes/rig.ts';
 
@@ -674,5 +680,165 @@ describe('the routes', () => {
     await req('DELETE', '/api/rig/session');
     const after = (ctx.db.prepare('SELECT COUNT(*) AS n FROM file').get() as { n: number }).n;
     expect(after).toBe(before);
+  });
+});
+
+// ===========================================================================
+describe('the master list of what is missing across the rig', () => {
+  const file = (name: string, region: number, size = 100): ExpectedFile => ({
+    name,
+    size,
+    region,
+    songFolder: '100_ALPHA',
+    base: '100_ALPHA_MAIN_LL180',
+    verLabel: 'v004',
+    versionId: 1,
+    status: 'kept',
+  });
+
+  /** A machine result carrying just the two lists the roll-up reads. */
+  const machine = (
+    machineId: string,
+    missingKept: ExpectedFile[],
+    sizeMismatch: { name: string }[] = [],
+  ) => ({
+    machineId,
+    error: null,
+    comparison: {
+      missingKept,
+      sizeMismatch,
+      missingSuperseded: [],
+      presentKept: { count: 0, bytes: 0 },
+      presentSuperseded: [],
+      extraForeign: [],
+      extraUnknown: [],
+      actual: { count: 0, bytes: 0 },
+      expected: { count: 0, bytes: 0 },
+      nameCollisions: 0,
+    },
+  }) as unknown as Parameters<typeof rollUpMissing>[0][number];
+
+  // Region 4 is carried by 103 (actor) and 208 (understudy), as the real rig
+  // mirrors every region on exactly two machines.
+  const holders = new Map<number, string[]>([
+    [4, ['103', '208']],
+    [5, ['104', '208']],
+  ]);
+
+  it('is GONE when no surveyed holder has it and both were looked at', () => {
+    // The finding that matters most: nothing on the rig can put this on screen.
+    const r = rollUpMissing(
+      [machine('103', [file('a_region4.mov', 4)]), machine('208', [file('a_region4.mov', 4)])],
+      holders,
+    );
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]).toMatchObject({
+      state: 'gone',
+      missingFrom: ['103', '208'],
+      presentOn: [],
+      unknownOn: [],
+    });
+    expect(r.counts.gone).toBe(1);
+  });
+
+  it('is REDUCED when the other holder still has it — the show still plays', () => {
+    const r = rollUpMissing(
+      [machine('103', [file('a_region4.mov', 4)]), machine('208', [])],
+      holders,
+    );
+    expect(r.rows[0]).toMatchObject({
+      state: 'reduced',
+      missingFrom: ['103'],
+      presentOn: ['208'],
+    });
+    expect(r.counts.gone).toBe(0);
+  });
+
+  it('is UNCONFIRMED, never gone, when a holder was not surveyed', () => {
+    // THE HONESTY RULE. 208 was offline; we did not look. Calling this `gone`
+    // would be reporting a finding we did not make, and it is the difference
+    // between "copy this file tonight" and "the rig is fine".
+    const r = rollUpMissing([machine('103', [file('a_region4.mov', 4)])], holders);
+    expect(r.rows[0]).toMatchObject({
+      state: 'unconfirmed',
+      missingFrom: ['103'],
+      unknownOn: ['208'],
+      presentOn: [],
+    });
+    expect(r.counts.gone).toBe(0);
+    expect(r.unsurveyedHolders).toEqual(['208']);
+  });
+
+  it('does not treat a wrong-sized copy as a copy', () => {
+    // Whatever that file is, it is not the one the archive recorded. Counting
+    // it as a spare would turn a `gone` into a `reduced` and hide the worst
+    // finding the survey can make.
+    const r = rollUpMissing(
+      [
+        machine('103', [file('a_region4.mov', 4)]),
+        machine('208', [], [{ name: 'a_region4.mov' }]),
+      ],
+      holders,
+    );
+    expect(r.rows[0]).toMatchObject({
+      state: 'gone',
+      wrongSizeOn: ['208'],
+      presentOn: [],
+    });
+  });
+
+  it('collapses one file reported by several machines into one row', () => {
+    const r = rollUpMissing(
+      [machine('103', [file('a_region4.mov', 4)]), machine('208', [file('a_region4.mov', 4)])],
+      holders,
+    );
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]?.missingFrom).toEqual(['103', '208']);
+  });
+
+  it('ignores a machine that failed, rather than reading it as complete', () => {
+    const failed = { machineId: '208', error: 'not reachable', comparison: null };
+    const r = rollUpMissing([machine('103', [file('a_region4.mov', 4)]), failed], holders);
+    // 208 errored, so it is unknown -- not a holder that "has" the file.
+    expect(r.rows[0]?.state).toBe('unconfirmed');
+    expect(r.rows[0]?.unknownOn).toEqual(['208']);
+  });
+
+  it('orders gone first, then unconfirmed, then reduced, biggest first', () => {
+    const r = rollUpMissing(
+      [
+        machine('103', [file('gone.mov', 4, 10), file('small-gone.mov', 4, 1), file('reduced.mov', 5, 999)]),
+        machine('208', [file('gone.mov', 4, 10), file('small-gone.mov', 4, 1)]),
+        machine('104', []),
+      ],
+      holders,
+    );
+    expect(r.rows.map((x) => x.name)).toEqual(['gone.mov', 'small-gone.mov', 'reduced.mov']);
+    expect(r.rows.map((x) => x.state)).toEqual(['gone', 'gone', 'reduced']);
+  });
+
+  it('rolls up per region, worst region first, naming who carries it', () => {
+    const r = rollUpMissing(
+      [
+        machine('103', [file('a_region4.mov', 4, 10)]),
+        machine('208', [file('a_region4.mov', 4, 10), file('b_region5.mov', 5, 500)]),
+        machine('104', []),
+      ],
+      holders,
+    );
+    expect(r.byRegion[0]).toMatchObject({ region: 4, holders: ['103', '208'], files: 1, gone: 1 });
+    expect(r.byRegion[1]).toMatchObject({ region: 5, gone: 0 });
+  });
+
+  it('is clean when nothing is missing anywhere', () => {
+    const r = rollUpMissing([machine('103', []), machine('208', [])], holders);
+    expect(r.clean).toBe(true);
+    expect(r.rows).toEqual([]);
+    expect(r.unsurveyedHolders).toEqual([]);
+  });
+
+  it('is served by the status route even before a survey has run', async () => {
+    const { body } = await req('GET', '/api/rig/status');
+    expect(body.survey.missing).toMatchObject({ rows: [], clean: true });
   });
 });

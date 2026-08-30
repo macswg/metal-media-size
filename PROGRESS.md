@@ -2,6 +2,47 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-30 — a master list, and the difference between "gone" and "we did not look"
+
+> *"at the top of the list we need a master list of the missing regions on
+> any/all machines."* — the user
+
+A card per machine answers "what is wrong with 301?". The question an operator
+actually asks is "what is wrong with the show?", and on this rig those are
+genuinely different: **every region sits on exactly two machines**, so a file
+absent from one of its holders still plays and the rig has merely lost its
+spare. The same file absent from both is media nothing can put on screen. Only a
+cross-machine roll-up can tell those apart, and telling them apart is the entire
+reason `rollUpMissing` exists.
+
+Hence three states rather than a flat list — `gone`, `unconfirmed`, `reduced` —
+and the middle one is the one that matters. **`unconfirmed` means no surveyed
+holder has a good copy, but a holder was not surveyed.** It may be safe there.
+Reporting it as `gone` would be claiming a finding we did not make.
+
+That is not a hypothetical. The first run against the real rig surveyed 103 and
+found 1,293 current files absent, 7.20 TiB. Region 4 is mirrored on 103 and 208;
+208 was not in the list. Every one of those 1,293 came back `unconfirmed`, and
+the panel says "this list cannot be complete: 208 carries some of these regions
+and was not surveyed". A flat "missing" list would have raised 1,293 false
+alarms on a rig that may be perfectly fine.
+
+**A wrong-sized copy is not a copy.** A holder carrying the right name at the
+wrong size does not count towards `presentOn` — whatever that file is, it is not
+the one the archive recorded, and counting it as a spare would turn a `gone`
+into a `reduced` and hide the worst finding the survey can make.
+
+The list also rolls up per region, naming who carries each one, so "r4 · 1,293 ·
+7.20 TiB" reads as a region-level fact rather than a thousand file-level ones.
+
+One thing only the screenshot caught: at 1,293 rows the card rendered 27,000px
+tall and buried every per-machine card beneath it. It now scrolls inside itself
+with a pinned header, and the file-name column truncates rather than pushing
+"still on" — the column that says whether anything can still play the file — off
+the edge.
+
+10 new tests, 593 green.
+
 ## 2026-08-29 — the other half of the question: what is actually ON the machines
 
 > *"i would like to be able to look at the files in a specified directory on all

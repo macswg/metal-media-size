@@ -554,6 +554,37 @@ The YAML is generated into a response body for the browser to download; the
 server never puts it on disk, and it carries **no credential** — `formatTargetsYaml`
 takes none, so it cannot.
 
+### The master list — `status.survey.missing`
+
+Every machine's missing list folded into one, because on a rig that mirrors each
+region across two machines "missing from 103" and "missing from the rig" are
+different findings.
+
+```
+rows[]:  { name, size, region, songFolder, base, verLabel,
+           missingFrom[], wrongSizeOn[], presentOn[], unknownOn[], state }
+counts:  { gone, unconfirmed, reduced }        bytes: { same keys }
+byRegion[]: { region, holders[], files, bytes, gone }
+unsurveyedHolders[]                            clean
+```
+
+| state | meaning |
+|---|---|
+| `gone` | No surveyed holder has a good copy **and every holder was surveyed.** Nothing can play it. |
+| `unconfirmed` | No surveyed holder has a good copy, but a holder was **not** surveyed. |
+| `reduced` | A good copy exists, but not on every holder. The show plays; the spare is gone. |
+
+**`unconfirmed` must never be presented as `gone`.** The difference is whether
+we looked. A client that collapses them turns "one machine of a mirrored pair
+was offline" into a rig-wide alarm.
+
+A holder carrying the right name at the **wrong size** counts towards
+`wrongSizeOn`, never `presentOn` — it is not a usable copy, and treating it as a
+spare would mask a `gone`.
+
+`unsurveyedHolders` names the machines that carry these regions and were not
+read. When it is non-empty the list is incomplete and the UI must say so.
+
 ### Survey result, per machine
 
 ```

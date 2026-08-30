@@ -207,7 +207,16 @@ export class RigPanel {
       this.connectCard(targets),
       this.surveyCard(survey, targets),
     );
-    if (results.length) this.host.append(this.summaryRow(results), ...this.resultCards(results));
+    if (results.length) {
+      this.host.append(
+        this.summaryRow(results),
+        // FIRST, above the per-machine cards. A card per machine answers "what
+        // is wrong with 301?"; this answers "what is wrong with the show?", and
+        // that is the one you read first.
+        this.missingCard(survey.missing),
+        ...this.resultCards(results),
+      );
+    }
     this.host.scrollTop = scrollTop;
   }
 
@@ -506,6 +515,146 @@ export class RigPanel {
     );
   }
 
+  /**
+   * The master list: everything missing anywhere on the rig, worst first.
+   *
+   * The three states are the point. Every region sits on two machines, so a
+   * file absent from one still plays and the rig has merely lost its spare;
+   * absent from both, nothing can put it on screen. `unconfirmed` is the honest
+   * third case — we could not read one of its holders, so we do not know.
+   */
+  missingCard(m) {
+    if (!m) return null;
+    const rows = m.rows || [];
+    const counts = m.counts || {};
+    const bytes = m.bytes || {};
+
+    const body = h('div.card-body');
+
+    if (m.clean) {
+      body.appendChild(
+        h('div.rig-hint', 'Nothing current is missing from any machine that was surveyed.'),
+      );
+    } else {
+      body.appendChild(
+        h(
+          'div.miss-legend',
+          legend('gone', `${count(counts.gone || 0)} gone from the rig`, fmtBytes(bytes.gone || 0), 'No surveyed machine has a good copy, and every machine that carries it was looked at. Nothing can play these.'),
+          legend('unconfirmed', `${count(counts.unconfirmed || 0)} unconfirmed`, fmtBytes(bytes.unconfirmed || 0), 'No surveyed machine has a good copy, but a machine that carries it was not surveyed. It may be safe there.'),
+          legend('reduced', `${count(counts.reduced || 0)} redundancy lost`, fmtBytes(bytes.reduced || 0), 'At least one machine still has a good copy, so the show plays — but the spare is gone.'),
+        ),
+      );
+
+      if (m.unsurveyedHolders?.length) {
+        body.appendChild(
+          h(
+            'div.rig-warn',
+            `This list cannot be complete: ${m.unsurveyedHolders.join(', ')} ` +
+              `${m.unsurveyedHolders.length === 1 ? 'carries' : 'carry'} some of these regions and ` +
+              `${m.unsurveyedHolders.length === 1 ? 'was' : 'were'} not surveyed.`,
+          ),
+        );
+      }
+
+      if (m.byRegion?.length) {
+        body.appendChild(
+          h(
+            'div.miss-regions',
+            ...m.byRegion.map((r) =>
+              h(
+                `span.miss-region${r.gone ? '.gone' : ''}`,
+                {
+                  title:
+                    `Region ${r.region} is carried by ${r.holders.join(' and ') || 'no machine'}. ` +
+                    `${r.files} file(s) missing, ${r.gone} of them from every surveyed holder.`,
+                },
+                h('b', { text: `r${r.region}` }),
+                ` ${count(r.files)} · ${fmtBytes(r.bytes)}`,
+                r.gone ? h('span.miss-gone-n', { text: `${count(r.gone)} gone` }) : null,
+              ),
+            ),
+          ),
+        );
+      }
+
+      const shown = rows.slice(0, 500);
+      body.appendChild(
+        h(
+          // Scrolls inside itself. At 1,293 rows an uncapped table is 27,000px
+          // tall and buries every per-machine card under it.
+          'div.miss-scroll',
+          h(
+            'table.grid.miss-table',
+            h(
+              'thead',
+              h(
+                'tr',
+                h('th', 'State'),
+                h('th', 'Song'),
+                h('th', 'File'),
+                h('th', 'Ver'),
+                h('th.num', 'Region'),
+                h('th.num', 'Size'),
+                h('th', 'Missing from'),
+                h('th', 'Still on'),
+              ),
+            ),
+            h(
+              'tbody',
+              ...shown.map((r) =>
+                h(
+                  `tr.miss-${r.state}`,
+                  h('td', h(`span.pill.miss-${r.state}`, { text: STATE_LABEL[r.state] || r.state })),
+                  h('td.mono', { text: r.songFolder }),
+                  h('td.mono.miss-file', { text: r.name, title: r.name }),
+                  h('td.mono', { text: r.verLabel }),
+                  h('td.num', { text: String(r.region) }),
+                  h('td.num', { text: fmtBytes(r.size) }),
+                  h('td.mono', { text: r.missingFrom.join(', ') || '—' }),
+                  h(
+                    'td.mono',
+                    r.presentOn.length
+                      ? h('span', { style: { color: 'var(--kept)' }, text: r.presentOn.join(', ') })
+                      : null,
+                    r.wrongSizeOn.length
+                      ? h('span', { style: { color: 'var(--warn)' }, text: ` ${r.wrongSizeOn.join(', ')} (wrong size)` })
+                      : null,
+                    r.unknownOn.length
+                      ? h('span.muted', {
+                          text: ` ${r.unknownOn.join(', ')}?`,
+                          title: `${r.unknownOn.join(', ')} carries this region but was not surveyed`,
+                        })
+                      : null,
+                    !r.presentOn.length && !r.wrongSizeOn.length && !r.unknownOn.length
+                      ? h('span', { style: { color: 'var(--warn)' }, text: 'nowhere' })
+                      : null,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      if (rows.length > shown.length) {
+        body.appendChild(h('div.card-note', `Showing the first ${count(shown.length)} of ${count(rows.length)}.`));
+      }
+    }
+
+    return h(
+      'div.card',
+      h(
+        'header',
+        h('h3', { text: 'Missing across the rig' }),
+        counts.gone
+          ? h('span.pill.broken', { text: `${count(counts.gone)} unplayable` })
+          : h('span.n', { text: m.clean ? 'nothing missing' : 'nothing unplayable' }),
+        h('span.spacer'),
+        h('span.n', { text: rows.length ? `${count(rows.length)} files` : '' }),
+      ),
+      body,
+    );
+  }
+
   resultCards(results) {
     return results.map((r) => {
       const t = r.totals;
@@ -588,6 +737,21 @@ function section(title, rows, tone, describe) {
     ),
     rows.length > 300 ? h('div.rig-hint', `Showing the first 300 of ${count(rows.length)}.`) : null,
     list,
+  );
+}
+
+const STATE_LABEL = {
+  gone: 'gone',
+  unconfirmed: 'unconfirmed',
+  reduced: 'spare lost',
+};
+
+function legend(kind, label, sub, title) {
+  return h(
+    `div.miss-legend-item.${kind}`,
+    { title },
+    h('span.miss-dot'),
+    h('span', h('b', { text: label }), h('span.muted', { text: ` · ${sub}` })),
   );
 }
 

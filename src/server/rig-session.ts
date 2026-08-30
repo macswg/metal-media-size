@@ -37,7 +37,16 @@
 import { ReadOnlyFs } from '../fs/readonly.ts';
 import { walk } from '../scan/walk.ts';
 import type { ExclusionMatcher } from '../scan/exclude.ts';
-import { compareMachine, totalsOf, type ExpectedFile, type MachineComparison, type MachineTotals, type RemoteFile } from '../rig/survey.ts';
+import {
+  compareMachine,
+  rollUpMissing,
+  totalsOf,
+  type ExpectedFile,
+  type MachineComparison,
+  type MachineTotals,
+  type MissingRollup,
+  type RemoteFile,
+} from '../rig/survey.ts';
 import type { RigTarget } from '../rig/targets.ts';
 import { mountShare, unmountShare, type MountOutcome } from '../rig/mounts.ts';
 
@@ -83,6 +92,13 @@ export interface SurveyPlan {
   exclusions: ExclusionMatcher;
   dirTimeoutMs: number;
   regionOfName: (name: string) => number | null;
+  /**
+   * Every machine that CARRIES each region, from the rig allocation -- not just
+   * the ones being surveyed. The difference is what lets the master list say
+   * "this is gone from the rig" as opposed to "we did not look at its other
+   * holder", which are very different findings.
+   */
+  regionHolders: Map<number, string[]>;
   concurrency?: number | undefined;
 }
 
@@ -123,6 +139,12 @@ export interface RigStatus {
     snapshotId: number | null;
     error: string | null;
     results: MachineResult[];
+    /**
+     * Everything missing, across every machine, in one list. A per-machine card
+     * answers "what is wrong with 301?"; this answers "what is wrong with the
+     * SHOW?", which on a rig that mirrors every region is a different question.
+     */
+    missing: MissingRollup;
   };
 }
 
@@ -145,6 +167,7 @@ export class RigSession {
   private snapshotId: number | null = null;
   private error: string | null = null;
   private results: MachineResult[] = [];
+  private regionHolders: Map<number, string[]> = new Map();
   private inFlight: Promise<void> | undefined;
 
   isRunning(): boolean {
@@ -256,6 +279,7 @@ export class RigSession {
     this.keepN = plan.keepN;
     this.snapshotId = plan.snapshotId;
     this.directory = plan.directory;
+    this.regionHolders = plan.regionHolders;
 
     this.inFlight = this.run(plan)
       .catch((err: unknown) => {
@@ -353,6 +377,10 @@ export class RigSession {
         snapshotId: this.snapshotId,
         error: this.error,
         results: this.results,
+        // Recomputed per call rather than cached, so it stays truthful while a
+        // survey is still filling `results` in. It is a roll-up of a few
+        // hundred rows at most; the payload costs more than the arithmetic.
+        missing: rollUpMissing(this.results, this.regionHolders),
       },
     };
   }

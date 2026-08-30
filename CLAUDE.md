@@ -380,6 +380,33 @@ cleaned off, not a problem), `presentKept`, `extraForeign` (belongs to another
 machine), `extraUnknown`. `inSync` is deliberately about playback, not tidiness:
 old media on a drive is a space problem, not a show-stopper.
 
+### The master list, and why `unconfirmed` is not `gone`
+
+`rollUpMissing` folds every machine's `missingKept` into one list at the top of
+the Rig tab. It exists because a per-machine card answers *"what is wrong with
+301?"* and an operator asks *"what is wrong with the show?"* — and on this rig
+those differ, because **every region sits on exactly two machines**. Three
+states, and the distinction between the middle one and the first is the whole
+point:
+
+- **`gone`** — no surveyed holder has a good copy, and *every* holder was looked
+  at. Nothing on the rig can put this on screen.
+- **`unconfirmed`** — no surveyed holder has a good copy, but a holder was **not
+  surveyed**. It may be safe there. **Never report this as `gone`**: we did not
+  look, and saying otherwise invents a finding. On the first real run this was
+  1,293 files against one surveyed machine of a mirrored pair — every one
+  correctly `unconfirmed`, and reporting them as `gone` would have been 1,293
+  false alarms.
+- **`reduced`** — a good copy exists somewhere, but not everywhere. The show
+  plays; the spare is gone.
+
+**A wrong-sized copy is not a copy.** A holder carrying the right name at the
+wrong size does not count towards `presentOn` — counting it would turn a `gone`
+into a `reduced` and hide the worst finding the survey can make.
+
+`unsurveyedHolders` is surfaced in the UI as "this list cannot be complete",
+because a master list that silently omits a machine is worse than no list.
+
 An address with no machine id is surveyed but **not compared** — expectations
 are keyed by machine, and guessing which machine an address is would invent the
 one fact the comparison rests on.
