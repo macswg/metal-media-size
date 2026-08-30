@@ -1079,6 +1079,21 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
 .pill.miss-recoverable { color: var(--warn); background: rgba(224, 112, 58, 0.07); }
 .pill.miss-unconfirmed { color: var(--patch); background: var(--patch-bg); }
 .pill.miss-spareLost { color: var(--superseded); background: var(--superseded-bg); }
+/* The misplaced list. Same idea as the missing list: the one thing worth doing
+   tonight is warning-coloured, tidiness is amber, and what we could not answer
+   stays purple. `unknown` is grey because it is not a finding, it is a gap. */
+.miss-legend-item.rescue .miss-dot { background: var(--warn); }
+.miss-legend-item.rescue b { color: var(--warn); }
+.miss-legend-item.unknown .miss-dot { background: var(--dim); }
+.miss-legend-item.unknown b { color: var(--dim); }
+.miss-legend-item.duplicate .miss-dot { background: var(--superseded); }
+.miss-legend-item.duplicate b { color: var(--superseded); }
+.pill.misp-rescue { color: var(--warn); background: rgba(224, 112, 58, 0.14); }
+.pill.misp-unconfirmed { color: var(--patch); background: var(--patch-bg); }
+.pill.misp-unknown { color: var(--dim); background: rgba(124, 136, 153, 0.12); }
+.pill.misp-duplicate { color: var(--superseded); background: var(--superseded-bg); }
+.gt-row.misp-rescue { background: rgba(224, 112, 58, 0.06); }
+
 /* Both alarm rows are tinted; the one the archive is the only source for is
    tinted harder. Nothing else in the table is tinted at all. */
 .gt-row.miss-missing { background: rgba(224, 112, 58, 0.06); }

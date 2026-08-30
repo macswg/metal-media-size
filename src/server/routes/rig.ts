@@ -346,7 +346,8 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
     for (const [region, holders] of machinesByRegion(machines)) {
       regionHolders.set(region, holders.map((m) => m.id));
     }
-    const expectedByRegion = expectationsByRegion(ctx, snapshot.id, keepN, regionOfName);
+    const { byRegion: expectedByRegion, statusByName: archiveStatusByName } =
+      expectationsByRegion(ctx, snapshot.id, keepN, regionOfName);
 
     const jobs: SurveyJob[] = targets.map((target) => {
       const regions = target.machineId ? (regionsById.get(target.machineId) ?? null) : null;
@@ -373,6 +374,7 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
       describeName,
       regionHolders,
       primaryHolders,
+      archiveStatusByName,
       ...(typeof body.concurrency === 'number' ? { concurrency: body.concurrency } : {}),
     });
 
@@ -411,7 +413,17 @@ function expectationsByRegion(
   snapshotId: number,
   keepN: number,
   regionOfName: (name: string) => number | null,
-): Map<number, ExpectedFile[]> {
+): {
+  byRegion: Map<number, ExpectedFile[]>;
+  /**
+   * Every name in the snapshot with its verdict -- regionless files included,
+   * because the question this answers is "does the archive have this name at
+   * all?", which is not a question about regions. The misplaced roll-up needs
+   * it: without it, a file the archive has never seen would be classified on
+   * the strength of nobody having reported it missing.
+   */
+  statusByName: Map<string, 'kept' | 'superseded' | 'unknown'>;
+} {
   const rows = ctx.db
     .prepare(
       `SELECT f.name AS name, f.size AS size, f.song_folder AS songFolder,
@@ -431,14 +443,20 @@ function expectationsByRegion(
 
   const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
   const out = new Map<number, ExpectedFile[]>();
+  const statusByName = new Map<string, 'kept' | 'superseded' | 'unknown'>();
 
   for (const r of rows) {
+    const v = r.versionId === null ? undefined : verdicts.get(r.versionId);
+    const status = v === undefined ? 'unknown' : v.keep ? 'kept' : 'superseded';
+    // Filled for EVERY name, before the region check: presence in this map is
+    // what "the archive has this file" means.
+    statusByName.set(r.name, status);
+
     const region = regionOfName(r.name);
     // A file with no region is not allocated to any machine -- it is the
     // `regionless` category the machine view already reports. It is not
-    // expected anywhere, and finding one on a machine is `extraUnknown`.
+    // expected anywhere, and finding one on a machine is not a finding at all.
     if (region === null) continue;
-    const v = r.versionId === null ? undefined : verdicts.get(r.versionId);
     const list = out.get(region) ?? [];
     list.push({
       name: r.name,
@@ -448,9 +466,9 @@ function expectationsByRegion(
       base: r.base ?? '',
       verLabel: r.verLabel ?? '',
       versionId: r.versionId ?? -1,
-      status: v === undefined ? 'unknown' : v.keep ? 'kept' : 'superseded',
+      status,
     });
     out.set(region, list);
   }
-  return out;
+  return { byRegion: out, statusByName };
 }

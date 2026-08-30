@@ -451,7 +451,7 @@ export interface MissingRollup {
   clean: boolean;
 }
 
-/** One machine's contribution, in the shape the roll-up needs. */
+/** One machine's contribution, in the roll-ups' shape. */
 export interface MissingSource {
   machineId: string | null;
   comparison: MachineComparison | null;
@@ -588,6 +588,221 @@ export function rollUpMissing(
     unplayable: {
       files: counts.missing + counts.recoverable,
       bytes: bytes.missing + bytes.recoverable,
+    },
+    clean: rows.length === 0,
+  };
+}
+
+/* ===========================================================================
+ *  THE OTHER HALF  --  MEDIA THAT IS HERE, AND IN THE WRONG PLACE
+ * ===========================================================================
+ *
+ * `missingKept` asks "what is the rig short of?". This asks the question that
+ * sits next to it: **what is on the rig, in the wrong place?** Both are needed,
+ * and neither implies the other -- on a rig where a copy went to the wrong
+ * machine, the file is simultaneously missing from one drive and taking up
+ * space on another, and the two facts are reported on different cards.
+ *
+ * A per-machine card already says "this file belongs to another machine"
+ * (`extraForeign`). It cannot say the thing an operator wants next, which is
+ * whether the machine it belongs to HAS it -- because that is a fact about a
+ * different machine. Hence a roll-up, and hence four states:
+ *
+ *   rescue       a rightful holder is short of this file, and here it is. The
+ *                nearest copy is on the rig, not in the archive. Actionable,
+ *                and it is the reason this exists.
+ *   duplicate    every rightful holder already has a good copy. This one is
+ *                just space on the wrong drive -- a cleanup, not an alarm.
+ *   unconfirmed  a rightful holder was not surveyed, so which of the two above
+ *                this is cannot be said. Never guessed at.
+ *   unknown      the archive has no row for this name. The region in the name
+ *                still says which machines carry that slice, but whether
+ *                anything needs the file cannot be answered from here.
+ *
+ * A SUPERSEDED FILE IS NEVER A RESCUE. If the archive has replaced it, no
+ * machine is short of it however few copies exist, and moving it would be
+ * moving old media around. It reads as `duplicate`, which is what it is: space.
+ *
+ * A WRONG-SIZED COPY ON THE RIGHTFUL HOLDER COUNTS AS NEEDING IT. Whatever that
+ * file is, it is not the one the archive recorded -- the same rule the missing
+ * roll-up uses, pointing the same way: towards reporting the finding.
+ * =========================================================================== */
+
+export type MisplacedState = 'rescue' | 'duplicate' | 'unconfirmed' | 'unknown';
+
+export interface MisplacedRow {
+  name: string;
+  /** Size on the machine that should not have it. */
+  size: number;
+  /** The region the NAME carries. Never null: that is what made it misplaced. */
+  region: number;
+  /** Where it sits on the machine it was found on, `/` separated. */
+  relPath: string;
+  base: string;
+  verLabel: string;
+  /** Machines carrying it that the allocation does not put it on. */
+  foundOn: string[];
+  /** Machines the allocation DOES put it on. */
+  belongsOn: string[];
+  /** Of those, the ones short of it -- absent, or carrying the wrong size. */
+  needIt: string[];
+  /** Of those, the ones that have a good copy. */
+  haveIt: string[];
+  /** Of those, the ones nobody read. */
+  unknownOn: string[];
+  /** What the archive says about the name, or null when it has never seen it. */
+  archiveStatus: 'kept' | 'superseded' | 'unknown' | null;
+  state: MisplacedState;
+}
+
+export interface MisplacedByRegion {
+  region: number;
+  holders: string[];
+  files: number;
+  bytes: number;
+  /** Of those, how many a rightful holder is actually short of. */
+  rescue: number;
+}
+
+export interface MisplacedRollup {
+  rows: MisplacedRow[];
+  counts: Record<MisplacedState, number>;
+  bytes: Record<MisplacedState, number>;
+  byRegion: MisplacedByRegion[];
+  /** Rightful holders nobody read, so some of this cannot be classified. */
+  unsurveyedHolders: string[];
+  /** Everything here, however classified: space sitting on the wrong drive. */
+  total: { files: number; bytes: number };
+  clean: boolean;
+}
+
+/**
+ * Roll every machine's `extraForeign` into one list for the rig.
+ *
+ * Pure, like `rollUpMissing`, and over the same inputs plus one: what the
+ * ARCHIVE says about each name. Without that, a file the archive has never seen
+ * would be classified as `duplicate` -- "the right machines already have it" --
+ * on the strength of nobody having reported it missing, which is not evidence
+ * of anything. `archiveStatusByName` covers the whole snapshot; a name absent
+ * from it is a name the archive does not have.
+ */
+export function rollUpMisplaced(
+  machines: readonly MissingSource[],
+  regionHolders: ReadonlyMap<number, readonly string[]>,
+  archiveStatusByName: ReadonlyMap<string, 'kept' | 'superseded' | 'unknown'> = new Map(),
+): MisplacedRollup {
+  /** What each machine we actually read had to say about a name. */
+  const surveyed = new Map<
+    string,
+    { missing: Set<string>; wrongSize: Set<string>; hasSuperseded: Set<string> }
+  >();
+  for (const m of machines) {
+    if (m.machineId === null || m.error !== null || !m.comparison) continue;
+    surveyed.set(m.machineId, {
+      missing: new Set([
+        ...m.comparison.missingKept.map((f) => f.name),
+        ...m.comparison.missingSuperseded.map((f) => f.name),
+      ]),
+      wrongSize: new Set(m.comparison.sizeMismatch.map((f) => f.name)),
+      hasSuperseded: new Set(m.comparison.presentSuperseded.map((f) => f.name)),
+    });
+  }
+
+  /** name -> the misplaced copies of it, collapsed across machines. */
+  const found = new Map<string, { file: ForeignFile; on: string[] }>();
+  for (const m of machines) {
+    if (m.machineId === null || m.error !== null || !m.comparison) continue;
+    for (const f of m.comparison.extraForeign) {
+      const entry = found.get(f.name);
+      if (entry) entry.on.push(m.machineId);
+      else found.set(f.name, { file: f, on: [m.machineId] });
+    }
+  }
+
+  const rows: MisplacedRow[] = [];
+  for (const { file, on } of found.values()) {
+    // `extraForeign` is defined by having a region, so this is never null; the
+    // guard keeps the type honest rather than asserting.
+    if (file.region === null) continue;
+    const holders = [...(regionHolders.get(file.region) ?? [])].sort();
+    const archiveStatus = archiveStatusByName.get(file.name) ?? null;
+
+    const needIt: string[] = [];
+    const haveIt: string[] = [];
+    const unknownOn: string[] = [];
+    for (const id of holders) {
+      const said = surveyed.get(id);
+      if (!said) unknownOn.push(id);
+      else if (said.missing.has(file.name) || said.wrongSize.has(file.name)) needIt.push(id);
+      else haveIt.push(id);
+    }
+
+    // A file the archive has replaced is not needed anywhere, however few
+    // copies of it exist. A file the archive has never seen cannot be said to
+    // be needed at all. Only a KEPT file can be a rescue.
+    const rescuable = archiveStatus === 'kept';
+    const state: MisplacedState =
+      archiveStatus === null
+        ? 'unknown'
+        : rescuable && needIt.length > 0
+          ? 'rescue'
+          : unknownOn.length > 0
+            ? 'unconfirmed'
+            : 'duplicate';
+
+    rows.push({
+      name: file.name,
+      size: file.size,
+      region: file.region,
+      relPath: file.relPath,
+      base: file.base,
+      verLabel: file.verLabel,
+      foundOn: [...on].sort(),
+      belongsOn: holders,
+      needIt,
+      haveIt,
+      unknownOn,
+      archiveStatus,
+      state,
+    });
+  }
+
+  // Worst first, then biggest first, exactly as the missing list orders itself.
+  const rank: Record<MisplacedState, number> = { rescue: 0, unconfirmed: 1, unknown: 2, duplicate: 3 };
+  rows.sort((a, b) => rank[a.state] - rank[b.state] || b.size - a.size || a.name.localeCompare(b.name));
+
+  const counts: Record<MisplacedState, number> = { rescue: 0, duplicate: 0, unconfirmed: 0, unknown: 0 };
+  const bytes: Record<MisplacedState, number> = { rescue: 0, duplicate: 0, unconfirmed: 0, unknown: 0 };
+  const regions = new Map<number, MisplacedByRegion>();
+  const unsurveyed = new Set<string>();
+  for (const r of rows) {
+    counts[r.state] += 1;
+    bytes[r.state] += r.size;
+    for (const id of r.unknownOn) unsurveyed.add(id);
+    const entry = regions.get(r.region) ?? {
+      region: r.region,
+      holders: r.belongsOn,
+      files: 0,
+      bytes: 0,
+      rescue: 0,
+    };
+    entry.files += 1;
+    entry.bytes += r.size;
+    if (r.state === 'rescue') entry.rescue += 1;
+    regions.set(r.region, entry);
+  }
+
+  return {
+    rows,
+    counts,
+    bytes,
+    byRegion: [...regions.values()].sort(
+      (a, b) => b.rescue - a.rescue || b.bytes - a.bytes || a.region - b.region,
+    ),
+    unsurveyedHolders: [...unsurveyed].sort(),
+    total: {
+      files: rows.length,
+      bytes: rows.reduce((n, r) => n + r.size, 0),
     },
     clean: rows.length === 0,
   };

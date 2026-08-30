@@ -466,6 +466,10 @@ export class RigPanel {
         // is wrong with 301?"; this answers "what is wrong with the show?", and
         // that is the one you read first.
         this.missingCard(survey.missing),
+        // Beside it, never inside it: "the rig is short of this" and "the rig
+        // has this in the wrong place" are two findings, and a file copied to
+        // the wrong machine is both at once.
+        this.misplacedCard(survey.misplaced),
         ...this.resultCards(results),
       );
     }
@@ -966,6 +970,99 @@ export class RigPanel {
     );
   }
 
+  /**
+   * MEDIA THAT IS HERE, AND IN THE WRONG PLACE.
+   *
+   * The per-machine card can say "this file belongs to another machine". It
+   * cannot say the thing an operator wants next — whether the machine it
+   * belongs to HAS it — because that is a fact about a different machine. So
+   * this is a roll-up, and the states are what you would DO about each row:
+   * put it back, delete it, or go and look at the machine nobody read.
+   */
+  misplacedCard(m) {
+    if (!m || m.clean) return null;
+    const counts = m.counts || {};
+    const bytes = m.bytes || {};
+    const rows = m.rows || [];
+
+    const body = h('div.card-body');
+    body.appendChild(
+      h(
+        'div.miss-legend',
+        legend('rescue', `${count(counts.rescue || 0)} can be put back`, fmtBytes(bytes.rescue || 0), 'A machine that should have this file is short of it, and here the file is on another machine. The nearest copy is on the rig, not in the archive.'),
+        legend('unconfirmed', `${count(counts.unconfirmed || 0)} unconfirmed`, fmtBytes(bytes.unconfirmed || 0), 'A machine that should have this file was not surveyed, so whether this copy is needed cannot be said.'),
+        legend('unknown', `${count(counts.unknown || 0)} not in the archive`, fmtBytes(bytes.unknown || 0), 'The archive has no row for this name. Its region says which machines carry that slice, but whether anything needs it cannot be answered from here.'),
+        legend('duplicate', `${count(counts.duplicate || 0)} already in place`, fmtBytes(bytes.duplicate || 0), 'Every machine that should have this file already has a good copy. This one is just space on the wrong drive — a cleanup, not an alarm.'),
+      ),
+    );
+
+    if (m.unsurveyedHolders?.length) {
+      body.appendChild(
+        h(
+          'div.rig-hint',
+          `${m.unsurveyedHolders.join(', ')} ${m.unsurveyedHolders.length === 1 ? 'carries' : 'carry'} some of these regions and ` +
+            `${m.unsurveyedHolders.length === 1 ? 'was' : 'were'} not surveyed. Until then some of this cannot be told apart from a copy that is needed.`,
+        ),
+      );
+    }
+
+    if (m.byRegion?.length) {
+      body.appendChild(
+        h(
+          'div.miss-regions',
+          ...m.byRegion.map((r) =>
+            h(
+              `span.miss-region${r.rescue ? '.alarm' : ''}`,
+              {
+                title:
+                  `Region ${r.region} belongs on ${r.holders.join(' and ') || 'no machine'}. ` +
+                  `${r.files} misplaced file(s), ${r.rescue} of them wanted by a machine that has not got them.`,
+              },
+              h('b', { text: `r${r.region}` }),
+              ` ${count(r.files)} · ${fmtBytes(r.bytes)}`,
+              r.rescue ? h('span.miss-alarm-n', { text: `${count(r.rescue)} to move` }) : null,
+            ),
+          ),
+        ),
+      );
+    }
+
+    body.appendChild(
+      h('div.rig-grid', gridTable({
+        key: 'rig.misplaced',
+        columns: misplacedCols(),
+        rows,
+        max: 500,
+        order: bySongWithinState(rows),
+        maxHeight: 440,
+        rowClass: (r) => `misp-${r.state}`,
+      })),
+    );
+    const shown = Math.min(rows.length, 500);
+    if (rows.length > shown) {
+      body.appendChild(
+        h('div.card-note', `Showing the worst ${count(shown)} of ${count(rows.length)}, listed by song within each state.`),
+      );
+    }
+
+    return h(
+      'div.card',
+      h(
+        'header',
+        h('h3', { text: 'On the wrong machine' }),
+        counts.rescue
+          ? h('span.pill.broken', {
+              text: `${count(counts.rescue)} to move`,
+              title: 'A machine that should have these is short of them, and the file is on the rig — it does not have to come from the archive.',
+            })
+          : h('span.n', { text: 'nothing to move' }),
+        h('span.spacer'),
+        h('span.n', { text: `${count(m.total?.files || 0)} files · ${fmtBytes(m.total?.bytes || 0)}` }),
+      ),
+      body,
+    );
+  }
+
   resultCards(results) {
     return results.map((r) => {
       const t = r.totals;
@@ -1352,6 +1449,67 @@ function missingCols() {
     },
   ];
 }
+
+/**
+ * Columns for the misplaced list.
+ *
+ * `Found on` and `Belongs on` are the finding: the machine that has it, and the
+ * machines that should. `Belongs on` marks the ones that are actually SHORT of
+ * it, because that is what turns a tidiness problem into a job for tonight.
+ */
+function misplacedCols() {
+  return [
+    {
+      key: 'state',
+      // Wider than the missing list's: `not in archive` is the longest pill
+      // either card carries, and a clipped pill reads as a different word.
+      label: 'State',
+      width: '134px',
+      cell: (r) => h(`span.pill.misp-${r.state}`, { text: MISPLACED_LABEL[r.state] || r.state }),
+    },
+    { ...SONG_COL, label: 'Folder', title: 'The folder it sits in on the machine that has it', cell: (r) => songOf(r.relPath) },
+    { ...FILE_COL, cell: (r) => r.name },
+    { ...VER_COL, cell: (r) => r.verLabel || '—' },
+    { ...REGION_COL, cell: (r) => regionCell(r.region) },
+    { key: 'size', label: 'Size', width: '96px', align: 'right', cell: (r) => fmtBytes(r.size) },
+    {
+      key: 'foundOn',
+      label: 'Found on',
+      width: 'minmax(110px, 1fr)',
+      cls: 'cell-ver',
+      cell: (r) => r.foundOn.join(', ') || '—',
+    },
+    {
+      key: 'belongsOn',
+      label: 'Belongs on',
+      width: 'minmax(140px, 1fr)',
+      cell: (r) =>
+        h(
+          'span.mono',
+          r.needIt.length
+            ? h('span', {
+                style: { color: 'var(--warn)' },
+                text: r.needIt.join(', '),
+                title: `${r.needIt.join(', ')} should have this file and ${r.needIt.length === 1 ? 'does' : 'do'} not.`,
+              })
+            : null,
+          r.haveIt.length
+            ? h('span', { style: { color: 'var(--kept)' }, text: `${r.needIt.length ? ' ' : ''}${r.haveIt.join(', ')}` })
+            : null,
+          // A machine nobody read is not named here, for the same reason it is
+          // not named in "Still on": it would read as a finding and is not one.
+          !r.needIt.length && !r.haveIt.length ? h('span.muted', { text: '—' }) : null,
+        ),
+    },
+  ];
+}
+
+const MISPLACED_LABEL = {
+  rescue: 'put it back',
+  duplicate: 'already there',
+  unconfirmed: 'unconfirmed',
+  unknown: 'not in archive',
+};
 
 const STATE_LABEL = {
   missing: 'missing',

@@ -39,12 +39,14 @@ import { walk } from '../scan/walk.ts';
 import type { ExclusionMatcher } from '../scan/exclude.ts';
 import {
   compareMachine,
+  rollUpMisplaced,
   rollUpMissing,
   totalsOf,
   type ExpectedFile,
   type MachineComparison,
   type MachineTotals,
   type NameDescription,
+  type MisplacedRollup,
   type MissingRollup,
   type RemoteFile,
 } from '../rig/survey.ts';
@@ -106,6 +108,13 @@ export interface SurveyPlan {
    * the header of `rollUpMissing`.
    */
   primaryHolders: Set<string>;
+  /**
+   * What the ARCHIVE says about every file name in the snapshot. Only the
+   * misplaced roll-up reads it, and only to keep itself honest: a name the
+   * archive has never seen must not be classified on the strength of nobody
+   * having reported it missing.
+   */
+  archiveStatusByName: Map<string, 'kept' | 'superseded' | 'unknown'>;
   concurrency?: number | undefined;
 }
 
@@ -152,6 +161,13 @@ export interface RigStatus {
      * SHOW?", which on a rig that mirrors every region is a different question.
      */
     missing: MissingRollup;
+    /**
+     * The other half of the same question: what is ON the rig, in the wrong
+     * place. A file copied to the wrong machine is missing from one drive and
+     * taking up space on another, and only a cross-machine roll-up can say
+     * whether the machine that should have it does.
+     */
+    misplaced: MisplacedRollup;
   };
 }
 
@@ -176,6 +192,7 @@ export class RigSession {
   private results: MachineResult[] = [];
   private regionHolders: Map<number, string[]> = new Map();
   private primaryHolders: Set<string> = new Set();
+  private archiveStatusByName: Map<string, 'kept' | 'superseded' | 'unknown'> = new Map();
   private inFlight: Promise<void> | undefined;
 
   isRunning(): boolean {
@@ -289,6 +306,7 @@ export class RigSession {
     this.directory = plan.directory;
     this.regionHolders = plan.regionHolders;
     this.primaryHolders = plan.primaryHolders;
+    this.archiveStatusByName = plan.archiveStatusByName;
 
     this.inFlight = this.run(plan)
       .catch((err: unknown) => {
@@ -390,6 +408,7 @@ export class RigSession {
         // survey is still filling `results` in. It is a roll-up of a few
         // hundred rows at most; the payload costs more than the arithmetic.
         missing: rollUpMissing(this.results, this.regionHolders, this.primaryHolders),
+        misplaced: rollUpMisplaced(this.results, this.regionHolders, this.archiveStatusByName),
       },
     };
   }

@@ -570,6 +570,41 @@ An address with no machine id is surveyed but **not compared** — expectations
 are keyed by machine, and guessing which machine an address is would invent the
 one fact the comparison rests on.
 
+### The other half: media that is here, in the wrong place
+
+`rollUpMisplaced` and the **On the wrong machine** card answer the question that
+sits beside the missing list. A per-machine card can say *"this file belongs to
+another machine"* (`extraForeign`); it cannot say whether the machine it belongs
+to HAS it, because that is a fact about a different machine. A file copied to
+the wrong place is missing from one drive and taking up space on another — two
+findings, on two cards, and neither implies the other.
+
+Four states, named for what an operator would do:
+
+- **`rescue`** — a rightful holder is short of it, and here it is. The nearest
+  copy is on the rig, not in the archive. This is the reason the card exists.
+- **`duplicate`** — every rightful holder has a good copy. Space on the wrong
+  drive; a cleanup, not an alarm.
+- **`unconfirmed`** — a rightful holder was not surveyed, so which of the two
+  above this is cannot be said.
+- **`unknown`** — the archive has no row for the name. Its region still says
+  which machines carry that slice, but whether anything needs it cannot be
+  answered from here.
+
+**A superseded file is never a rescue.** If the archive has replaced it, no
+machine is short of it however few copies exist, and moving it would be moving
+old media around the rig.
+
+**A wrong-sized copy on the rightful holder counts as needing it** — the same
+rule the missing roll-up uses, pointing the same way: towards the finding.
+
+**`archiveStatusByName` is not optional.** Nobody reports a file the archive has
+never seen as missing, so without it silence would classify a stray as
+`duplicate` — *"the right machines already have it"* — on no evidence at all. It
+covers every name in the snapshot, regionless files included, because the
+question it answers is "does the archive have this name", which is not a
+question about regions. Built in the same pass as the expectations.
+
 ## FreeFileSync
 
 See `docs/ffs-format.md`. It records what is **verified** (against the user's real

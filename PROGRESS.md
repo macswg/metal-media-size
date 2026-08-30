@@ -2,6 +2,48 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-30 — the other half: media that is here, in the wrong place
+
+> *"this seems to work great in identifying when region files are missing, now
+> we need to be able to identify when region files exist but are on the wrong
+> machines."* — the user
+
+The per-machine card already said *"belongs to another machine"* — 2,584 files,
+2.33 TiB on 101 alone. What it could not say is the thing you want next:
+**does the machine it belongs to have it?** That is a fact about a different
+machine, so it needs a roll-up, and the answer changes what the row IS. If 106
+is short of a region-7 file that is sitting on 101, the nearest copy is on the
+rig — a minute's work — rather than a night pulling it back from the archive.
+
+`rollUpMisplaced`, and the **On the wrong machine** card beside the missing one.
+Four states named for what you would do: `rescue` (put it back), `duplicate`
+(space on the wrong drive), `unconfirmed` (a rightful holder was not surveyed),
+`unknown` (the archive has no row for the name).
+
+Three rules that keep it from lying, each with a test:
+
+- **A superseded file is never a rescue.** The archive has replaced it, so no
+  machine is short of it however few copies exist.
+- **A wrong-sized copy on the rightful holder counts as needing it** — the same
+  rule the missing roll-up uses, pointing the same way.
+- **`archiveStatusByName` is required, not a nicety.** Nobody reports a file the
+  archive has never seen as missing, so without it silence would classify a
+  stray as `duplicate` — "the right machines already have it" — on no evidence.
+  It is built in the same pass as the expectations and covers every name in the
+  snapshot, regionless included: the question is "does the archive have this
+  name", which is not a question about regions.
+
+`Belongs on` colours the machines that are actually short of it, which is what
+turns a tidiness list into a job for tonight. The region chips count rescues,
+not rows. And a machine nobody read is still not named in a cell — an em dash,
+as in `Still on`, for the same reason.
+
+On the real rig the first thing this will show is the 2,584 region-0 proxies on
+101: they belong on 306/307, which have not been surveyed, so every one will
+read `unconfirmed` until they are. That is the honest answer, and it is also the
+question I have been asking since this morning — whether the actors legitimately
+hold region 0, or the allocation is missing something.
+
 ## 2026-08-30 — append d3 VideoFile path
 
 > *"give me a checkbox that adds /objects/VideoFile after the selected or typed

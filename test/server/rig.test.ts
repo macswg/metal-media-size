@@ -55,6 +55,7 @@ import {
 import { formatTargetsYaml, parseTargetList, MAX_TARGETS } from '../../src/rig/targets.ts';
 import {
   compareMachine,
+  rollUpMisplaced,
   rollUpMissing,
   totalsOf,
   type ExpectedFile,
@@ -990,6 +991,209 @@ describe('the master list of what is missing across the rig', () => {
   it('is served by the status route even before a survey has run', async () => {
     const { body } = await req('GET', '/api/rig/status');
     expect(body.survey.missing).toMatchObject({ rows: [], clean: true });
+  });
+});
+
+/**
+ * ============================================================================
+ *  MEDIA THAT IS HERE, AND IN THE WRONG PLACE
+ * ============================================================================
+ *
+ * The counterpart to the missing list, and the failure to guard against is the
+ * mirror image of that one: calling a stray copy USEFUL when the machine it
+ * belongs on already has it (busywork), or calling it useless when that machine
+ * is short of it (a file that could have been put back in a minute, restored
+ * from the archive over a night instead).
+ */
+describe('the roll-up of media on the wrong machine', () => {
+  const foreign = (name: string, region: number, size = 100) => ({
+    relPath: `100_ALPHA/${name}`,
+    name,
+    size,
+    mtime: 1,
+    region,
+    verLabel: 'v004',
+    base: '100_ALPHA_MAIN_LL180',
+  });
+
+  const expected = (name: string, region: number, size = 100): ExpectedFile => ({
+    name,
+    size,
+    region,
+    songFolder: '100_ALPHA',
+    base: '100_ALPHA_MAIN_LL180',
+    verLabel: 'v004',
+    versionId: 1,
+    status: 'kept',
+  });
+
+  /** A machine result carrying only the lists this roll-up reads. */
+  const machine = (
+    machineId: string,
+    over: {
+      extraForeign?: ReturnType<typeof foreign>[];
+      missingKept?: ExpectedFile[];
+      missingSuperseded?: ExpectedFile[];
+      sizeMismatch?: { name: string }[];
+      presentSuperseded?: { name: string }[];
+    } = {},
+  ) => ({
+    machineId,
+    error: null,
+    comparison: {
+      missingKept: over.missingKept ?? [],
+      missingSuperseded: over.missingSuperseded ?? [],
+      sizeMismatch: over.sizeMismatch ?? [],
+      presentSuperseded: over.presentSuperseded ?? [],
+      extraForeign: over.extraForeign ?? [],
+      extraUnknown: [],
+      extraUnparsed: [],
+      regionless: [],
+      presentKept: { count: 0, bytes: 0 },
+      actual: { count: 0, bytes: 0 },
+      expected: { count: 0, bytes: 0 },
+      nameCollisions: 0,
+    },
+  }) as unknown as Parameters<typeof rollUpMisplaced>[0][number];
+
+  // Region 7 belongs on 106 (actor) and 301 (understudy). 101 carries region 1
+  // and has no business holding a region 7 file.
+  const holders = new Map<number, string[]>([[7, ['106', '301']]]);
+  const archive = new Map<string, 'kept' | 'superseded' | 'unknown'>([
+    ['a_v004_region7.mov', 'kept'],
+  ]);
+
+  it('is a RESCUE when a machine that should have it is short of it', () => {
+    const r = rollUpMisplaced(
+      [
+        machine('101', { extraForeign: [foreign('a_v004_region7.mov', 7)] }),
+        machine('106', { missingKept: [expected('a_v004_region7.mov', 7)] }),
+        machine('301', {}),
+      ],
+      holders,
+      archive,
+    );
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]).toMatchObject({
+      state: 'rescue',
+      foundOn: ['101'],
+      belongsOn: ['106', '301'],
+      needIt: ['106'],
+      haveIt: ['301'],
+    });
+    expect(r.counts.rescue).toBe(1);
+  });
+
+  it('is a DUPLICATE when every machine that should have it already does', () => {
+    const r = rollUpMisplaced(
+      [machine('101', { extraForeign: [foreign('a_v004_region7.mov', 7)] }), machine('106', {}), machine('301', {})],
+      holders,
+      archive,
+    );
+    // Space on the wrong drive. A cleanup, not a job for tonight.
+    expect(r.rows[0]).toMatchObject({ state: 'duplicate', needIt: [], haveIt: ['106', '301'] });
+    expect(r.counts.rescue).toBe(0);
+  });
+
+  it('is UNCONFIRMED when a machine that should have it was not surveyed', () => {
+    const r = rollUpMisplaced(
+      [machine('101', { extraForeign: [foreign('a_v004_region7.mov', 7)] }), machine('106', {})],
+      holders,
+      archive,
+    );
+    expect(r.rows[0]).toMatchObject({ state: 'unconfirmed', unknownOn: ['301'] });
+    expect(r.unsurveyedHolders).toEqual(['301']);
+  });
+
+  /**
+   * The guard the archive map exists for. Nobody reports a file the archive has
+   * never seen as missing -- so without that map, silence would read as "the
+   * right machines already have it", which is not evidence of anything.
+   */
+  it('does not call a file the archive has never seen a duplicate', () => {
+    const r = rollUpMisplaced(
+      [machine('101', { extraForeign: [foreign('stranger_v001_region7.mov', 7)] }), machine('106', {}), machine('301', {})],
+      holders,
+      archive,
+    );
+    expect(r.rows[0]).toMatchObject({ state: 'unknown', archiveStatus: null });
+  });
+
+  it('never calls a superseded file a rescue, however few copies exist', () => {
+    // The archive has replaced it, so no machine is short of it and moving it
+    // would be moving old media around the rig.
+    const r = rollUpMisplaced(
+      [
+        machine('101', { extraForeign: [foreign('a_v004_region7.mov', 7)] }),
+        machine('106', { missingSuperseded: [expected('a_v004_region7.mov', 7)] }),
+        machine('301', {}),
+      ],
+      holders,
+      new Map([['a_v004_region7.mov', 'superseded' as const]]),
+    );
+    expect(r.rows[0]).toMatchObject({ state: 'duplicate', archiveStatus: 'superseded' });
+  });
+
+  it('treats a wrong-sized copy on the rightful machine as needing it', () => {
+    // Same rule as the missing roll-up, pointing the same way: whatever that
+    // file is, it is not the one the archive recorded.
+    const r = rollUpMisplaced(
+      [
+        machine('101', { extraForeign: [foreign('a_v004_region7.mov', 7)] }),
+        machine('106', { sizeMismatch: [{ name: 'a_v004_region7.mov' }] }),
+        machine('301', {}),
+      ],
+      holders,
+      archive,
+    );
+    expect(r.rows[0]).toMatchObject({ state: 'rescue', needIt: ['106'] });
+  });
+
+  it('collapses one file found on several machines into one row', () => {
+    const r = rollUpMisplaced(
+      [
+        machine('101', { extraForeign: [foreign('a_v004_region7.mov', 7)] }),
+        machine('102', { extraForeign: [foreign('a_v004_region7.mov', 7)] }),
+        machine('106', { missingKept: [expected('a_v004_region7.mov', 7)] }),
+        machine('301', {}),
+      ],
+      holders,
+      archive,
+    );
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]?.foundOn).toEqual(['101', '102']);
+  });
+
+  it('orders rescues first and counts the space either way', () => {
+    const r = rollUpMisplaced(
+      [
+        machine('101', {
+          extraForeign: [foreign('a_v004_region7.mov', 7, 10), foreign('b_v004_region7.mov', 7, 900)],
+        }),
+        machine('106', { missingKept: [expected('a_v004_region7.mov', 7, 10)] }),
+        machine('301', {}),
+      ],
+      holders,
+      new Map([
+        ['a_v004_region7.mov', 'kept' as const],
+        ['b_v004_region7.mov', 'kept' as const],
+      ]),
+    );
+    expect(r.rows.map((x) => x.state)).toEqual(['rescue', 'duplicate']);
+    // The header counts every misplaced byte, not just the actionable ones:
+    // all of it is space sitting on the wrong drive.
+    expect(r.total).toEqual({ files: 2, bytes: 910 });
+  });
+
+  it('is clean when nothing is out of place', () => {
+    const r = rollUpMisplaced([machine('101', {}), machine('106', {})], holders, archive);
+    expect(r.clean).toBe(true);
+    expect(r.rows).toEqual([]);
+  });
+
+  it('is served by the status route even before a survey has run', async () => {
+    const { body } = await req('GET', '/api/rig/status');
+    expect(body.survey.misplaced).toMatchObject({ rows: [], clean: true });
   });
 });
 
