@@ -31,9 +31,13 @@ that **fails the build**. If a change requires weakening one, stop and ask.
    outside it, or if `node:fs` is imported outside those two files.
    **The check does not strip comments** — avoid those words in prose too.
 3. **The export jail.** `writer.ts` resolves real paths and refuses to write at or
-   under the object mount, any scan root, `/Volumes`, or the FreeFileSync
-   application-support directory. It also refuses the filename `LastRun.ffs_gui`.
-   Exports may only land inside `exports/`.
+   under the object mount, any scan root, `/Volumes`, FreeFileSync's config
+   directory **on any platform** (`~/Library/Application Support/FreeFileSync`,
+   `%APPDATA%\FreeFileSync`, `~/.config/FreeFileSync` — all of them are in the
+   list, not just this machine's), or **any UNC path** (`\\server\share`), which
+   is the Windows analogue of `/Volumes` and cannot be expressed as a root
+   prefix. It also refuses the filename `LastRun.ffs_gui`. Exports may only land
+   inside `exports/`. See "Windows" below for why the platform spread matters.
 4. **`DeletionPolicy: 'Permanent'` is unreachable.** Not in the type union, the
    builder asserts against it, and the string appears nowhere in emitted XML.
    Only `RecycleBin` (the default, and what the UI recommends) and `Versioning`
@@ -232,9 +236,12 @@ exception**, not a loosening of the rule above:
   default, and every header read goes through it. At the default, asking for 64
   lanes gets you four: the archive probes at ~4.7 files/s instead of ~10, and
   worse, the web UI starves — `index.html` took **4.1 s** to serve while a probe
-  ran, because static reads queue behind ~1 s archive reads. `npm run probe` and
-  `npm run serve` both set `UV_THREADPOOL_SIZE=64`. If you launch either with a
-  bare `node` command, expect both symptoms back.
+  ran, because static reads queue behind ~1 s archive reads.
+  **`src/cli/threadpool.ts` sets it, in Node, and it must stay the FIRST import
+  of `serve.ts` and `probe.ts`** — ES modules evaluate imports before the
+  importing module's body, so anywhere else and the pool may already exist. It
+  used to be a shell prefix in the npm script, which did not run on Windows at
+  all (see below). An explicit value in the environment still wins.
 - **It is cancellable, and a scan is not.** That difference is deliberate: a
   scan is one atomic walk, a probe is thousands of independent reads written in
   batches as they land. `POST /api/probe/cancel` stops it and keeps everything
@@ -429,6 +436,39 @@ Note: **presence of a string in the FFS binary is evidence; absence is not.**
 The binary holds a deduplicated literal pool covering every format version it can
 *read*, including the legacy `<Differences>` shape. `Changes` returns zero hits
 despite being in the real config.
+
+## Windows
+
+`start-analyser.bat` is real: this runs on a PC as well as a Mac, and three
+things had quietly broken there. All three were invisible on macOS, which is
+what made them worth tests rather than comments. `test/portability.test.ts`
+pins them.
+
+- **No shell syntax in an npm script.** `UV_THREADPOOL_SIZE=64 node ...` is a
+  POSIX assignment and a Windows *program name* — npm runs scripts through
+  `cmd.exe`, so `npm run serve` and `npm run probe` did not start at all, and
+  `start-analyser.bat` calls `npm run serve` as its last line. Set environment
+  variables in Node, never in the script.
+- **Quote globs with double quotes.** `cmd.exe` strips those and leaves single
+  quotes in place, so `--exclude '**/x'` reaches the tool with the quotes
+  attached and matches nothing.
+- **A forbidden root written for one platform protects nothing on another**, and
+  says nothing while it fails to. See the export jail above.
+
+What is already portable, and should stay so: `walk.ts` normalises `rel_path` to
+forward slashes at the point of capture (it is stored in the index, shown in the
+UI and written into the FreeFileSync manifest); every path-boundary check uses
+`root + sep`, never `'/'`, or `C:\archive-other` would look like it was inside
+`C:\archive`; `better-sqlite3` ships `win32-x64` and `win32-arm64` prebuilds, so
+no build tools are needed.
+
+**The rig survey is the one macOS-only feature.** `src/rig/mounts.ts` runs
+`/sbin/mount_smbfs` and friends. On Windows there is nothing to mount — a UNC
+path is read directly, and `ReadOnlyFs` would fence it exactly as it fences
+anything else — but there is also no `-o rdonly` equivalent, so the read-only
+guarantee would have to come from the share's own permissions instead of from
+the kernel. Do not port it by quietly dropping that guarantee; it is the reason
+the feature is shaped the way it is.
 
 ## Stack
 

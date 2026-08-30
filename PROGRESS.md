@@ -2,6 +2,68 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-30 — three things that were broken on a PC and silent on a Mac
+
+> *"other than the remote directory walk, will this work on a pc?"* — the user
+
+Mostly yes, and the audit turned up three real breakages. What they had in
+common is the thing worth recording: **none of them failed on macOS, and two of
+them would not have failed loudly on Windows either.**
+
+**1. `npm run serve` and `npm run probe` did not start at all.** Both scripts
+began `UV_THREADPOOL_SIZE=64 node ...`, which is POSIX shell syntax. npm runs
+scripts through `cmd.exe`, where a leading `NAME=value` is not an assignment but
+the name of a program to run. `start-analyser.bat` — which exists, and is a
+real Windows launcher — calls `npm run serve` as its last line, so the launcher
+failed on its final instruction. `npm run scan` was fine; it has no prefix.
+
+**2. The pool was therefore never enlarged**, which is the documented failure in
+CLAUDE.md: the probe runs at ~4.7 files/s instead of ~10 and the web UI starves
+behind archive reads. Fixed by setting it in Node — `src/cli/threadpool.ts`,
+imported FIRST by both entry points, because ES modules evaluate imports before
+the importing module's body and the pool is created on first use.
+
+That it works at all was measured rather than assumed: eight concurrent
+`pbkdf2` calls (threadpool tasks) take ~130 ms at the default of four, two
+rounds, and ~70 ms once the module has run, one round. libuv reads the variable
+when it creates the pool, and Node keeps `process.env` and the real environment
+in step, so a write before any threadpool work reaches it.
+
+**3. The export jail protected nothing on Windows.** Every forbidden root was a
+POSIX path: `/Volumes`, the object mount, and
+`~/Library/Application Support/FreeFileSync`. FreeFileSync on a PC keeps
+`LastRun.ffs_gui` in `%APPDATA%\FreeFileSync`, which was not in the list — so
+the guard that stops the exporter writing over a live job did not apply, and the
+export **succeeded**. That is the one that mattered, and the reason it needed a
+test rather than a comment: nothing anywhere would have said so.
+
+The list now carries every platform's FreeFileSync directory at once rather than
+switching on `process.platform` — a root that cannot match costs nothing, and a
+list that changes shape per platform is a list somebody eventually reads wrong.
+`%APPDATA%` is read from the environment when set and reconstructed from the
+home directory when not.
+
+UNC paths needed their own rule. `\\server\share` is the Windows analogue of
+`/Volumes` — where a network volume appears, and exactly where the `d3 Projects`
+share on a playback machine lives — but it has no parent directory that could be
+added to a list of roots, so it is refused by shape in
+`assertResolvedPathAllowed` instead. Detected by shape rather than by platform,
+because a path is a UNC path whoever is looking at it.
+
+Also confirmed portable and now pinned: `walk.ts` normalises `rel_path` to
+forward slashes at the point of capture; every path-boundary check uses
+`root + sep` rather than `'/'`, or `C:\archive-other` would look like it was
+inside `C:\archive`; `better-sqlite3` 13.0.3 ships `win32-x64` and `win32-arm64`
+prebuilds, so a PC needs no build tools.
+
+The rig survey stays macOS-only. On Windows there is nothing to mount — a UNC
+path is read directly and `ReadOnlyFs` would fence it the same way — but there
+is no `-o rdonly` equivalent, so the kernel-enforced read-only guarantee would
+have to be replaced by a read-only account on the d3 side. Recorded so nobody
+ports it by quietly dropping the guarantee that shaped it.
+
+16 new tests, 609 green.
+
 ## 2026-08-30 — a master list, and the difference between "gone" and "we did not look"
 
 > *"at the top of the list we need a master list of the missing regions on

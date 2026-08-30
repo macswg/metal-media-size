@@ -28,6 +28,8 @@ import { join, resolve } from 'node:path';
 import {
   assertDirectoryEmpty,
   DEFAULT_EXPORTS_DIR,
+  freeFileSyncConfigDirs,
+  isUncPath,
   DEFAULT_FORBIDDEN_ROOTS,
   ExportJailError,
   PROJECT_ROOT,
@@ -261,5 +263,71 @@ describe('the empty-left folder is proved empty, not assumed empty', () => {
 
   it('is itself jailed: it will not even look outside exports/', async () => {
     await expect(assertDirectoryEmpty('/tmp', { exportsDir })).rejects.toThrow(ExportJailError);
+  });
+});
+
+// ===========================================================================
+describe('the jail is not macOS-only', () => {
+  /**
+   * THE BUG THIS PINS. Every forbidden root was a POSIX path written for a Mac.
+   * On Windows none of them can match: FreeFileSync keeps `LastRun.ffs_gui` in
+   * `%APPDATA%\FreeFileSync`, so the guard that stops the exporter writing over
+   * a live job simply did not apply. Nothing failed -- the export succeeded,
+   * which is exactly what makes it worth a test rather than a comment.
+   */
+  it('protects the FreeFileSync config directory on every platform', () => {
+    const dirs = freeFileSyncConfigDirs();
+    const joined = dirs.join('|');
+    expect(joined, 'macOS').toMatch(/Library[\\/]Application Support[\\/]FreeFileSync/);
+    expect(joined, 'Windows').toMatch(/AppData[\\/]Roaming[\\/]FreeFileSync|APPDATA/i);
+    expect(joined, 'Linux').toMatch(/\.config[\\/]FreeFileSync/);
+    // And every one of them is in force, not merely listed.
+    for (const d of dirs) expect(DEFAULT_FORBIDDEN_ROOTS).toContain(d);
+  });
+
+  it('honours %APPDATA% when the environment sets it somewhere unusual', () => {
+    const before = process.env['APPDATA'];
+    process.env['APPDATA'] = join('D:', 'Roaming');
+    try {
+      expect(freeFileSyncConfigDirs()).toContain(join('D:', 'Roaming', 'FreeFileSync'));
+    } finally {
+      if (before === undefined) delete process.env['APPDATA'];
+      else process.env['APPDATA'] = before;
+    }
+  });
+
+  it('keeps the POSIX roots even where they cannot match', () => {
+    // A list that changes shape per platform is a list somebody reads wrong.
+    expect(DEFAULT_FORBIDDEN_ROOTS).toContain('/Volumes');
+    expect(DEFAULT_FORBIDDEN_ROOTS).toContain('/Users/Shared/ObjectMount.noindex');
+  });
+
+  it('recognises a UNC path by its shape, whatever platform is asking', () => {
+    expect(isUncPath('\\\\10.10.1.53\\d3 Projects\\x.ffs_gui')).toBe(true);
+    expect(isUncPath('//10.10.1.53/d3 Projects')).toBe(true);
+    expect(isUncPath('C:\\Users\\seangreen\\exports')).toBe(false);
+    expect(isUncPath('/Users/seangreen/exports')).toBe(false);
+    // A single leading slash is an ordinary absolute path, not a share.
+    expect(isUncPath('/Volumes/d3')).toBe(false);
+  });
+
+  it('refuses to write onto a network share', () => {
+    // The Windows analogue of the /Volumes rule: it is where the `d3 Projects`
+    // share on a playback machine appears, and it has no parent directory that
+    // could be added to the forbidden roots.
+    expect(() =>
+      assertResolvedPathAllowed('\\\\10.10.1.53\\d3 Projects\\report.html'),
+    ).toThrow(ExportJailError);
+    expect(() => assertResolvedPathAllowed('//10.10.1.53/d3 Projects/report.html')).toThrow(
+      /network share/,
+    );
+  });
+
+  it('refuses even when the export directory itself is the share', () => {
+    expect(() =>
+      assertResolvedPathAllowed('//srv/share/exports/report.html', {
+        exportsDir: '//srv/share/exports',
+      }),
+    ).toThrow(/network share/);
   });
 });

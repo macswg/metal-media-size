@@ -1,6 +1,6 @@
 {
   "name": "metal-media-size",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,12 +8,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run --exclude '**/*.integration.test.ts'",
+    "test": "vitest run --exclude \"**/*.integration.test.ts\"",
     "test:all": "vitest run",
     "test:integration": "vitest run test/scan.integration.test.ts",
     "scan": "node --experimental-strip-types src/cli/scan.ts",
-    "probe": "UV_THREADPOOL_SIZE=64 node --experimental-strip-types src/cli/probe.ts",
-    "serve": "UV_THREADPOOL_SIZE=64 node --experimental-strip-types src/cli/serve.ts"
+    "probe": "node --experimental-strip-types src/cli/probe.ts",
+    "serve": "node --experimental-strip-types src/cli/serve.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.3",

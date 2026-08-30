@@ -13,6 +13,11 @@
  * project's own SQLite index.
  */
 
+// MUST BE THE FIRST IMPORT: it sets UV_THREADPOOL_SIZE before anything can
+// submit work to libuv's pool. See the module for why, and for the
+// measurement. Previously this lived in the npm script as shell syntax,
+// which meant it did not run at all on Windows.
+import './threadpool.ts';
 import { loadConfig, resolveDbPath } from '../config.ts';
 import { openDb, latestSnapshot, mediaCoverage } from '../db/index.ts';
 import { ReadOnlyFs } from '../fs/readonly.ts';

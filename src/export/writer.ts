@@ -59,15 +59,70 @@ export const DEFAULT_EXPORTS_DIR = join(PROJECT_ROOT, 'exports');
  *   appears -- including the `d3 Projects` server named in the user's own
  *   FreeFileSync job. A project checked out under `/Volumes` would be unable
  *   to export; that is the intended trade, and it is safe by construction;
- * - FreeFileSync's application-support directory, which holds the live
+ * - FreeFileSync's configuration directory, which holds the live
  *   `LastRun.ffs_gui` job.
+ *
+ * ---------------------------------------------------------------------------
+ * THE LAST TWO ARE PLATFORM-SPECIFIC, AND GETTING THAT WRONG IS SILENT.
+ *
+ * This list was written for macOS and every entry in it was a POSIX path. On
+ * Windows none of them can ever match: FreeFileSync keeps `LastRun.ffs_gui` in
+ * `%APPDATA%\FreeFileSync`, not in `~/Library/Application Support`, so the
+ * guard that stops the exporter writing over a live job simply did not apply.
+ * Nothing failed -- the export succeeded, which is precisely the problem.
+ *
+ * The POSIX entries are kept on every platform. They cost nothing where they
+ * cannot match, and a list that changes shape per platform is a list somebody
+ * eventually reads wrong.
+ *
+ * `\\server\share` is the Windows analogue of `/Volumes`: the place every
+ * network volume appears. It cannot be expressed as a root prefix, so it is
+ * enforced as its own rule in `assertResolvedPathAllowed` rather than bolted
+ * into this list, where it would silently never match.
+ * ---------------------------------------------------------------------------
  */
 export const DEFAULT_FORBIDDEN_ROOTS: readonly string[] = Object.freeze([
   '/Users/Shared/ObjectMount.noindex',
   '/Volumes',
   '/System/Volumes/Data/Users/Shared/ObjectMount.noindex',
-  join(homedir(), 'Library', 'Application Support', 'FreeFileSync'),
+  ...freeFileSyncConfigDirs(),
 ]);
+
+/**
+ * Every directory FreeFileSync might keep `LastRun.ffs_gui` in, on any platform.
+ *
+ * All of them, not just this platform's: the cost of a root that cannot match
+ * is nothing, and the cost of missing the one that can is a clobbered job.
+ * `%APPDATA%` is read from the environment when it is set and reconstructed
+ * from the home directory when it is not, so the Windows path is protected even
+ * on a machine where the variable is missing.
+ */
+export function freeFileSyncConfigDirs(): string[] {
+  const home = homedir();
+  const appData = process.env['APPDATA'];
+  const dirs = [
+    // macOS
+    join(home, 'Library', 'Application Support', 'FreeFileSync'),
+    // Windows, from the environment and from the conventional location.
+    ...(appData ? [join(appData, 'FreeFileSync')] : []),
+    join(home, 'AppData', 'Roaming', 'FreeFileSync'),
+    // Linux
+    join(home, '.config', 'FreeFileSync'),
+  ];
+  return [...new Set(dirs)];
+}
+
+/**
+ * True for a Windows UNC path -- `\\server\share\...`.
+ *
+ * The direct analogue of the `/Volumes` rule: it is where a network volume
+ * appears, and the `d3 Projects` share on a playback machine is exactly such a
+ * path. Detected by shape rather than by platform, because a path is a UNC path
+ * whoever is looking at it.
+ */
+export function isUncPath(p: string): boolean {
+  return /^[\\/]{2}[^\\/]/.test(String(p ?? ''));
+}
 
 /** Never touch this file name, wherever it appears. */
 export const PROTECTED_FILENAMES: readonly string[] = Object.freeze(['LastRun.ffs_gui']);
@@ -135,6 +190,17 @@ export function assertResolvedPathAllowed(realPath: string, opts: JailOptions = 
     throw new ExportJailError(
       target,
       `${basename(target)} is a live FreeFileSync job and is never writable`,
+    );
+  }
+
+  // Rule 3a: never onto a network volume. On macOS those live under `/Volumes`
+  // and the root check below catches them; a Windows UNC path has no such
+  // parent directory to forbid, so it is refused by its shape.
+  if (isUncPath(realPath) || isUncPath(exportsDir)) {
+    throw new ExportJailError(
+      target,
+      'it is on a network share (a UNC path). Exports may only be written to ' +
+        'local storage, under ' + JSON.stringify(exportsDir) + '.',
     );
   }
 
