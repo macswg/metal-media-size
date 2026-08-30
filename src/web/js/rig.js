@@ -853,8 +853,12 @@ export class RigPanel {
     const body = h('div.card-body');
 
     if (m.clean) {
-      body.appendChild(
+      body.append(
         h('div.rig-hint', 'Nothing current is missing from any machine that was surveyed.'),
+        // Still worth drawing: "nothing missing" and "nobody looked" are the
+        // two answers this strip exists to keep apart, and a clean list is
+        // exactly when they are easiest to confuse.
+        this.regionStrip(m.byRegion),
       );
     } else {
       body.appendChild(
@@ -899,27 +903,7 @@ export class RigPanel {
         );
       }
 
-      if (m.byRegion?.length) {
-        body.appendChild(
-          h(
-            'div.miss-regions',
-            ...m.byRegion.map((r) =>
-              h(
-                `span.miss-region${r.unplayable ? '.alarm' : ''}`,
-                {
-                  title:
-                    `Region ${r.region} is played by ${r.primaries?.join(' and ') || '—'} and backed up by ` +
-                    `${(r.holders || []).filter((id) => !(r.primaries || []).includes(id)).join(' and ') || 'nothing'}. ` +
-                    `${r.files} file(s) missing somewhere, ${r.unplayable} of them not on the machine that plays them.`,
-                },
-                h('b', { text: `r${r.region}` }),
-                ` ${count(r.files)} · ${fmtBytes(r.bytes)}`,
-                r.unplayable ? h('span.miss-alarm-n', { text: `${count(r.unplayable)} unplayable` }) : null,
-              ),
-            ),
-          ),
-        );
-      }
+      body.appendChild(this.regionStrip(m.byRegion));
 
       body.appendChild(
         // Scrolls inside itself. At 1,293 rows an uncapped table is 27,000px
@@ -967,6 +951,58 @@ export class RigPanel {
           : null,
       ),
       body,
+    );
+  }
+
+  /**
+   * EVERY REGION OF THE CANVAS, AND WHERE IT STANDS ON THE RIG.
+   *
+   * The tab is called Region Gaps (cluster), and this is the part that earns
+   * the name: one chip per region the allocation knows about — region 0
+   * included, on the director machines — showing the machine that PLAYS it and
+   * whether that machine has it.
+   *
+   * Seeded from the allocation rather than from the findings, because the state
+   * that used to be missing from this tab is `unsurveyed`: a region nobody
+   * looked at was simply absent, which reads exactly like a region that is
+   * fine.
+   */
+  regionStrip(regions) {
+    const list = regions || [];
+    if (!list.length) return null;
+    const label = { short: 'short', spare: 'spare lost', unsurveyed: 'not surveyed', ok: 'ok' };
+    return h(
+      'div.miss-regions',
+      ...list.map((r) => {
+        const plays = r.primaries?.join(' and ') || 'no machine';
+        const backups = (r.holders || []).filter((id) => !(r.primaries || []).includes(id));
+        const detail =
+          r.state === 'unsurveyed'
+            ? `${plays} plays it and was not surveyed, so nothing is known about this region.`
+            : r.state === 'short'
+              ? `${plays} is missing ${count(r.unplayable)} file(s), ${fmtBytes(r.unplayableBytes)}.`
+              : r.state === 'spare'
+                ? `${plays} has everything; a backup is short of ${count(r.files)} file(s).`
+                : `${plays} was surveyed and is short of nothing.`;
+        return h(
+          `span.miss-region.rgn-${r.state}`,
+          {
+            title:
+              `Region ${r.region} is played by ${plays} and backed up by ` +
+              `${backups.join(' and ') || 'nothing'}. ${detail}`,
+          },
+          h('b', { text: `r${r.region}` }),
+          h('span.rgn-who', { text: plays }),
+          h('span.rgn-state', {
+            // "306 1 · 20 GiB" reads as though the 1 belonged to the machine
+            // id. The word is worth the width on fifteen chips.
+            text:
+              r.state === 'short'
+                ? `${count(r.unplayable)} missing · ${fmtBytes(r.unplayableBytes)}`
+                : label[r.state] || r.state,
+          }),
+        );
+      }),
     );
   }
 

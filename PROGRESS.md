@@ -2,6 +2,40 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-30 — every region of the canvas, including the one nobody looked at
+
+> *"306 should have region 0s include that in the analysis, 307 is an understudy
+> for 306 so should have region 0 content as well."* · *"if region 0 is missing
+> from 306 mark it as such in the region gaps (cluster) section."* — the user
+
+The allocation already had it: 306 (director) and 307 (director-understudy) both
+carry region 0, 2.22 TiB allocated to each, 1.31 TiB kept at keep-1 — checked
+against the live index rather than taken from the source. What was only
+INCIDENTAL was what the survey does with it, so that is pinned now: region 0 is
+ordinary media on 306 (`presentKept`, machine in sync), the alarm when 306 has
+not got it, `recoverable` when only 307 has it, and `extraForeign` when it turns
+up on an actor. Six tests, all passing first time — the behaviour was right, it
+was just nobody's job to keep it that way.
+
+**Then the real gap.** The per-region chips were built from the FINDINGS, so a
+region with nothing wrong did not appear — and neither did a region nobody had
+surveyed. Those are not the same answer, and the tab could not tell them apart:
+region 0 was simply absent, which reads exactly like region 0 being fine.
+
+`byRegion` is now seeded from the ALLOCATION and covers every region, in canvas
+order, each with a state: `short` (the machine that plays it is missing files,
+with how many and how much), `spare` (that machine is complete, a backup is
+not), `unsurveyed` (nobody read the machine that plays it), `ok`. It draws even
+when the list is clean, which is exactly when "nothing missing" and "nobody
+looked" are easiest to confuse.
+
+    r0  306  1 missing · 20.34 GiB     r1  101  1,292 missing · 2.06 TiB
+    r2  206  not surveyed              r4  103  spare lost      r5  104  ok
+
+A region no machine claims still gets a row if a file for it turned up missing —
+it cannot be seeded from an allocation that does not mention it, and the
+alternative is a finding that exists in the rows and in no summary.
+
 ## 2026-08-30 — the other half: media that is here, in the wrong place
 
 > *"this seems to work great in identifying when region files are missing, now

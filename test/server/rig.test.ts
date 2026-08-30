@@ -943,7 +943,7 @@ describe('the master list of what is missing across the rig', () => {
     expect(r.rows.map((x) => x.state)).toEqual(['missing', 'missing', 'recoverable', 'spareLost']);
   });
 
-  it('rolls up per region, worst region first, naming who carries it and who plays it', () => {
+  it('rolls up per region in canvas order, naming who carries it and who plays it', () => {
     const r = rollUpMissing(
       [
         machine('103', [file('a_region4.mov', 4, 10)]),
@@ -960,10 +960,41 @@ describe('the master list of what is missing across the rig', () => {
       files: 1,
       missing: 1,
       unplayable: 1,
+      state: 'short',
     });
     // Region 5's actor has it; only the spare is gone, so the region is not an
     // alarm however many bytes it is.
-    expect(r.byRegion[1]).toMatchObject({ region: 5, missing: 0, unplayable: 0 });
+    expect(r.byRegion[1]).toMatchObject({ region: 5, missing: 0, unplayable: 0, state: 'spare' });
+  });
+
+  /**
+   * THE STATE THIS STRIP EXISTS FOR. A region nobody looked at used to be
+   * absent from the tab entirely, which reads exactly like a region that is
+   * fine. Confirmed by the user in the region 0 case: *"if region 0 is missing
+   * from 306 mark it as such"* -- and the honest first answer, before 306 is
+   * surveyed, is that nobody has looked.
+   */
+  it('covers EVERY region, not only the ones with findings', () => {
+    const r = rollUpMissing([machine('103', [])], holders, primaries);
+    expect(r.byRegion.map((x) => x.region)).toEqual([4, 5]);
+    // 103 plays region 4 and was read: nothing wrong with it.
+    expect(r.byRegion[0]).toMatchObject({ region: 4, state: 'ok', surveyedPrimaries: ['103'] });
+    // 104 plays region 5 and was NOT read. Not `ok`, and never silently absent.
+    expect(r.byRegion[1]).toMatchObject({ region: 5, state: 'unsurveyed', surveyedPrimaries: [] });
+  });
+
+  it('marks a region short when its own machine is missing files, and says how much', () => {
+    const r = rollUpMissing(
+      [machine('103', [file('a_region4.mov', 4, 700)]), machine('208', [])],
+      holders,
+      primaries,
+    );
+    expect(r.byRegion[0]).toMatchObject({
+      region: 4,
+      state: 'short',
+      unplayable: 1,
+      unplayableBytes: 700,
+    });
   });
 
   /**
@@ -991,6 +1022,190 @@ describe('the master list of what is missing across the rig', () => {
   it('is served by the status route even before a survey has run', async () => {
     const { body } = await req('GET', '/api/rig/status');
     expect(body.survey.missing).toMatchObject({ rows: [], clean: true });
+  });
+});
+
+/**
+ * ============================================================================
+ *  REGION 0 BELONGS TO THE DIRECTOR MACHINES
+ * ============================================================================
+ *
+ * **Confirmed by the user:** *"306 should have region 0s include that in the
+ * analysis, 307 is an understudy for 306 so should have region 0 content as
+ * well."*
+ *
+ * The allocation has said so since it was written, and `machines.test.ts` pins
+ * that. What was only ever INCIDENTAL is what the rig survey does with it, and
+ * that is what these assert: region 0 is a legitimate holding on 306 and 307,
+ * an anomaly anywhere else, and 306 -- not 307 -- is the machine whose absence
+ * is the finding.
+ *
+ * The archive's own rules point the other way and stay that way: region 0 is
+ * never a slice, never a required region, never counted in `region_count`.
+ * Those are statements about what a VERSION must contain. This is a statement
+ * about which machine holds a delivered file, and the two do not meet.
+ */
+describe('region 0 on the rig', () => {
+  const file = (name: string, region: number, size = 100): ExpectedFile => ({
+    name,
+    size,
+    region,
+    songFolder: '100_ALPHA',
+    base: '100_ALPHA_MAIN_LL180',
+    verLabel: 'v004',
+    versionId: 1,
+    status: 'kept',
+  });
+  const result = (machineId: string, missingKept: ExpectedFile[] = []) => ({
+    machineId,
+    error: null,
+    comparison: {
+      missingKept,
+      missingSuperseded: [],
+      sizeMismatch: [],
+      presentSuperseded: [],
+      presentKept: { count: 0, bytes: 0 },
+      extraForeign: [],
+      extraUnknown: [],
+      extraUnparsed: [],
+      regionless: [],
+      actual: { count: 0, bytes: 0 },
+      expected: { count: 0, bytes: 0 },
+      nameCollisions: 0,
+    },
+  }) as unknown as Parameters<typeof rollUpMissing>[0][number];
+
+  const holders = new Map<number, string[]>([[0, ['306', '307']]]);
+  /** 306 is the director and plays region 0; 307 backs it up. */
+  const primaries = new Set(['306']);
+  const proxy = 'a_v004_proxy3_region0.mov';
+
+  it('is a legitimate holding on the director, not something extra', () => {
+    const c = compareMachine(
+      [{ relPath: proxy, name: proxy, size: 100, mtime: 1 }],
+      [file(proxy, 0)],
+      {
+        regions: [0],
+        describeName: () => ({ region: 0, verLabel: 'v004', base: 'a' }),
+      },
+    );
+    expect(c.presentKept).toEqual({ count: 1, bytes: 100 });
+    expect(c.extraForeign).toEqual([]);
+    expect(totalsOf(c).inSync).toBe(true);
+  });
+
+  it('is expected there: absent from the director, it is the alarm', () => {
+    const c = compareMachine([], [file(proxy, 0)], {
+      regions: [0],
+      describeName: () => ({ region: 0, verLabel: 'v004', base: 'a' }),
+    });
+    expect(c.missingKept.map((f) => f.name)).toEqual([proxy]);
+  });
+
+  it('belongs to another machine when it turns up on an actor', () => {
+    // What the real rig shows: 2,584 region 0 proxies sitting on 101, which
+    // carries region 1. Not "unknown", not ignored -- somebody else's media.
+    const c = compareMachine(
+      [{ relPath: proxy, name: proxy, size: 100, mtime: 1 }],
+      [],
+      { regions: [1], describeName: () => ({ region: 0, verLabel: 'v004', base: 'a' }) },
+    );
+    expect(c.extraForeign.map((f) => f.name)).toEqual([proxy]);
+    expect(c.extraUnknown).toEqual([]);
+    expect(c.regionless).toEqual([]);
+  });
+
+  it('is RECOVERABLE when only 307 has it — the understudy is a backup here too', () => {
+    const r = rollUpMissing([result('306', [file(proxy, 0)]), result('307')], holders, primaries);
+    expect(r.rows[0]).toMatchObject({
+      state: 'recoverable',
+      missingFrom: ['306'],
+      presentOn: ['307'],
+      primaryOn: ['306'],
+    });
+  });
+
+  it('is MISSING when neither director machine has it', () => {
+    const r = rollUpMissing(
+      [result('306', [file(proxy, 0)]), result('307', [file(proxy, 0)])],
+      holders,
+      primaries,
+    );
+    expect(r.rows[0]?.state).toBe('missing');
+    expect(r.unplayable.files).toBe(1);
+  });
+
+  /**
+   * *"if region 0 is missing from 306 mark it as such in the region gaps
+   * (cluster) section."* -- the user. The strip carries region 0 like any other
+   * region, and says which of the three things is true of it.
+   */
+  it('marks region 0 SHORT when 306 has not got it', () => {
+    const r = rollUpMissing([result('306', [file(proxy, 0)]), result('307')], holders, primaries);
+    expect(r.byRegion).toHaveLength(1);
+    expect(r.byRegion[0]).toMatchObject({
+      region: 0,
+      primaries: ['306'],
+      holders: ['306', '307'],
+      state: 'short',
+      unplayable: 1,
+      unplayableBytes: 100,
+    });
+  });
+
+  it('marks region 0 NOT SURVEYED until 306 is actually read', () => {
+    // The honest state of the real rig today: region 0 has never been looked
+    // at, and that is not the same as region 0 being fine.
+    const r = rollUpMissing([result('101')], holders, primaries);
+    expect(r.byRegion[0]).toMatchObject({ region: 0, state: 'unsurveyed', surveyedPrimaries: [] });
+  });
+
+  it('marks region 0 OK once 306 is read and is short of nothing', () => {
+    const r = rollUpMissing([result('306'), result('307')], holders, primaries);
+    expect(r.byRegion[0]).toMatchObject({ region: 0, state: 'ok', surveyedPrimaries: ['306'] });
+  });
+
+  it('sends a stray region 0 file home to 306 and 307', () => {
+    const found = {
+      relPath: `100_ALPHA/${proxy}`,
+      name: proxy,
+      size: 100,
+      mtime: 1,
+      region: 0,
+      verLabel: 'v004',
+      base: 'a',
+    };
+    const onActor = {
+      machineId: '101',
+      error: null,
+      comparison: {
+        missingKept: [],
+        missingSuperseded: [],
+        sizeMismatch: [],
+        presentSuperseded: [],
+        presentKept: { count: 0, bytes: 0 },
+        extraForeign: [found],
+        extraUnknown: [],
+        extraUnparsed: [],
+        regionless: [],
+        actual: { count: 0, bytes: 0 },
+        expected: { count: 0, bytes: 0 },
+        nameCollisions: 0,
+      },
+    } as unknown as Parameters<typeof rollUpMisplaced>[0][number];
+    const archive = new Map([[proxy, 'kept' as const]]);
+
+    // Neither director surveyed: it cannot be told whether this copy is needed.
+    const unread = rollUpMisplaced([onActor], holders, archive);
+    expect(unread.rows[0]).toMatchObject({
+      state: 'unconfirmed',
+      belongsOn: ['306', '307'],
+      unknownOn: ['306', '307'],
+    });
+
+    // 306 surveyed and short of it: the nearest copy is on 101.
+    const read = rollUpMisplaced([onActor, result('306', [file(proxy, 0)]), result('307')], holders, archive);
+    expect(read.rows[0]).toMatchObject({ state: 'rescue', needIt: ['306'], haveIt: ['307'] });
   });
 });
 

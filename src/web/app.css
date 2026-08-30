@@ -1065,6 +1065,19 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   border-radius: 3px; padding: 3px 7px; cursor: help;
 }
 .miss-region.alarm { border-color: var(--warn); color: var(--warn); }
+
+/* The region strip. Every region of the canvas, in canvas order, coloured for
+   its state — `unsurveyed` is deliberately NOT quiet: "nobody looked" is the
+   answer this strip exists to stop reading as "fine". */
+.miss-region .rgn-who { margin-left: 6px; color: var(--dim); }
+.miss-region .rgn-state { margin-left: 6px; }
+.miss-region.rgn-short { border-color: var(--warn); color: var(--warn); }
+.miss-region.rgn-short b, .miss-region.rgn-short .rgn-state { color: var(--warn); }
+.miss-region.rgn-spare { border-color: #4a3a1c; }
+.miss-region.rgn-spare .rgn-state { color: var(--superseded); }
+.miss-region.rgn-unsurveyed { border-color: #3b3355; }
+.miss-region.rgn-unsurveyed .rgn-state { color: var(--patch); }
+.miss-region.rgn-ok .rgn-state { color: var(--kept); }
 .miss-region b { color: var(--text); margin-right: 4px; }
 .miss-alarm-n { margin-left: 6px; color: var(--warn); font-weight: 600; }
 

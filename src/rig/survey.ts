@@ -418,24 +418,49 @@ export interface MissingRow {
   state: MissingState;
 }
 
+/**
+ * One region of the canvas, as it stands on the RIG.
+ *
+ *   short       the machine that plays it is missing files. The finding.
+ *   spare       the machine that plays it is complete; a backup is short.
+ *   unsurveyed  nobody read the machine that plays it, so nothing is known.
+ *               NOT the same as `ok`, and the difference is the whole reason
+ *               this list covers every region rather than only the ones with
+ *               findings: a region nobody looked at used to be absent from the
+ *               tab entirely, which reads exactly like a region that is fine.
+ *   ok          the machine that plays it was read and is short of nothing.
+ */
+export type RigRegionState = 'short' | 'spare' | 'unsurveyed' | 'ok';
+
 export interface MissingByRegion {
   region: number;
   /** Machines that carry this region, whether or not they were surveyed. */
   holders: string[];
   /** Of those holders, the ones that play the region rather than back it up. */
   primaries: string[];
+  /** Of THOSE, the ones actually read. Empty means nothing can be said. */
+  surveyedPrimaries: string[];
   files: number;
   bytes: number;
   /** Of those, how many the archive is the only remaining source for. */
   missing: number;
   /** Of those, how many are not on the machine that plays them. The alarm. */
   unplayable: number;
+  /** Bytes of that. */
+  unplayableBytes: number;
+  state: RigRegionState;
 }
 
 export interface MissingRollup {
   rows: MissingRow[];
   counts: Record<MissingState, number>;
   bytes: Record<MissingState, number>;
+  /**
+   * EVERY region the allocation knows about, in canvas order -- not only the
+   * ones with findings. A region with nothing wrong says so, and a region
+   * nobody looked at says THAT, which is the state the tab could not express
+   * before: it was simply absent, which reads as fine.
+   */
   byRegion: MissingByRegion[];
   /** Machines whose contents are unknown, so the roll-up cannot be complete. */
   unsurveyedHolders: string[];
@@ -553,24 +578,72 @@ export function rollUpMissing(
 
   const counts: Record<MissingState, number> = { missing: 0, recoverable: 0, unconfirmed: 0, spareLost: 0 };
   const bytes: Record<MissingState, number> = { missing: 0, recoverable: 0, unconfirmed: 0, spareLost: 0 };
+
+  // SEEDED FROM THE ALLOCATION, not from the findings. A region with no missing
+  // files must still appear -- as `ok` if its machine was read and as
+  // `unsurveyed` if it was not, and those two are not the same answer. Region 0
+  // is a region here like any other: it belongs to the director machines, and
+  // if 306 has not got it that is a finding, not a footnote.
   const regions = new Map<number, MissingByRegion>();
-  for (const r of rows) {
-    counts[r.state] += 1;
-    bytes[r.state] += r.size;
-    const entry = regions.get(r.region) ?? {
-      region: r.region,
-      holders: [...(regionHolders.get(r.region) ?? [])].sort(),
-      primaries: [...(regionHolders.get(r.region) ?? [])].filter((id) => primaryHolders.has(id)).sort(),
+  for (const [region, holders] of regionHolders) {
+    const all = [...holders].sort();
+    const primaries = all.filter((id) => primaryHolders.has(id));
+    // With no roles to go on, every holder decides -- the same fallback the
+    // row states use, and for the same reason.
+    const deciding = primaries.length > 0 ? primaries : all;
+    regions.set(region, {
+      region,
+      holders: all,
+      primaries: deciding,
+      surveyedPrimaries: deciding.filter((id) => surveyed.has(id)),
       files: 0,
       bytes: 0,
       missing: 0,
       unplayable: 0,
+      unplayableBytes: 0,
+      state: 'ok',
+    });
+  }
+
+  for (const r of rows) {
+    counts[r.state] += 1;
+    bytes[r.state] += r.size;
+    const entry = regions.get(r.region);
+    // A region no machine claims cannot be seeded from the allocation, but a
+    // file for it was still found missing somewhere. Reported rather than
+    // dropped: the alternative is a finding that exists in the rows and in no
+    // summary.
+    const row = entry ?? {
+      region: r.region,
+      holders: [],
+      primaries: [],
+      surveyedPrimaries: [],
+      files: 0,
+      bytes: 0,
+      missing: 0,
+      unplayable: 0,
+      unplayableBytes: 0,
+      state: 'ok' as RigRegionState,
     };
-    entry.files += 1;
-    entry.bytes += r.size;
-    if (r.state === 'missing') entry.missing += 1;
-    if (r.state === 'missing' || r.state === 'recoverable') entry.unplayable += 1;
-    regions.set(r.region, entry);
+    row.files += 1;
+    row.bytes += r.size;
+    if (r.state === 'missing') row.missing += 1;
+    if (r.state === 'missing' || r.state === 'recoverable') {
+      row.unplayable += 1;
+      row.unplayableBytes += r.size;
+    }
+    regions.set(r.region, row);
+  }
+
+  for (const entry of regions.values()) {
+    entry.state =
+      entry.unplayable > 0
+        ? 'short'
+        : entry.surveyedPrimaries.length === 0
+          ? 'unsurveyed'
+          : entry.files > 0
+            ? 'spare'
+            : 'ok';
   }
 
   const unsurveyed = new Set<string>();
@@ -580,9 +653,10 @@ export function rollUpMissing(
     rows,
     counts,
     bytes,
-    byRegion: [...regions.values()].sort(
-      (a, b) => b.unplayable - a.unplayable || b.bytes - a.bytes || a.region - b.region,
-    ),
+    // CANVAS ORDER, not worst-first: this is a strip you read across to find
+    // the region you care about, and the state is carried by colour. Region 0
+    // sorts first, where the whole-canvas copy belongs.
+    byRegion: [...regions.values()].sort((a, b) => a.region - b.region),
     unsurveyedHolders: [...unsurveyed].sort(),
     unsurveyedPrimaries: [...unsurveyed].filter((id) => primaryHolders.has(id)).sort(),
     unplayable: {

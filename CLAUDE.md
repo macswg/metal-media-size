@@ -289,6 +289,20 @@ sits on exactly two machines and every playable byte is stored twice — the rig
 holds 2.00× what the archive does. `test/server/machines.test.ts` asserts that
 shape, including that the pairing is mutual.
 
+**Region 0 on the rig is confirmed by the user:** *"306 should have region 0s
+include that in the analysis, 307 is an understudy for 306 so should have region
+0 content as well."* So on the RIG a region-0 file is ordinary media with an
+ordinary pair of holders: expected on 306 and 307, an alarm when 306 has not got
+it, `recoverable` when only 307 has, and `extraForeign` when it turns up on an
+actor. At snapshot 12 that is 2.22 TiB allocated to each of them (1.31 TiB kept
+at keep-1). Pinned by *region 0 on the rig* in `test/server/rig.test.ts`.
+
+**This does not soften any of the ARCHIVE's region-0 rules**, and must not be
+read as doing so. Region 0 is still never a slice, never a required region,
+never counted in `region_count`, and a proxy-only version still never supersedes
+a master. Those are statements about what a *version* must contain; this is a
+statement about which *machine* holds a delivered file. The two never meet.
+
 `role` decides exactly one thing, and only since the user confirmed it: **which
 of a region's two holders actually plays it.** `isPrimaryRole` says actors and
 directors do and understudies do not, and `rollUpMissing` keys off that — see
@@ -546,6 +560,21 @@ costs to fix:
 
 `unplayable` is `missing + recoverable`: the files the show cannot play. That,
 not `missing` alone, is what the header pill and the per-region chips count.
+
+**The region strip covers EVERY region, not only the ones with findings.**
+`byRegion` is seeded from the allocation and each entry carries a `state`:
+`short` (the machine that plays it is missing files), `spare` (that machine is
+complete, a backup is not), `unsurveyed` (nobody read the machine that plays
+it), `ok`. It is in canvas order rather than worst-first — a strip is read
+across to find a region, and severity is carried by colour.
+
+`unsurveyed` is the reason it is seeded that way. A region nobody looked at used
+to be **absent from the tab entirely**, which reads exactly like a region that is
+fine. Region 0 made that concrete: it belongs to 306 and 307, neither had ever
+been surveyed, and the tab said nothing about it at all. Asked for by the user:
+*"if region 0 is missing from 306 mark it as such in the region gaps (cluster)
+section."* Region 0 is a region here like any other; if 306 has not got it, that
+is a finding and the strip says so.
 
 **When no holder is a primary** — an allocation naming no roles, or machine ids
 this rig does not know — every holder decides, which is the old
