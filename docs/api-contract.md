@@ -348,6 +348,85 @@ are always tallied over the whole snapshot** and are unaffected by `?severity=`
 or `?limit=`, so a "7 high, 3 low" chip pair does not move when one is clicked.
 An unknown value is a 400 (`bad_severity`).
 
+### Region coverage — versions holding some of the canvas but not all
+```
+GET /api/coverage?severity=high|low&includePatches=0|1&keepN=&limit=&offset=
+    + every filter param below
+```
+`{ requiredRegions[], requiredCount, allocationSource, rows[], counts{},
+   severity{}, severityFilter, listedBytes, listedMissingSlices,
+   total, matchedBytes, limit, offset, keepN, includePatches }`
+
+A playable delivery is the whole canvas. `requiredRegions` is the set of
+**non-zero** regions the playback machines carry — the same allocation
+`/api/machines` reads, so on the real rig it is `1..14` and `allocationSource`
+says whether that came from the built-in rig or `config/machines.json`. It is
+derived rather than a hard-coded 14, so a different rig moves this view with it.
+
+**Region 0 is never required.** It is the whole-canvas copy the offline edit is
+cut against, not a slice, so a version consisting of nothing but region 0 has no
+gaps to report — it is counted in `proxyOnlyVersions` instead.
+
+Each row:
+```
+versionId, assetId, songFolder, base, family, verLabel, isPatch,
+bytes, fileCount, region0Bytes, latestMtime, status,
+present[], presentCount,     // slices this version has, never including 0
+missing[], missingCount,     // required slices it does not have
+extra[],                     // slices present that no machine carries
+severity, supersededBy       // exactly as in /api/anomalies
+```
+Rows are ordered worst-first: live masters, then the widest gap, then the
+largest version. There is no `?sort=` — this is a report, and the order it is
+read in is part of what it says.
+
+#### How this differs from the `missingRegions` anomaly
+
+Both say "missing regions" and neither subsumes the other:
+
+- `/api/anomalies` compares a version against **its own asset's modal layout**.
+  It finds versions that disagree with their siblings. An asset whose every
+  version has ten slices is self-consistent and invisible there.
+- `/api/coverage` compares a version against **the canvas**. That same asset is
+  ten-fourteenths of a delivery in every version it has, and shows up here.
+
+#### Counts
+
+```
+counts: { completeVersions, incompleteVersions, incompletePatchVersions,
+          proxyOnlyVersions, regionlessVersions,
+          listedVersions, listedAssets }
+```
+
+**The first four are a partition**: every version the filters matched lands in
+exactly one of `complete` / `incomplete` / `proxyOnly` / `regionless`, whatever
+`includePatches` is set to, so a client can add them up and get the whole
+archive. `regionless` (a legal whole-canvas deliverable, no region token) and
+`proxyOnly` are separate categories and merging them hides one inside the other.
+
+`listedVersions` / `listedAssets` describe the narrower set the route actually
+LISTS, and `listedBytes` / `listedMissingSlices` are over that same set. Like
+`/api/anomalies`, none of them move with `?severity=` or `?limit=`.
+
+`includePatches=1` adds partial patch versions to `rows`. Off by default: a
+`_frameNNNNN` render covers a frame range and is *expected* to touch only some
+slices, so listing every patch as broken would make the view useless. They are
+counted in `incompletePatchVersions` either way and are never invisible.
+
+#### Filtering narrows the report, never the evidence
+
+The region index is built over the **whole snapshot**, always. The filters
+decide which versions are reported; they must never decide which files count as
+evidence about a version, or a `path=*_region1.mov` filter would strip the
+slices out from under every version on screen and report the archive as full of
+holes. Same principle as *"`/api/reclaim` filters the OUTPUT, not the input"*.
+
+Severity is exactly the `/api/anomalies` verdict and **does not depend on
+`keepN`** — this route reads `keepN` only to annotate each row's `status`.
+
+This route proposes nothing for removal. An incomplete version may be a delivery
+still in flight.
+
 ### Export
 ```
 POST /api/export

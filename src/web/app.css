@@ -807,6 +807,89 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
 .stat.muted-stat .v { color: var(--dim); font-size: 16px; }
 
 
+/* ----------------------------------------------------------- region gaps
+
+   The canvas as a strip of cells, one per slice. Filled means the version has
+   that slice; hollow means it does not. The whole point of the panel is that a
+   hole is visible at a glance rather than read out of a list of numbers, so
+   the missing cell carries the warning colour and the present ones stay quiet.
+   ------------------------------------------------------------------------ */
+
+.slice-grid { display: flex; flex-wrap: wrap; gap: 3px; }
+.slice {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1;
+  min-width: 17px;
+  padding: 4px 2px;
+  text-align: center;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+.slice.on { background: var(--panel-3); color: var(--text-2); border-color: var(--line); }
+/* A missing slice is the finding. It is the only loud thing in the row. */
+.slice.off {
+  background: repeating-linear-gradient(
+    -45deg, transparent, transparent 3px, rgba(224, 112, 58, 0.28) 3px, rgba(224, 112, 58, 0.28) 5px
+  );
+  color: var(--warn);
+  border-color: var(--warn);
+  font-weight: 700;
+}
+/* Present, but on no playback machine. Not a gap — reported so the count adds up. */
+.slice.extra { background: var(--patch-bg); color: var(--patch); border-color: var(--patch); }
+.slice-grid.legend .slice { min-width: 22px; padding: 5px 3px; font-size: 10.5px; }
+
+.cov-list { display: grid; }
+.cov {
+  display: grid;
+  grid-template-columns:
+    16px minmax(160px, 1.5fr) minmax(120px, auto) auto minmax(130px, 0.9fr)
+    minmax(120px, auto) 74px 88px;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.3px;
+}
+.cov:last-child { border-bottom: 0; }
+.cov:hover { background: #1a212b; }
+.cov-sev { color: var(--warn); font-weight: 700; text-align: center; }
+.cov-id { min-width: 0; }
+.cov-song { display: block; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.cov-base {
+  display: block; font-family: var(--mono); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cov-ver { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cov-verlabel { font-family: var(--mono); font-weight: 600; }
+.cov-what { color: var(--warn); }
+.cov-what b { font-weight: 600; }
+.cov-missing { color: var(--dim); font-family: var(--mono); font-size: 11.5px; }
+.cov-by { color: var(--faint); font-size: 11.5px; }
+.cov-when { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+.cov-bytes {
+  text-align: right; font-family: var(--mono);
+  font-variant-numeric: tabular-nums; color: var(--text-2);
+}
+
+/* Gaps on a version something newer has already replaced recede, exactly as
+   they do in the anomalies panel — still legible, never loud. */
+.cov.low { opacity: 0.6; }
+.cov.low .cov-what { color: var(--dim); }
+/* Quieter, but STILL LEGIBLE AS A HOLE. Dropping the outline here would make a
+   superseded row's missing slices indistinguishable from its present ones,
+   which is the one thing every row on this panel has to show. */
+.cov.low .slice.off {
+  color: var(--text-2); border-color: var(--dim); border-style: dashed;
+  background: none; font-weight: 600;
+}
+
+.inline-check { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); cursor: pointer; }
+
+
 /* ==========================================================================
    NARROW SCREENS — phones, and the iPhone in particular
    ==========================================================================
@@ -1342,6 +1425,21 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 3px; }
   .anom-ver { grid-column: 2; }
   .anom-what { grid-column: 2 / -1; }
   .anom-by { grid-column: 2 / -1; }
+
+  .cov {
+    grid-template-columns: 18px 1fr auto;
+    gap: 4px 8px;
+    padding: 10px 0;
+  }
+  .cov-sev { grid-row: span 5; align-self: start; padding-top: 2px; }
+  .cov-id { grid-column: 2 / -1; }
+  .cov-base { white-space: normal; word-break: break-all; }
+  .cov-ver { grid-column: 2; }
+  .cov-bytes { grid-column: 3; grid-row: 2; }
+  .cov .slice-grid { grid-column: 2 / -1; margin: 2px 0; }
+  .cov-what { grid-column: 2 / -1; }
+  .cov-by { grid-column: 2; }
+  .cov-when { grid-column: 3; text-align: right; }
 
   /* -------------------------------------------------------- controls */
 

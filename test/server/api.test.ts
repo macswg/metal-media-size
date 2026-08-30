@@ -101,7 +101,7 @@ describe('the browser app is served at /', () => {
     const res = await app.inject({ method: 'GET', url: '/' });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/html');
-    expect(res.body).toContain('<title>Archive Analyser</title>');
+    expect(res.body).toContain('<title>Media Allocation Analyzer</title>');
     expect(res.body).toContain('./js/main.js');
   });
 

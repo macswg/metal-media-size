@@ -132,7 +132,7 @@ export function intParam(q: Query, key: string): number | undefined {
   return n;
 }
 
-function boolIntParam(q: Query, key: string): 0 | 1 | undefined {
+export function boolIntParam(q: Query, key: string): 0 | 1 | undefined {
   const s = str(q, key);
   if (s === undefined) return undefined;
   if (s === '1' || s === 'true') return 1;

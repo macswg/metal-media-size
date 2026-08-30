@@ -15,12 +15,17 @@ import { FilterPanel } from './filters.js';
 import { TableView } from './tableview.js';
 import { LadderPanel } from './ladder.js';
 import { AnomaliesPanel, DuplicatesPanel } from './panels.js';
+import { CoveragePanel } from './coverage.js';
 import { SnapshotBar, DiffPanel } from './snapshots.js';
 import { openExportDialog, resolveSelectedVersionIds } from './export.js';
 import { bytes as fmtBytes, count } from './format.js';
 
 const TABS = [
   ['table', 'Browse'],
+  // Sits between Browse and Anomalies deliberately: it is a view of the media
+  // itself, not a list of defects. It measures in SLICES where everything to
+  // its left measures in bytes.
+  ['coverage', 'Region gaps'],
   ['anomalies', 'Anomalies'],
   ['duplicates', 'Duplicates'],
   ['diff', 'Snapshot diff'],
@@ -74,9 +79,10 @@ async function boot() {
   if (new URLSearchParams(location.search).has('debug')) window.__aa = app;
 
   showTab(state.tab);
-  // Loaded eagerly so the tab badge is honest from the first paint.
+  // Loaded eagerly so the tab badges are honest from the first paint.
   app.anomaliesLoaded = true;
   app.anomalies.load();
+  app.coverage.load();
   await app.table.refresh();
   await app.reclaim.fetch();
   paintStatusBar();
@@ -300,6 +306,7 @@ function buildPanes() {
   clear(host);
   app.panes = {
     table: h('div.tab-pane'),
+    coverage: h('div.tab-pane.scrollpane'),
     anomalies: h('div.tab-pane.scrollpane'),
     duplicates: h('div.tab-pane.scrollpane'),
     diff: h('div.tab-pane.scrollpane'),
@@ -314,6 +321,16 @@ function buildPanes() {
       setSheetOpen(true);
     },
     onSelectionChange: () => paintStatusBar(),
+  });
+  app.coverage = new CoveragePanel(app.panes.coverage, {
+    // Gaps on a live master only — see the panel.
+    onCounts: (c) => setTabBadge('coverage', c.high ?? 0, c.low ?? 0),
+    onOpenAsset: (assetId, versionId) => {
+      if (assetId == null) return;
+      $('.workspace').classList.add('with-drawer');
+      app.ladder.open(assetId, versionId);
+      setSheetOpen(true);
+    },
   });
   app.anomalies = new AnomaliesPanel(app.panes.anomalies, {
     // The badge counts HIGH severity only. A badge that also counted anomalies
@@ -340,6 +357,13 @@ function setTabBadge(tab, n, secondary) {
 function showTab(id) {
   for (const [tab, btn] of app.tabButtons) btn.classList.toggle('on', tab === id);
   for (const [tab, pane] of Object.entries(app.panes)) pane.classList.toggle('on', tab === id);
+  // The coverage view answers to the sidebar filters, so it can go stale while
+  // another tab is in front. Refetch on the way in rather than on every filter
+  // keystroke aimed at the table.
+  if (id === 'coverage' && app.coverageStale) {
+    app.coverageStale = false;
+    app.coverage.load();
+  }
   if (id === 'duplicates' && !app.duplicatesLoaded) {
     app.duplicatesLoaded = true;
     app.duplicates.load();
@@ -448,6 +472,12 @@ function handleStateChange(reasons) {
     app.table.refresh();
     if (reasons.has('filters') || reasons.has('mode')) app.reclaim.refresh();
     if (reasons.has('keepN')) app.ladder.refresh();
+    // Filters narrow the coverage view and keepN colours its status pills.
+    // Reload it now if it is the tab in front, otherwise mark it stale.
+    if (reasons.has('filters') || reasons.has('keepN')) {
+      if (state.tab === 'coverage') app.coverage.load();
+      else app.coverageStale = true;
+    }
   }
   void reloading;
 }
@@ -455,6 +485,8 @@ function handleStateChange(reasons) {
 async function reloadEverything() {
   app.duplicatesLoaded = false;
   app.anomalies.load();
+  app.coverage.load();
+  app.coverageStale = false;
   clearSelection();
   await loadSummary();
   app.reclaim.refresh();

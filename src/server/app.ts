@@ -27,6 +27,7 @@ import { PROJECT_ROOT, type AppConfig } from '../config.ts';
 import { createContext, type AppContext } from './context.ts';
 import { hasStatusCode, isHttpError, messageOf } from './errors.ts';
 import { registerAnomalyRoutes } from './routes/anomalies.ts';
+import { registerCoverageRoutes } from './routes/coverage.ts';
 import { registerDuplicateRoutes } from './routes/duplicates.ts';
 import { registerExportRoutes } from './routes/export.ts';
 import { registerFileRoutes } from './routes/files.ts';
@@ -170,6 +171,7 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
   registerSummaryRoutes(app, ctx);
   registerDuplicateRoutes(app, ctx);
   registerAnomalyRoutes(app, ctx);
+  registerCoverageRoutes(app, ctx);
   registerExportRoutes(app, ctx);
 
   return { app, ctx };

@@ -2,6 +2,79 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-29 — the versions carrying some of the canvas but not all
+
+> *"because you know what regions are required give me a filter view that shows
+> me any assets that have some regions (more than region0) but not all"* — the
+> user
+
+We do know what is required, and it was never written down anywhere the media
+could be checked against. `src/machines.ts` has held the answer since the
+per-machine view landed: fourteen actors, one canvas slice each, so a playable
+delivery is regions 1–14. **Region gaps** is a new tab between Browse and
+Anomalies that measures against that instead of against bytes.
+
+That matters because every other figure in the tool is a byte count, and bytes
+hide this particular defect completely. `520_GOSE_BUTCHER_AFTERMATH_0000B_ALPHA_LOOP_LL180
+v003b` is 23.18 GiB, is the current master, is `kept` at every keep-N, and is
+missing region 4. Nothing about its size says so. Every row now draws the whole
+canvas as fourteen cells and leaves the missing ones hollow, so the shape of the
+hole is the row rather than a number at the end of it.
+
+**`requiredRegions` is derived, not a `14` typed into a new file.** It is the
+non-zero regions the rig carries, so `config/machines.json` would move this view
+with it, and `allocationSource` says which answered. Region 0 is excluded for
+the reason it is always excluded: it names *which part of the canvas*, not *at
+what resolution*, and a version holding nothing but the offline-edit copy is not
+a delivery with holes in it — it is counted separately.
+
+**This is not the missing-region anomaly again.** That one compares a version
+against its own asset's modal layout, and finds versions that disagree with
+their siblings. An asset whose every version has ten slices is perfectly
+self-consistent and invisible there. This one compares against the canvas, and
+that asset is ten-fourteenths of a delivery in every version it has. On today's
+archive the two agree exactly — the same 2 versions — because every asset's
+layout *is* the full fourteen. That is a finding worth having, not a reason to
+merge the checks.
+
+**The failure mode this had to be built against is inventing a gap.** A byte
+total degrades gracefully when a filter narrows it; a region set does not.
+Build the region index from the filtered files and `path=*_region1.mov` strips
+thirteen slices out from under every version on screen and reports the archive
+as broken. So the index is built over the whole snapshot, always, and the
+filters only decide which verdicts are reported — the same shape as *"hiding a
+successor does not make a version safe"*, and pinned by a test named for it.
+
+The four buckets are a partition on purpose. Complete 1,838 · with gaps 2 ·
+region 0 only 419 · no region token 271 = 2,530, every version in view, so the
+panel can show the addition instead of leaving "what about the rest?" hanging.
+`regionless` stays separate from `proxyOnly` for the same reason `unparsed`
+stays separate from `regionless` in the machine view: one is a legal
+whole-canvas deliverable, the other is a preview, and merging them hides the
+second inside the first.
+
+Patches are counted but not listed by default. A `_frameNNNNN` render covers a
+frame range and is *expected* to touch only some slices; listing every patch as
+broken would have made the panel worthless. There are none in this archive —
+every patch here carries all fourteen — which is itself worth knowing.
+
+**Severity moved to `src/server/severity.ts`.** It was inside the anomalies
+route and this view needs the identical verdict. Two implementations would have
+been two ideas of which version is newest, disagreeing the first time the
+grammar moved; `compareVersions` now answers for both. Behaviour unchanged —
+the anomaly suite passes untouched.
+
+`presentCount` is re-derived from the file names with the scan's own parser and
+asserted equal to the stored `region_count` for every version. It matches on all
+2,530 versions of the real archive and on every fixture row, which is the only
+way to know the two readings of "a slice is a non-zero, non-proxy region" have
+not drifted apart.
+
+Also fixed: `test/server/api.test.ts` still asserted the pre-0.5.26 window
+title, so the suite had been one test red since the rename.
+
+28 new tests, 520 green.
+
 ## 2026-08-27 — the columns a small window was eating
 
 > *"auto resize the columns in the data view when window is smaller, then

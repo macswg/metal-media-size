@@ -159,6 +159,9 @@ export const api = {
 
   duplicates: (params) => impl.get('/api/duplicates', params).then(normaliseList),
   anomalies: (params) => impl.get('/api/anomalies', params),
+  // Versions holding some of the canvas but not all of it. Shape is fixed by
+  // the route, so no normalisation: `rows` plus its own counts block.
+  coverage: (params) => impl.get('/api/coverage', params),
 
   exportManifest: (payload) => impl.post('/api/export', payload),
 };

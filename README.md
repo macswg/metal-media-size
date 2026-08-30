@@ -142,6 +142,15 @@ superseded. That is what this tool works out.
 - **Anomalies** — missing regions, versions with no proxy, unparsed and
   zero-byte files. Graded: a defect on a current master is loud; one already
   fixed by a newer version is reported but de-emphasised.
+- **Region gaps** — which versions carry *some* of the canvas but not all of it.
+  Everything else in the tool measures in bytes, and a version missing ten of
+  its fourteen slices can still be enormous, so this one measures in slices:
+  every row draws the whole canvas with the missing cells hollow. The required
+  set is read from the rig (`1`–`14`), not hard-coded, and region 0 is never one
+  of them. It is not the same check as the missing-region anomaly — that
+  compares a version against its own siblings, this compares it against the
+  canvas — and the panel accounts for every version in view in one of four
+  buckets so the numbers add up. Nothing here is proposed for removal.
 - **Duplicates** — metadata only, never reads file bytes (the mount is object
   storage; reading means egress). Always labelled "content not verified".
 - **Per-machine** — a fourth Browse mode: how much media each playback machine

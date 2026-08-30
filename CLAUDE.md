@@ -143,6 +143,55 @@ that day, not a live reading — the archive grows, and keep-1 measures 49.87 Ti
 at snapshot 8. What must never come back is the 3.17 TiB of last-copy masters
 the rule protects; the headline figure is expected to drift.
 
+### Region gaps measure against the CANVAS, anomalies against the SIBLINGS
+
+`/api/coverage` and the **Region gaps** tab answer one question: which versions
+carry *some* of the canvas but not all of it. `requiredRegions` is the set of
+**non-zero** regions the rig carries, read from `src/machines.ts` — so it is
+`1..14` today, derived rather than a `14` written down, and it follows
+`config/machines.json` if that ever supplies a different rig.
+
+This is the one place the machine allocation informs a statement about the
+archive, and it is a *reporting* use only. It still decides nothing about
+supersession: `status` on every row arrives from the usual whole-snapshot
+`computeReclaim`, and severity comes from `src/server/severity.ts`.
+
+**It does not duplicate the `missingRegions` anomaly.** That one compares a
+version against its own asset's modal layout and finds versions that disagree
+with their siblings; an asset whose every version has ten slices is
+self-consistent and invisible there. This one compares against the canvas, and
+that asset is ten-fourteenths of a delivery in every version it has. Neither
+subsumes the other. On the archive at snapshot 12 the two happen to agree
+exactly — 2 versions, `520_GOSE_..._v003b` missing region 4 on a live master and
+`140_ONE_SOLDIERS_LL180 v002` missing 8 — because every asset's layout *is* the
+full fourteen. That agreement is a finding, not a reason to merge them.
+
+- **Region 0 is never required**, for the same reason it is never a slice.
+- **The region index is built over the WHOLE snapshot**, never the filtered
+  rows. Filters choose which versions are reported; they must never choose which
+  files count as evidence about a version, or `path=*_region1.mov` would report
+  the archive as full of holes. `test/server/coverage.test.ts` pins this.
+- **The four buckets are a partition** — complete / with-gaps / region0-only /
+  regionless — so the panel can add them up to every version in view and have
+  the arithmetic hold. `regionless` is a legal whole-canvas deliverable and is
+  not the same thing as `proxyOnly`; merging them hides one inside the other.
+- **Patches are counted but not listed by default.** A `_frameNNNNN` render
+  covers a frame range and is expected to touch only some slices.
+- `presentCount` is re-derived from file names with the scan's own parser and is
+  asserted equal to `asset_version.region_count` for every version — two
+  implementations of one rule, pinned to each other. Measured as an exact match
+  on all 2,530 versions of the real archive.
+
+### Severity lives in `src/server/severity.ts`
+
+Shared by `/api/anomalies` and `/api/coverage`. `high` = no full version of the
+asset ranks newer; `low` = one does, so a re-render presumably fixed it.
+**It never depends on keepN**, and nothing in that module may consult the
+reclaim policy. It was extracted from the anomalies route when the second
+consumer arrived: a second implementation would be a second idea of which
+version is newest, and the two would disagree the first time the grammar moved.
+`compareVersions` does the ordering, as it does in `reclaim.ts`.
+
 ### `noHeader` is the only anomaly that needs a probe
 Every other category is derived from names, sizes and counts, so it covers the
 whole archive by construction. `noHeader` covers only what `npm run probe` has

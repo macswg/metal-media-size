@@ -20,30 +20,11 @@
  * ---------------------------------------------------------------------------
  *
  * ---------------------------------------------------------------------------
- * SEVERITY
- *
- * A defect on a live master matters; the same defect on a version that a later
- * full render has already replaced almost certainly does not. Every anomaly row
- * therefore carries:
- *
- *   severity: 'high'  no full version of this asset is NEWER than the version
- *                     the defect sits on. This is a current master with a
- *                     problem, and someone has to look at it.
- *   severity: 'low'   a newer FULL version exists, so whatever this row
- *                     describes has presumably been re-rendered away. Still
- *                     reported, never hidden -- just de-emphasised.
- *   supersededBy      ver_label of that asset's newest full version, or null
- *                     when severity is 'high'.
- *
- * SEVERITY DOES NOT DEPEND ON keepN. A newer full version either exists or it
- * does not; that is a property of the archive, not of the view. If severity
- * moved with the reclaim slider, the same defect would change importance as the
- * operator dragged it, and the panel would stop being trustworthy. This route
- * never consults the reclaim policy at all, which is what makes the invariant
- * structural rather than a promise.
- *
- * UNATTRIBUTABLE IS 'high'. A file we cannot tie to an asset cannot be proved
- * superseded by anything, so it gets the conservative answer.
+ * SEVERITY lives in `../severity.ts`, shared with `/api/coverage`. Every row
+ * here carries `severity` ('high' = no newer full version exists) and
+ * `supersededBy`. It DOES NOT DEPEND ON keepN, and this route never consults
+ * the reclaim policy at all -- which is what makes that invariant structural
+ * rather than a promise. Unattributable files get the conservative answer.
  * ---------------------------------------------------------------------------
  *
  * REGION ANOMALIES need a definition, because the schema stores a region COUNT
@@ -67,27 +48,22 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { compareVersions } from '../../scan/derive.ts';
 import type { AppContext } from '../context.ts';
 import { resolveSnapshot } from '../context.ts';
-import { badRequest } from '../errors.ts';
 import { intParam, type Query } from '../query.ts';
+import {
+  buildSeverityIndex,
+  loadVersionMeta,
+  parseSeverityFilter,
+  Tally,
+  UNATTRIBUTED,
+  type SeverityVerdict,
+} from '../severity.ts';
 import { toSnapshotView } from './snapshots.ts';
 import { mediaCoverage } from '../../db/index.ts';
 
 const DEFAULT_ANOMALY_LIMIT = 500;
 const MAX_ANOMALY_LIMIT = 20_000;
-
-export const SEVERITIES = ['high', 'low'] as const;
-export type Severity = (typeof SEVERITIES)[number];
-
-/** The verdict attached to every anomaly row. */
-export interface SeverityVerdict {
-  severity: Severity;
-  supersededBy: string | null;
-}
-
-const UNATTRIBUTED: SeverityVerdict = { severity: 'high', supersededBy: null };
 
 interface NameRow {
   id: number;
@@ -103,25 +79,6 @@ interface NameRow {
   probed: number;
   /** NULL when unprobed OR when probed and headerless -- `probed` separates them. */
   width: number | null;
-}
-
-/**
- * Version metadata in the shape this route works in. `verNum` / `subLetter`
- * are camelCase because `compareVersions` -- the single ordering authority,
- * shared with reclaim.ts -- takes them that way, and re-implementing the
- * comparison here to match the column names is exactly the sort of drift that
- * ends with two different ideas of which version is newest.
- */
-interface VersionMeta {
-  versionId: number;
-  assetId: number;
-  songFolder: string;
-  base: string;
-  verLabel: string;
-  verNum: number;
-  subLetter: string | null;
-  regionCount: number;
-  isPatch: boolean;
 }
 
 /** Region number from a file name, or null for proxies and region-less files. */
@@ -173,35 +130,6 @@ function modalRegionSet(sets: number[][]): number[] {
   return best?.regions ?? [];
 }
 
-function parseSeverityFilter(q: Query): Severity | undefined {
-  const raw = q['severity'];
-  if (raw === undefined || raw === null || raw === '') return undefined;
-  const s = String(raw);
-  if (!(SEVERITIES as readonly string[]).includes(s)) {
-    throw badRequest(
-      'bad_severity',
-      `severity must be one of: ${SEVERITIES.join(', ')}. Got ${JSON.stringify(s)}.`,
-    );
-  }
-  return s as Severity;
-}
-
-/** Running high/low tallies for one anomaly category. */
-class Tally {
-  high = 0;
-  low = 0;
-  add(v: SeverityVerdict): void {
-    if (v.severity === 'high') this.high += 1;
-    else this.low += 1;
-  }
-  get total(): number {
-    return this.high + this.low;
-  }
-  toJSON(): { high: number; low: number } {
-    return { high: this.high, low: this.low };
-  }
-}
-
 export function registerAnomalyRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get('/api/anomalies', (req) => {
     const q = req.query as Query;
@@ -220,58 +148,11 @@ export function registerAnomalyRoutes(app: FastifyInstance, ctx: AppContext): vo
       )
       .all(snapshot.id) as NameRow[];
 
-    const versionMeta = (
-      ctx.db
-        .prepare(
-          `SELECT av.version_id  AS versionId,
-                  av.asset_id    AS assetId,
-                  av.song_folder AS songFolder,
-                  av.base        AS base,
-                  av.ver_label   AS verLabel,
-                  av.ver_num     AS verNum,
-                  av.sub_letter  AS subLetter,
-                  av.region_count AS regionCount,
-                  av.is_patch    AS isPatch
-             FROM v_asset_version av WHERE av.snapshot_id = ?`,
-        )
-        .all(snapshot.id) as (Omit<VersionMeta, 'isPatch'> & { isPatch: number })[]
-    ).map((v): VersionMeta => ({ ...v, isPatch: v.isPatch === 1 }));
-
-    const metaById = new Map(versionMeta.map((v) => [v.versionId, v]));
-
-    // -----------------------------------------------------------------------
-    // Severity: for each asset, the FULL versions in order. A defect is 'low'
-    // exactly when some full version ranks strictly newer than the version it
-    // sits on. Patches never count -- a patch is a partial re-render and does
-    // not replace anything (the same rule reclaim.ts enforces).
-    // -----------------------------------------------------------------------
-    const fullsByAsset = new Map<number, VersionMeta[]>();
-    for (const v of versionMeta) {
-      if (v.isPatch) continue;
-      const list = fullsByAsset.get(v.assetId);
-      if (list) list.push(v);
-      else fullsByAsset.set(v.assetId, [v]);
-    }
-    for (const list of fullsByAsset.values()) list.sort(compareVersions);
-
-    function severityAt(
-      assetId: number | null,
-      at: { verNum: number; subLetter: string | null } | null,
-    ): SeverityVerdict {
-      if (assetId === null || at === null) return UNATTRIBUTED;
-      const fulls = fullsByAsset.get(assetId);
-      if (!fulls || fulls.length === 0) return UNATTRIBUTED;
-      const newest = fulls[fulls.length - 1] as VersionMeta;
-      if (compareVersions(newest, at) <= 0) return UNATTRIBUTED;
-      return { severity: 'low', supersededBy: newest.verLabel };
-    }
-
-    /** Severity of a defect sitting on a known asset-version row. */
-    function severityOfVersion(versionId: number): SeverityVerdict {
-      const meta = metaById.get(versionId);
-      if (!meta) return UNATTRIBUTED;
-      return severityAt(meta.assetId, meta);
-    }
+    // Built over the WHOLE snapshot, never the filtered view -- see
+    // `buildSeverityIndex`. The same index answers /api/coverage.
+    const { metaById, severityAt, severityOfVersion } = buildSeverityIndex(
+      loadVersionMeta(ctx.db, snapshot.id),
+    );
 
     // -----------------------------------------------------------------------
     // Attribution for files that carry no asset_version_id: match the longest
