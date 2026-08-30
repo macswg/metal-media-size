@@ -493,6 +493,90 @@ Further validation, all 400:
 `503 exporter_unavailable` if `src/export/index.ts` is missing. The route never
 improvises an exporter.
 
+## The rig survey — `/api/rig/*`
+
+```
+POST   /api/rig/targets      { text, share?, directory? }  parse a paste or a YAML import
+GET    /api/rig/targets.yaml                               the list as the file to save
+POST   /api/rig/credentials  { username, password }        held for the session only
+POST   /api/rig/connect      { share? }                    mount every target READ-ONLY
+POST   /api/rig/disconnect                                 unmount the ones we mounted
+POST   /api/rig/survey       { directory?, keepN? }        walk them all and compare
+POST   /api/rig/survey/cancel
+GET    /api/rig/status                                     targets, mounts, progress, results
+GET    /api/rig/mounts                                     SMB shares mounted right now
+DELETE /api/rig/session                                    forget everything, credential included
+```
+
+The only part of this application that reaches another machine. Three properties
+are structural rather than conventions, and a client may rely on all three:
+
+**1. Every mount is read-only.** `mount_smbfs -N -o rdonly,nobrowse`. The kernel
+refuses every write through those mountpoints, from any process on the Mac
+including root. `connect` returns `readOnly` as a COUNT read back from the mount
+table, and `mountShare` refuses to return a mount that did not come back
+read-only. `alsoWritableElsewhere` counts machines that are ALSO mounted
+read-write by somebody else (typically Finder) — surfaced, never hidden.
+
+**2. Nothing is persisted.** Addresses, mountpoints, results and the credential
+live in memory for the life of the server process. No rig route reads or writes
+the index. `status` reports `hasCredentials` and `username`; the password is
+never returned at any depth.
+
+**3. The survey never opens a file.** `readdir` and `lstat` only. Comparison is
+by name and size, like `/api/duplicates`, and means the same thing: a match is
+not proof the contents match.
+
+### Target list
+
+Both input forms go through one parser, so a list that round-trips the YAML file
+cannot come back meaning something else:
+
+```
+101 10.10.1.53          # plain: [<machine>] <address>, any of space/comma/equals
+10.10.1.99              # no machine id -> surveyed, NOT compared
+```
+```yaml
+share: d3 Projects
+directory: media/SHOW_2026
+machines:
+  - id: "101"
+    host: 10.10.1.53
+```
+
+`errors[]` carries every line that could not be read, with its 1-based line
+number and the text verbatim — never silently dropped. `unknownMachineIds`
+names ids the rig has never heard of. A machine id is optional and is what buys
+the comparison: expectations are keyed by machine, so an untagged address is
+listed with `comparison: null` and the UI says why.
+
+The YAML is generated into a response body for the browser to download; the
+server never puts it on disk, and it carries **no credential** — `formatTargetsYaml`
+takes none, so it cannot.
+
+### Survey result, per machine
+
+```
+machineId, host, mountPoint, root, fileCount, totalBytes, elapsedMs, skipped[], error
+totals:      { actualFiles, actualBytes, expectedFiles, expectedBytes,
+               missingKeptFiles/Bytes, missingSupersededFiles/Bytes,
+               presentSupersededFiles/Bytes, sizeMismatchFiles,
+               extraForeignFiles/Bytes, extraUnknownFiles/Bytes,
+               nameCollisions, inSync }
+comparison:  { missingKept[], missingSuperseded[], presentKept{count,bytes},
+               presentSuperseded[], sizeMismatch[], extraForeign[], extraUnknown[] }
+```
+
+Every file on a machine lands in exactly one bucket. `missingKept` is the alarm.
+`inSync` is about PLAYBACK, not tidiness: old media on a drive is a space
+problem, so a machine carrying superseded files is still in sync.
+
+`keepN` decides only which archive versions count as current. Expectations come
+from the whole-snapshot `computeReclaim` plus the region allocation in
+`src/machines.ts`, exactly as `/api/machines` computes them — the machine never
+decides what the archive says, and the archive never decides what is on the
+machine.
+
 ## Filter query params (shared by /files, /versions, /reclaim, /songs)
 
 ```

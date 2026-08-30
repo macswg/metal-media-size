@@ -2,6 +2,90 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-29 — the other half of the question: what is actually ON the machines
+
+> *"i would like to be able to look at the files in a specified directory on all
+> of the machines on the network. I can give you a list of ip addresses, but it
+> will change occasionally. ideally we would just type/copy these ip addresses
+> into the app so there are no machine addresses stored anywhere."* — the user
+
+Every view in this tool described the ARCHIVE. The Per-machine view already said
+what machine 301 *should* hold — it carries regions 6 and 7, so it should hold
+every region6 and region7 file. Nothing said what it *does* hold. The **Rig** tab
+walks a directory on each playback machine and puts the two side by side, which
+is the question an operator actually has the night before a show.
+
+**The mount is read-only, and the kernel enforces it.** This was the design
+question that mattered, and the first answer was wrong. The plan was
+AppleScript's `mount volume` — it keeps the password off the command line, which
+seemed like the thing to optimise for. The user asked the right question:
+*"did we confirm that the files on the remote smb machines cannot be altered in
+any way?"* The honest answer was no: the app could not write (no write primitive
+exists in `src/`, and the survey does not even OPEN a file), but the VOLUME was
+mounted read-write, so Finder or anything else on the Mac could. Comparing the
+two mount-table lines made it plain — the archive says `read-only`, the SMB
+share did not.
+
+Asked whether the `mkdir` that a read-only mount needs runs locally or on the
+server, the answer settled it: **locally**. A mountpoint is an empty directory on
+this Mac that a share is grafted onto; the remote machine never hears about it.
+The user then chose the trade — *"the passwords for the smb share are just guest
+accounts so they're not meant to be secure"* — and it became
+`mount_smbfs -N -o rdonly,nobrowse`. From `mount(8)`: *"even the super-user may
+not write it."* Verified on the real rig before the code was written: `touch` and
+`mkdir` both fail with `Read-only file system`, locally, before anything reaches
+the machine. That is a stronger promise than "this application does not write".
+
+`readOnly` is read back out of the mount table, never assumed, and `mountShare`
+refuses to return a mount that did not come back read-only. A share the operator
+has open in Finder is read-write; that is reported as `otherWritableMount` and
+the row says "also open in Finder" rather than pretending the machine is sealed.
+
+**The fence grew by exactly two capabilities, both jailed.** `src/rig/mounts.ts`
+joins `readonly.ts` and `writer.ts` as a chokepoint: the only file that may
+import `node:child_process`, the only one that may name `mkdir`, four absolute
+commands, `execFile` so there is no shell. The mkdir and the umount are both
+jailed to a mount root under the system temp directory, which is what stands
+between a bug and the archive's own volume being taken away mid-show.
+`test/readonly-enforcement.test.ts` grew from four checks to nine.
+
+The denylist caught the first draft, exactly as designed: the word *truncate* in
+a prose comment failed the build. The check does not strip comments, on purpose.
+
+**Nothing about the machines is stored.** Addresses, mountpoints, results and the
+credential live in one in-memory object. Then: *"once i type in the ip list,
+allow me to export a yaml and give me the option to import yaml"* — so the list
+is rendered into a response body the browser downloads, landing wherever the
+operator puts it and never in this project. It carries addresses and never a
+credential, and `formatTargetsYaml` takes no credential argument, so it cannot.
+Both the paste and the YAML go through one parser, so a saved list cannot come
+back meaning something else.
+
+**What the comparison is for.** The buckets are named for what an operator would
+do about them, not for their set arithmetic: `missingKept` is the alarm,
+`sizeMismatch` is a copy that did not finish or a render the archive never saw,
+`presentSuperseded` is space a cleanup returns, `extraForeign` is a file that
+went to the wrong machine. Every file on a machine lands in exactly one. `inSync`
+is about playback rather than tidiness — old media is a space problem, not a
+show-stopper.
+
+An address with no machine id is surveyed but not compared. Expectations are
+keyed by machine, and guessing which machine an address is would invent the one
+fact the whole comparison rests on.
+
+Two things the tests caught that a reading would not have: `10.10.1.999` is a
+syntactically valid DNS name, so it passed host validation and would have gone
+to a name lookup instead of being reported as the typo it is; and `101` is also
+a valid DNS name, so parsing `10.10.1.53 101` by trying one order and falling
+back read it as machine "10.10.1.53" at host "101". Both now decided explicitly.
+
+Verified end to end against a real machine: connect (read-only, at our own jailed
+mountpoint, correctly reporting the operator's separate Finder mount as still
+writable), survey 80 files in 39 ms, disconnect — with the Finder mount
+untouched.
+
+35 new tests, 583 green.
+
 ## 2026-08-29 — the versions carrying some of the canvas but not all
 
 > *"because you know what regions are required give me a filter view that shows

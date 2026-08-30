@@ -16,6 +16,7 @@ import { TableView } from './tableview.js';
 import { LadderPanel } from './ladder.js';
 import { AnomaliesPanel, DuplicatesPanel } from './panels.js';
 import { CoveragePanel } from './coverage.js';
+import { RigPanel } from './rig.js';
 import { SnapshotBar, DiffPanel } from './snapshots.js';
 import { openExportDialog, resolveSelectedVersionIds } from './export.js';
 import { bytes as fmtBytes, count } from './format.js';
@@ -28,6 +29,10 @@ const TABS = [
   ['coverage', 'Region gaps'],
   ['anomalies', 'Anomalies'],
   ['duplicates', 'Duplicates'],
+  // The only tab that describes the RIG rather than the archive. Last of the
+  // analysis tabs, before the snapshot diff, because it is the one you reach
+  // for once you already know what the archive says.
+  ['rig', 'Rig'],
   ['diff', 'Snapshot diff'],
 ];
 
@@ -309,6 +314,7 @@ function buildPanes() {
     coverage: h('div.tab-pane.scrollpane'),
     anomalies: h('div.tab-pane.scrollpane'),
     duplicates: h('div.tab-pane.scrollpane'),
+    rig: h('div.tab-pane.scrollpane'),
     diff: h('div.tab-pane.scrollpane'),
   };
   for (const pane of Object.values(app.panes)) host.appendChild(pane);
@@ -338,6 +344,11 @@ function buildPanes() {
     onCounts: (c) => setTabBadge('anomalies', c.high ?? 0, c.low ?? 0),
   });
   app.duplicates = new DuplicatesPanel(app.panes.duplicates);
+  app.rig = new RigPanel(app.panes.rig, {
+    // Machines missing current media. The one thing on that tab that is an
+    // alarm rather than an observation.
+    onCounts: (c) => setTabBadge('rig', c.high ?? 0, 0),
+  });
   app.diff = new DiffPanel(app.panes.diff, { snapshotBar: app.snapshotBar });
 }
 
@@ -364,6 +375,9 @@ function showTab(id) {
     app.coverageStale = false;
     app.coverage.load();
   }
+  // Loaded on the way in, never eagerly: it is session state in the server,
+  // and an untouched Rig tab should make no requests and hold no addresses.
+  if (id === 'rig') app.rig.load();
   if (id === 'duplicates' && !app.duplicatesLoaded) {
     app.duplicatesLoaded = true;
     app.duplicates.load();

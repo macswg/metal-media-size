@@ -15,6 +15,7 @@ import type { KeepReason } from '../scan/reclaim.ts';
 import { ReclaimCache } from './reclaim-cache.ts';
 import { ScanRunner } from './scan-runner.ts';
 import { ProbeRunner } from './probe-runner.ts';
+import { RigSession } from './rig-session.ts';
 import { badRequest, notFound } from './errors.ts';
 import { intParam, type Query } from './query.ts';
 
@@ -30,6 +31,12 @@ export interface AppContext {
    */
   probes: ProbeRunner;
   /**
+   * The rig survey's session: addresses, mountpoints, results and the
+   * credential, all in memory and none of it written anywhere. Lives on the
+   * context because it is per-server, not per-request. See rig-session.ts.
+   */
+  rig: RigSession;
+  /**
    * Where the exporter puts its artefacts. Undefined in normal operation, so
    * the exporter uses its own jailed default of `<project>/exports`. Tests set
    * it to a scratch directory so a test run never leaves files in `exports/`.
@@ -41,7 +48,8 @@ export function createContext(db: Db, cfg: AppConfig, exportsDir?: string): AppC
   const reclaim = new ReclaimCache(db);
   const scans = new ScanRunner(db, cfg, (snapshotId) => reclaim.invalidate(snapshotId));
   const probes = new ProbeRunner(db, cfg);
-  return { db, cfg, reclaim, scans, probes, ...(exportsDir === undefined ? {} : { exportsDir }) };
+  const rig = new RigSession();
+  return { db, cfg, reclaim, scans, probes, rig, ...(exportsDir === undefined ? {} : { exportsDir }) };
 }
 
 /**

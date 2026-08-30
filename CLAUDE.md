@@ -310,6 +310,80 @@ silently shrinking it.
 ### `family` is a display label
 Never use it to classify anything as removable.
 
+## The rig survey — the one thing that leaves this machine
+
+`/api/rig/*` and the **Rig** tab read a directory on each playback machine over
+SMB and compare it with the archive. It is the only feature that touches
+anything outside this Mac, and it is fenced accordingly.
+
+### The mount is read-only, and the kernel enforces it
+
+`src/rig/mounts.ts` mounts every share with `mount_smbfs -N -o rdonly,nobrowse`.
+From `mount(8)`: *"even the super-user may not write it."* That is a stronger
+guarantee than "this application does not write" — **nothing** on this Mac can
+write through those mountpoints, Finder and root included. Verified on the real
+rig: `touch` and `mkdir` both fail with `Read-only file system`, locally, before
+anything reaches the machine.
+
+`readOnly` is read back out of the mount table, never assumed, and `mountShare`
+**refuses to return** a mount that did not come back read-only. A share the
+operator connected in Finder is read-write; that is reported as
+`otherWritableMount` rather than hidden, and the UI says "also open in Finder".
+
+### `src/rig/mounts.ts` is a chokepoint, like `readonly.ts`
+
+- **The only file in `src/` that may import `node:child_process`**, and the only
+  one that may name `mkdir`. Both enforced by `test/readonly-enforcement.test.ts`.
+- **Exactly four commands**, all absolute, all via `execFile` so there is no
+  shell: `/sbin/mount`, `/bin/mkdir`, `/sbin/mount_smbfs`, `/sbin/umount`.
+- **The `mkdir` is LOCAL and EMPTY.** A mountpoint is a directory on *this* Mac
+  that a share is grafted onto; the remote machine never hears about it. Jailed
+  to `MOUNT_ROOT` under the system temp dir — not `/Volumes`, which is
+  `root:wheel`.
+- **`umount` is jailed to the same root.** It can never reach `/Volumes`, a
+  volume the operator connected, or the object mount holding the archive.
+- Nothing here removes a directory or writes a file.
+- `assertHost` is an **allowlist of shapes** (IPv4 or DNS name), because the
+  host becomes both a URL component and a directory name. `10.10.1.999` is
+  refused: it is a valid DNS name and always actually a typo'd address.
+
+### The password is in the command line, deliberately
+
+`mount_smbfs` takes a credential in exactly one place — the URL. There is no
+stdin or environment form. The user was told and chose it: *"the passwords for
+the smb share are just guest accounts so they're not meant to be secure"*. Do
+not silently reverse that on the grounds that it looks wrong in isolation; the
+trade bought a kernel-enforced read-only mount. `-N` is always passed, or a bad
+password makes `mount_smbfs` prompt on a terminal a server has not got.
+
+### Nothing about the machines is stored
+
+Addresses, mountpoints, results and the credential live in `RigSession`, an
+object in memory. Not in `data/index.db`, not in `config/`, not in `exports/`,
+not in a log. The **only** artefact that outlives the session is the YAML file
+the operator saves from the browser, which carries addresses and **never** a
+credential — `formatTargetsYaml` takes no credential argument, so it cannot.
+
+### The survey never opens a file
+
+It calls `readdir` and `lstat` and nothing else — not one byte of any file on a
+machine is read. Pinned by a test. Comparison is by name and size only, exactly
+like the duplicate detector, and results say so.
+
+### What the comparison means
+
+Buckets are named for what an operator would DO about them, and every file on a
+machine lands in exactly one: `missingKept` (the alarm — current media absent),
+`sizeMismatch` (same name, different size — both readings are bad),
+`presentSuperseded` (space a cleanup returns), `missingSuperseded` (already
+cleaned off, not a problem), `presentKept`, `extraForeign` (belongs to another
+machine), `extraUnknown`. `inSync` is deliberately about playback, not tidiness:
+old media on a drive is a space problem, not a show-stopper.
+
+An address with no machine id is surveyed but **not compared** — expectations
+are keyed by machine, and guessing which machine an address is would invent the
+one fact the comparison rests on.
+
 ## FreeFileSync
 
 See `docs/ffs-format.md`. It records what is **verified** (against the user's real

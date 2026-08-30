@@ -9,6 +9,18 @@
  *
  *   1. DENYLIST      -- no fs write primitive appears anywhere in `src/`.
  *   2. IMPORT FENCE  -- `node:fs` / `fs` is imported only by the chokepoint.
+ *   3. COMMAND FENCE -- `node:child_process` is imported only by the MOUNT
+ *      chokepoint, `src/rig/mounts.ts`, which exists because macOS ships no
+ *      SMB client and a share has to be mounted before it can be read. That
+ *      module may run exactly four commands, all by absolute path. The rest of
+ *      `src/` may not run a command at all.
+ *
+ *      It is also the ONLY file outside the export writer allowed to name
+ *      `mkdir`, and only to create a LOCAL, EMPTY mountpoint directory jailed
+ *      to its own root under the system temp area. That directory is on this
+ *      Mac; the remote machine never hears about it. Its `umount` is jailed to
+ *      the same root, which is what stands between a bug and the archive's own
+ *      volume being taken away mid-show.
  *
  * The single sanctioned exception is `src/export/writer.ts`, which a later
  * agent will add to write export artefacts into the project's `exports/`
@@ -33,6 +45,22 @@ const WRITE_EXEMPT = new Set(['src/export/writer.ts']);
 
 /** Files allowed to import node:fs. The chokepoint, plus the export writer. */
 const FS_IMPORT_EXEMPT = new Set(['src/fs/readonly.ts', 'src/export/writer.ts']);
+
+/**
+ * Files allowed to import `node:child_process`. Exactly one: the mount
+ * chokepoint. Reading a machine on the network means mounting its share first,
+ * and mounting means asking macOS -- so the capability exists, and it is fenced
+ * the same way touching the archive is.
+ */
+const EXEC_IMPORT_EXEMPT = new Set(['src/rig/mounts.ts']);
+
+/**
+ * Files allowed to name `mkdir`. The mount chokepoint, for one purpose: a
+ * mountpoint is a local, empty directory on THIS Mac that a remote share is
+ * grafted onto. Nothing is created on the remote machine, and the path is
+ * jailed to the application's own root under the system temp directory.
+ */
+const MKDIR_EXEMPT = new Set(['src/rig/mounts.ts']);
 
 /**
  * Filesystem mutation primitives. Any occurrence in `src/` outside the exempt
@@ -124,11 +152,18 @@ describe('read-only enforcement', () => {
       const relPath = rel(file);
       if (WRITE_EXEMPT.has(relPath)) continue;
 
+      // The mount chokepoint may name `mkdir`, and only `mkdir`: a mountpoint
+      // is a local empty directory, and creating one is the single write this
+      // application makes outside `exports/`. Every other primitive still
+      // fails the build there, which the next test asserts positively.
+      const allowMkdir = MKDIR_EXEMPT.has(relPath);
+
       const lines = readFileSync(file, 'utf8').split('\n');
       lines.forEach((text, i) => {
         denyRe.lastIndex = 0;
         let m: RegExpExecArray | null;
         while ((m = denyRe.exec(text)) !== null) {
+          if (allowMkdir && (m[1] === 'mkdir' || m[1] === 'mkdirSync')) continue;
           violations.push({
             file: relPath,
             line: i + 1,
@@ -197,6 +232,110 @@ describe('read-only enforcement', () => {
       violations,
       formatViolations(violations, 'illegal node:fs import(s)'),
     ).toEqual([]);
+  });
+
+  it('COMMAND BOUNDARY: node:child_process is imported only by the mount chokepoint', () => {
+    // Running a command is the one capability that can reach outside this
+    // process entirely. It exists for exactly one reason -- macOS has no SMB
+    // client library, so a share must be mounted before it can be read -- and
+    // it is confined to the one module that does that.
+    const violations: Violation[] = [];
+    const perLine =
+      /(?:from|import|require)\s*\(?\s*['"](node:child_process|child_process)['"]/g;
+
+    for (const file of files) {
+      const relPath = rel(file);
+      if (EXEC_IMPORT_EXEMPT.has(relPath)) continue;
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((text, i) => {
+          perLine.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = perLine.exec(text)) !== null) {
+            violations.push({
+              file: relPath,
+              line: i + 1,
+              column: m.index + 1,
+              text,
+              token: m[1] as string,
+            });
+          }
+        });
+    }
+
+    expect(violations, formatViolations(violations, 'illegal child_process import(s)')).toEqual([]);
+  });
+
+  it('the mount chokepoint runs only the four allowed commands', () => {
+    const source = readFileSync(join(SRC, 'rig/mounts.ts'), 'utf8');
+
+    // execFile only. `exec` would take a shell, and a shell would take a
+    // command line built from a host name.
+    expect(source).toMatch(/import \{ execFile \} from 'node:child_process'/);
+    // `exec(` only when it is a call to the shell-taking exec, not the `.exec(`
+    // of a regular expression -- which this module uses to read the mount table.
+    expect(source).not.toMatch(/\bexecSync\b|\bspawnSync\b|\bspawn\s*\(/);
+    expect(source).not.toMatch(/(?<![.\w])exec\s*\(/);
+    expect(source).not.toMatch(/shell\s*:/);
+
+    // All four are absolute literals, so none can be resolved through a PATH
+    // an attacker controls.
+    expect(source).toMatch(/mount: '\/sbin\/mount'/);
+    expect(source).toMatch(/makeDir: '\/bin\/mkdir'/);
+    expect(source).toMatch(/mountSmbfs: '\/sbin\/mount_smbfs'/);
+    expect(source).toMatch(/umount: '\/sbin\/umount'/);
+    // And there are no others.
+    expect(source.match(/^  \w+: '\/[^']+',$/gm)).toHaveLength(4);
+
+    // EVERY mount is read-only. This is the whole protection for the playback
+    // machines and it rests on one option string.
+    expect(source).toMatch(/'rdonly,nobrowse'/);
+    // Never prompt: a server process has no terminal to prompt on.
+    expect(source).toMatch(/'-N'/);
+
+    // Both the mkdir and the umount are jailed to our own mount root. Without
+    // this, a bug could unmount the volume holding the archive.
+    expect(source).toMatch(/assertInMountRoot\(mountPointFor\(host\)\)/);
+    expect(source).toMatch(/const abs = assertInMountRoot\(mountPoint\);/);
+
+    // Nothing here may remove a directory or eject a disk.
+    expect(source).not.toMatch(/\bdiskutil\b|\beject\b|\brmdir\b/);
+  });
+
+  it('the rig session never persists what it holds', () => {
+    // The operator asked for addresses to live nowhere. The session is the one
+    // place they exist, so it may not reach the database or the exporter.
+    // (That the CREDENTIAL never comes back out is asserted behaviourally, by
+    // reading a real session's status -- see test/server/rig.test.ts.)
+    const source = readFileSync(join(SRC, 'server/rig-session.ts'), 'utf8');
+    expect(source).not.toMatch(/better-sqlite3|INSERT |prepare\(/);
+    expect(source).not.toMatch(/from '\.\.\/export\//);
+  });
+
+  it('the rig survey never even OPENS a file on a remote machine', () => {
+    // The application cannot write anywhere -- the two fences above prove that
+    // for every path, remote ones included. This is the stronger claim, and it
+    // is worth pinning separately: surveying a playback machine reads its
+    // DIRECTORY ENTRIES and nothing else. No file on a machine is opened at
+    // all, so there is no descriptor to write through even by accident, and a
+    // survey costs the machine no file reads while a show is loaded.
+    for (const f of ['rig/mounts.ts', 'rig/survey.ts', 'rig/targets.ts', 'server/rig-session.ts', 'server/routes/rig.ts']) {
+      expect(readFileSync(join(SRC, f), 'utf8'), f).not.toMatch(/\bopenRead\b/);
+    }
+    // And the walker the survey drives uses only the two listing calls.
+    const walker = readFileSync(join(SRC, 'scan/walk.ts'), 'utf8');
+    expect(walker).not.toMatch(/\bopenRead\b/);
+    expect(walker).toMatch(/rofs\.readdir\(/);
+    expect(walker).toMatch(/rofs\.lstat\(/);
+  });
+
+  it('the export jail still refuses /Volumes, where every SMB share mounts', () => {
+    // The rig survey mounts machines under /Volumes. The one module that may
+    // write is already forbidden from writing there, so the sanctioned writer
+    // cannot reach a playback machine either. Asserted here because the rig
+    // feature now depends on a rule written for a different reason.
+    const source = readFileSync(join(SRC, 'export/writer.ts'), 'utf8');
+    expect(source).toMatch(/'\/Volumes'/);
   });
 
   it('the chokepoint exposes no write operation', () => {

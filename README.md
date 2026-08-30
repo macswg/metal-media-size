@@ -164,6 +164,16 @@ superseded. That is what this tool works out.
   and the reserved headroom, drawn as one 32 TB drive — so a machine that is
   nearly full is visible at a glance. The allocation lives in `src/machines.ts`
   and will move to a config file.
+- **Rig** — the only view that describes the machines rather than the archive.
+  Paste (or import from YAML) a list of addresses, connect, and it walks the
+  same directory on every playback machine and compares it with what the archive
+  says should be there: current media missing, same-name-different-size,
+  superseded media still taking up drive space, files that belong to another
+  machine. **Every share is mounted read-only** (`mount_smbfs -o rdonly`), which
+  the kernel enforces against every process on the Mac including root, and the
+  survey never opens a file — it reads directory entries and stats only. No
+  address, mountpoint or password is ever written to disk; the list can be saved
+  as a YAML file that carries addresses and never a credential.
 - **Snapshots** — every scan is retained and two can be diffed. The archive is
   live, so this matters. Old snapshots can be removed from the index.
 - **Exports** — a shareable HTML report, JSON, Markdown, and a FreeFileSync

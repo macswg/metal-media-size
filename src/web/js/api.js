@@ -51,6 +51,13 @@ const LIVE = {
   get(path, params) {
     return LIVE.request(path, params);
   },
+  // The one route that is not JSON: the rig target list, rendered as the YAML
+  // file the operator saves. Returned as text for the browser to download.
+  async text(path) {
+    const res = await fetch(new URL(path, location.origin));
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.text();
+  },
   post(path, payload, params) {
     // `params` matters for POST /api/probe: which snapshot is being probed is
     // resolved from the query string, exactly as every read route resolves it.
@@ -164,4 +171,21 @@ export const api = {
   coverage: (params) => impl.get('/api/coverage', params),
 
   exportManifest: (payload) => impl.post('/api/export', payload),
+
+  /* --------------------------------------------------------------------- */
+  /* The rig survey. Every one of these is session state in the server's     */
+  /* memory: nothing here reads or writes the index, and no address or       */
+  /* password is persisted anywhere. `rigTargetsYaml` returns TEXT, which    */
+  /* the browser turns into a download — the server never puts it on disk.   */
+  /* --------------------------------------------------------------------- */
+  rigStatus: () => impl.get('/api/rig/status'),
+  rigTargets: (payload) => impl.post('/api/rig/targets', payload),
+  rigCredentials: (payload) => impl.post('/api/rig/credentials', payload),
+  rigConnect: (payload) => impl.post('/api/rig/connect', payload),
+  rigDisconnect: () => impl.post('/api/rig/disconnect', {}),
+  rigMounts: () => impl.get('/api/rig/mounts'),
+  rigSurvey: (payload) => impl.post('/api/rig/survey', payload),
+  rigCancelSurvey: () => impl.post('/api/rig/survey/cancel', {}),
+  rigForget: () => impl.del('/api/rig/session'),
+  rigTargetsYaml: () => impl.text('/api/rig/targets.yaml'),
 };
