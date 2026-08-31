@@ -266,7 +266,7 @@ describe('read-only enforcement', () => {
     expect(violations, formatViolations(violations, 'illegal child_process import(s)')).toEqual([]);
   });
 
-  it('the mount chokepoint runs only the four allowed commands', () => {
+  it('the mount chokepoint runs only the five allowed commands', () => {
     const source = readFileSync(join(SRC, 'rig/mounts.ts'), 'utf8');
 
     // execFile only. `exec` would take a shell, and a shell would take a
@@ -278,8 +278,9 @@ describe('read-only enforcement', () => {
     expect(source).not.toMatch(/(?<![.\w])exec\s*\(/);
     expect(source).not.toMatch(/shell\s*:/);
 
-    // All four are absolute literals, so none can be resolved through a PATH
-    // an attacker controls.
+    // All four macOS ones are absolute literals, so none can be resolved
+    // through a PATH an attacker controls. The fifth, Windows' `net use`, is
+    // built from the system root instead -- asserted separately below.
     expect(source).toMatch(/mount: '\/sbin\/mount'/);
     expect(source).toMatch(/makeDir: '\/bin\/mkdir'/);
     expect(source).toMatch(/mountSmbfs: '\/sbin\/mount_smbfs'/);

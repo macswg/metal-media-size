@@ -462,12 +462,24 @@ export interface MissingRollup {
    * before: it was simply absent, which reads as fine.
    */
   byRegion: MissingByRegion[];
-  /** Machines whose contents are unknown, so the roll-up cannot be complete. */
+  /**
+   * Holders of the regions IN THIS LIST that were not read, so a row's repair
+   * route is not fully known. Derived from the rows, because that is the
+   * question it answers: of the files listed here, which machines might still
+   * have one.
+   */
   unsurveyedHolders: string[];
   /**
-   * Of those, the ones that PLAY a region. These are the omissions that matter:
-   * a primary nobody read is a finding this list cannot make at all, where an
-   * unread backup only leaves the repair route unknown.
+   * Machines that PLAY a region and were not read, ANYWHERE ON THE RIG -- not
+   * only where a finding already exists.
+   *
+   * NOT a subset of `unsurveyedHolders`, and deliberately so. That one is about
+   * the rows that are here; this one is about the rows that are NOT, which is
+   * the more serious omission: a primary nobody read is a finding this list
+   * cannot make at all. Region 0 is the case that proves it -- it belongs to
+   * 306 and 307, and if neither was surveyed there are no region-0 rows to
+   * derive anything from, so a rows-derived reading would say nothing was
+   * missed. It is seeded from the allocation for the same reason `byRegion` is.
    */
   unsurveyedPrimaries: string[];
   /** Files that are not on the machine that plays them: `missing` + `recoverable`. */
@@ -481,6 +493,25 @@ export interface MissingSource {
   machineId: string | null;
   comparison: MachineComparison | null;
   error: string | null;
+}
+
+/**
+ * The machines that actually told us something.
+ *
+ * A source with no machine id was surveyed but not compared -- expectations are
+ * keyed by machine, and guessing which machine an address is would invent the
+ * one fact the comparison rests on. A source carrying an error, or no
+ * comparison, was not read. All three are silence, and both roll-ups have to
+ * treat them identically: a machine counted as read by one and unread by the
+ * other would put a file in `presentOn` here and in `unknownOn` there.
+ */
+function* surveyedMachines(
+  machines: readonly MissingSource[],
+): Generator<{ id: string; comparison: MachineComparison }> {
+  for (const m of machines) {
+    if (m.machineId === null || m.error !== null || !m.comparison) continue;
+    yield { id: m.machineId, comparison: m.comparison };
+  }
 }
 
 /**
@@ -499,20 +530,15 @@ export function rollUpMissing(
 ): MissingRollup {
   /** machineId -> what that machine said, for the machines we actually read. */
   const surveyed = new Map<string, { missing: Set<string>; wrongSize: Set<string> }>();
-  for (const m of machines) {
-    if (m.machineId === null || m.error !== null || !m.comparison) continue;
-    surveyed.set(m.machineId, {
-      missing: new Set(m.comparison.missingKept.map((f) => f.name)),
-      wrongSize: new Set(m.comparison.sizeMismatch.map((f) => f.name)),
-    });
-  }
-
   // Every distinct file reported missing by anybody. Keyed by name, which is
   // unique across the delivery because a base carries its song number.
   const files = new Map<string, ExpectedFile>();
-  for (const m of machines) {
-    if (m.machineId === null || m.error !== null || !m.comparison) continue;
-    for (const f of m.comparison.missingKept) if (!files.has(f.name)) files.set(f.name, f);
+  for (const { id, comparison } of surveyedMachines(machines)) {
+    surveyed.set(id, {
+      missing: new Set(comparison.missingKept.map((f) => f.name)),
+      wrongSize: new Set(comparison.sizeMismatch.map((f) => f.name)),
+    });
+    for (const f of comparison.missingKept) if (!files.has(f.name)) files.set(f.name, f);
   }
 
   const rows: MissingRow[] = [];
@@ -649,6 +675,16 @@ export function rollUpMissing(
   const unsurveyed = new Set<string>();
   for (const r of rows) for (const id of r.unknownOn) unsurveyed.add(id);
 
+  // From the ALLOCATION, not from the rows. A region whose primary was never
+  // read produces no rows at all, so a rows-derived reading of this would be
+  // silent about exactly the machine whose absence hides the most. `primaries`
+  // on each entry is already the deciding set, including the no-roles fallback
+  // where every holder decides.
+  const unsurveyedPrimaries = new Set<string>();
+  for (const entry of regions.values()) {
+    for (const id of entry.primaries) if (!surveyed.has(id)) unsurveyedPrimaries.add(id);
+  }
+
   return {
     rows,
     counts,
@@ -658,7 +694,7 @@ export function rollUpMissing(
     // sorts first, where the whole-canvas copy belongs.
     byRegion: [...regions.values()].sort((a, b) => a.region - b.region),
     unsurveyedHolders: [...unsurveyed].sort(),
-    unsurveyedPrimaries: [...unsurveyed].filter((id) => primaryHolders.has(id)).sort(),
+    unsurveyedPrimaries: [...unsurveyedPrimaries].sort(),
     unplayable: {
       files: counts.missing + counts.recoverable,
       bytes: bytes.missing + bytes.recoverable,
@@ -770,26 +806,21 @@ export function rollUpMisplaced(
     string,
     { missing: Set<string>; wrongSize: Set<string>; hasSuperseded: Set<string> }
   >();
-  for (const m of machines) {
-    if (m.machineId === null || m.error !== null || !m.comparison) continue;
-    surveyed.set(m.machineId, {
-      missing: new Set([
-        ...m.comparison.missingKept.map((f) => f.name),
-        ...m.comparison.missingSuperseded.map((f) => f.name),
-      ]),
-      wrongSize: new Set(m.comparison.sizeMismatch.map((f) => f.name)),
-      hasSuperseded: new Set(m.comparison.presentSuperseded.map((f) => f.name)),
-    });
-  }
-
   /** name -> the misplaced copies of it, collapsed across machines. */
   const found = new Map<string, { file: ForeignFile; on: string[] }>();
-  for (const m of machines) {
-    if (m.machineId === null || m.error !== null || !m.comparison) continue;
-    for (const f of m.comparison.extraForeign) {
+  for (const { id, comparison } of surveyedMachines(machines)) {
+    surveyed.set(id, {
+      missing: new Set([
+        ...comparison.missingKept.map((f) => f.name),
+        ...comparison.missingSuperseded.map((f) => f.name),
+      ]),
+      wrongSize: new Set(comparison.sizeMismatch.map((f) => f.name)),
+      hasSuperseded: new Set(comparison.presentSuperseded.map((f) => f.name)),
+    });
+    for (const f of comparison.extraForeign) {
       const entry = found.get(f.name);
-      if (entry) entry.on.push(m.machineId);
-      else found.set(f.name, { file: f, on: [m.machineId] });
+      if (entry) entry.on.push(id);
+      else found.set(f.name, { file: f, on: [id] });
     }
   }
 

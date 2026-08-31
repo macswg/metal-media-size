@@ -996,8 +996,11 @@ describe('the master list of what is missing across the rig', () => {
     expect(r.counts.missing).toBe(0);
     expect(r.unsurveyedHolders).toEqual(['103']);
     // And it says the omission is one that matters: an unread ACTOR is a
-    // finding this list cannot make at all.
-    expect(r.unsurveyedPrimaries).toEqual(['103']);
+    // finding this list cannot make at all. 104 is the actor for region 5 and
+    // was not read either -- this field is seeded from the ALLOCATION, so it
+    // names every unread actor on the rig rather than only the ones a row
+    // already points at.
+    expect(r.unsurveyedPrimaries).toEqual(['103', '104']);
   });
 
   /**
@@ -1009,7 +1012,11 @@ describe('the master list of what is missing across the rig', () => {
   it('is an alarm when the actor is missing it and only the BACKUP was unsurveyed', () => {
     const r = rollUpMissing([machine('103', [file('a_region4.mov', 4)])], holders, primaries);
     expect(r.rows[0]).toMatchObject({ state: 'missing', missingFrom: ['103'], unknownOn: ['208'] });
-    expect(r.unsurveyedPrimaries).toEqual([]);
+    // 208 is a BACKUP, so its absence is not an omission that can hide a
+    // finding, and it must not be named here. (104 is: it is the actor for
+    // region 5 and nobody read it either.)
+    expect(r.unsurveyedPrimaries).not.toContain('208');
+    expect(r.unsurveyedPrimaries).toEqual(['104']);
     // The list still says a machine was not read: `missing` here means "no machine
     // we looked at has it", and the UI must not upgrade that to "it exists
     // nowhere". 208 stays visible as an unanswered question.
@@ -1293,6 +1300,25 @@ describe('region 0 on the rig', () => {
   it('marks region 0 OK once 306 is read and is short of nothing', () => {
     const r = rollUpMissing([result('306'), result('307')], holders, primaries);
     expect(r.byRegion[0]).toMatchObject({ region: 0, state: 'ok', surveyedPrimaries: ['306'] });
+  });
+
+  /**
+   * The other half of the region-0 fix, and the half that was still missing.
+   *
+   * `byRegion` is seeded from the allocation, so an unread 306 shows in the
+   * strip. `unsurveyedPrimaries` -- what the loud "this list cannot be
+   * complete" warning is keyed on -- used to be derived from the ROWS, and an
+   * unread primary produces no rows: nobody reports a region-0 file missing
+   * when nobody read a machine that holds one. So the exact case the strip was
+   * added for was silent in the warning. It is seeded from the allocation now,
+   * for the same reason and by the same route.
+   */
+  it('names 306 as an unread PRIMARY even though it produced no rows at all', () => {
+    const r = rollUpMissing([result('101')], holders, primaries);
+    expect(r.rows).toEqual([]);
+    expect(r.unsurveyedPrimaries).toEqual(['306']);
+    // 307 is a backup: its absence cannot hide a finding, so it is not named.
+    expect(r.unsurveyedPrimaries).not.toContain('307');
   });
 
   it('sends a stray region 0 file home to 306 and 307', () => {

@@ -393,8 +393,11 @@ operator connected in Finder is read-write; that is reported as
 
 - **The only file in `src/` that may import `node:child_process`**, and the only
   one that may name `mkdir`. Both enforced by `test/readonly-enforcement.test.ts`.
-- **Exactly four commands**, all absolute, all via `execFile` so there is no
-  shell: `/sbin/mount`, `/bin/mkdir`, `/sbin/mount_smbfs`, `/sbin/umount`.
+- **Exactly five commands**, all resolved by absolute path, all via `execFile`
+  so there is no shell: `/sbin/mount`, `/bin/mkdir`, `/sbin/mount_smbfs`,
+  `/sbin/umount` on macOS, and `net use` on Windows. The four macOS ones are
+  literals in `ALLOWED_COMMANDS`; the fifth is built from `%SystemRoot%` by
+  `netCommand`, so it is fenced by being *built* rather than accepted.
 - **The `mkdir` is LOCAL and EMPTY.** A mountpoint is a directory on *this* Mac
   that a share is grafted onto; the remote machine never hears about it. Jailed
   to `MOUNT_ROOT` under the system temp dir — not `/Volumes`, which is
@@ -585,6 +588,15 @@ costs to fix:
   only the repair route unknown, and is reported as a hint rather than a
   warning. An unread *primary* is a finding the list cannot make at all, and
   `unsurveyedPrimaries` is what the loud warning is keyed on.
+  **That field is seeded from the ALLOCATION, not from the rows**, for the same
+  reason the region strip is: an unread primary produces no rows at all — nobody
+  reports a region-0 file missing when nobody read a machine that holds one — so
+  a rows-derived reading would be silent about exactly the machine whose absence
+  hides the most. It is therefore **not** a subset of `unsurveyedHolders`, which
+  stays rows-derived because it answers a different question: of the files
+  *listed here*, which machines might still have one. The warning is drawn on a
+  clean list too, where "nothing is missing from the machines we read" and
+  "nothing is missing" are easiest to confuse.
 - **`spareLost`** — the primary has it; a backup does not. The show plays and
   the redundancy is gone. The only state here that is not an alarm.
 

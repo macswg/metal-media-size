@@ -14,6 +14,7 @@
  *   POST   /api/rig/survey/cancel    stop before the next machine
  *   GET    /api/rig/status           targets, mounts, progress, results
  *   GET    /api/rig/mounts           SMB shares mounted on this Mac right now
+ *                                    (macOS only -- Windows mounts nothing)
  *   DELETE /api/rig/session          forget everything, credential included
  *
  * ---------------------------------------------------------------------------
@@ -27,10 +28,22 @@
  * the only thing that ever reads it is the mount. `status` reports whether one
  * is held and the user name, never the password.
  *
- * EVERY MOUNT IS READ-ONLY. `mount_smbfs -o rdonly` -- the kernel refuses every
- * write through these mountpoints, from any process on this Mac including root.
- * See `src/rig/mounts.ts`. A share the operator separately connected in Finder
- * is read-write, and `alsoWritableElsewhere` says so rather than hiding it.
+ * READ-ONLY -- AND THE RESPONSE SAYS WHICH PROMISE IS IN FORCE. There are two,
+ * they are not the same, and they are never collapsed into one:
+ *
+ *   macOS    `mount_smbfs -o rdonly`. The KERNEL refuses every write through
+ *            our mountpoint, from any process on this Mac including root.
+ *   Windows  there is no mount and no per-connection read-only flag to set, so
+ *            the promise is the APPLICATION's own: no write primitive exists in
+ *            `src/` outside the export writer and the survey never opens a
+ *            file, while the share stays as writable as its own permissions
+ *            make it.
+ *
+ * `connect` counts the machines under each -- `kernelReadOnly` and
+ * `applicationReadOnly` -- from what every target actually reported, so a badge
+ * can never claim a protection that is not in force. See `src/rig/mounts.ts`.
+ * A share the operator separately connected in Finder is read-write, and
+ * `alsoWritableElsewhere` says so rather than hiding it.
  *
  * THE DIRECTORY MAY BE PICKED RATHER THAN TYPED. `browse` lists one directory,
  * one level deep, on ONE mounted machine, so the operator can choose the path

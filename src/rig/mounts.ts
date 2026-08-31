@@ -3,13 +3,21 @@
  *  MOUNT CHOKEPOINT  --  THE ONLY MODULE THAT RUNS AN EXTERNAL COMMAND
  * =============================================================================
  *
- * The rig survey reads directories on other machines. macOS ships no SMB client
- * library, so a share has to be MOUNTED before it can be read, and mounting
- * means asking the operating system. That is the one thing in this codebase
- * that reaches outside the process, and this is the one file that does it.
+ * The rig survey reads directories on other machines, and the two platforms it
+ * runs on reach them differently. macOS ships no SMB client library, so a share
+ * has to be MOUNTED before it can be read; Windows reads a UNC path where it
+ * stands, once a session exists. Either way it means asking the operating
+ * system. That is the one thing in this codebase that reaches outside the
+ * process, and this is the one file that does it.
  *
  * ---------------------------------------------------------------------------
- * THE MOUNT IS READ-ONLY, AND THAT IS ENFORCED BY THE KERNEL
+ * ON macOS THE MOUNT IS READ-ONLY, AND THAT IS ENFORCED BY THE KERNEL
+ *
+ * WINDOWS MAKES A DIFFERENT AND WEAKER PROMISE -- there is no mount and no
+ * per-connection read-only flag to set, so the guarantee is the application's
+ * own. See the WINDOWS section at the foot of this file. The two are carried
+ * apart in `AccessOutcome.guarantee` and printed apart in the UI; do not read
+ * the paragraph below as covering both.
  *
  * Every mount this module makes carries `-o rdonly`. From `mount(8)`: *"Mount
  * the file system read-only (even the super-user may not write it)."* That is a
@@ -37,12 +45,20 @@
  *      and the only one permitted to name `mkdir`.
  *      `test/readonly-enforcement.test.ts` fails the build otherwise.
  *
- *   2. Exactly FOUR commands may be run, all by absolute path, all on the
- *      allowlist below, none built from user input:
+ *   2. Exactly FIVE commands may be run -- the four macOS ones on the
+ *      allowlist below, and one on Windows -- all resolved by absolute path,
+ *      none built from user input:
  *        /sbin/mount        read the mount table. Takes no arguments.
  *        /bin/mkdir         create a LOCAL, EMPTY mountpoint directory.
  *        /sbin/mount_smbfs  mount a share there, read-only.
  *        /sbin/umount       take one of OUR mountpoints away again.
+ *        net use            Windows only, and the whole SMB session API there.
+ *                           Resolved from `%SystemRoot%\System32` rather than
+ *                           found on PATH -- see `netCommand`. It is not in
+ *                           `ALLOWED_COMMANDS` because that constant holds
+ *                           literals and this one is built from the
+ *                           environment; it is fenced by being built, not
+ *                           accepted.
  *      They run through `execFile`, never `exec`, so THERE IS NO SHELL and
  *      nothing can be word-split, globbed or chained out of an argument.
  *
@@ -104,7 +120,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { ReadOnlyFs } from '../fs/readonly.ts';
 
-/** The complete set of commands this application may ever run on macOS. */
+/**
+ * The complete set of commands this application may ever run on macOS.
+ *
+ * Not the complete set it may run: Windows adds `net use`, built by
+ * `netCommand` from the system root rather than written down here. See the
+ * CONTRACT above.
+ */
 export const ALLOWED_COMMANDS = Object.freeze({
   mount: '/sbin/mount',
   makeDir: '/bin/mkdir',

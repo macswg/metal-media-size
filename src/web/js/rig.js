@@ -12,11 +12,14 @@
  * password lives in memory for the session and is never written to the file,
  * never shown back, and never returned by the API.
  *
- * EVERY MOUNT IS READ-ONLY, enforced by the kernel: `mount_smbfs -o rdonly`
- * means even root cannot write through it. That is a stronger promise than
- * "this application does not write", and the panel says which one is in force
- * per machine rather than asserting it — a share you separately connected in
- * Finder is read-write, and the row says so.
+ * THIS TAB READS ONLY — AND THE BADGE SAYS WHO GUARANTEES THAT. On a Mac the
+ * share is mounted `mount_smbfs -o rdonly`, so even root cannot write through
+ * it; that is a stronger promise than "this application does not write". On
+ * Windows there is no mount and no read-only flag to set, so the promise is
+ * this application's own and the share stays as writable as its permissions
+ * make it. Both are true, they are different, and the pill on each machine row
+ * prints whichever is actually in force rather than the flattering one — a
+ * share you separately connected in Finder is read-write, and the row says so.
  *
  * This tab reads. It mounts shares, walks a directory and compares — it never
  * removes anything, and it produces no manifest.
@@ -31,6 +34,18 @@ import { stat } from './panels.js';
 
 /** Poll interval while a survey is running. */
 const POLL_MS = 900;
+
+/**
+ * How many rows a list paints, and the number its own note quotes.
+ *
+ * ONE constant per cap, because the cap and the sentence explaining it are the
+ * same fact: a note reading "the largest 300" under a table showing 500 rows is
+ * worse than no note at all. The rows arrive CHOSEN biggest-first by the
+ * server, so a capped list is still the findings that cost the most to be wrong
+ * about; `order` then decides how the survivors are read. See `bySong`.
+ */
+const ROLLUP_MAX_ROWS = 500;
+const SECTION_MAX_ROWS = 300;
 
 const PLACEHOLDER = `101 10.10.1.53
 102 10.10.1.54
@@ -929,14 +944,37 @@ export class RigPanel {
 
     const body = h('div.card-body');
 
+    // Two different omissions, and only the first can hide an alarm: a machine
+    // that PLAYS a region and was not read is a finding this list cannot make
+    // at all, where an unread BACKUP leaves every verdict intact and only the
+    // repair route unknown.
+    //
+    // Drawn whether or not there are findings, because a clean list is exactly
+    // when the two are easiest to confuse: "nothing is missing from the
+    // machines we read" and "nothing is missing" look the same on a screen, and
+    // the unread machine is the whole difference between them.
+    const unreadPrimaries = m.unsurveyedPrimaries || [];
+    const unreadBackups = (m.unsurveyedHolders || []).filter((id) => !unreadPrimaries.includes(id));
+    const one = unreadPrimaries.length === 1;
+    const primaryWarning = unreadPrimaries.length
+      ? h(
+          'div.rig-warn',
+          h('b', 'This list cannot be complete. '),
+          `${unreadPrimaries.join(', ')} ${one ? 'plays' : 'play'} a region on this rig and ` +
+            `${one ? 'was' : 'were'} not surveyed, so findings about ` +
+            `${one ? 'that machine' : 'those machines'} cannot be made at all.`,
+        )
+      : null;
+
     if (m.clean) {
-      body.append(
+      append(body, [
         h('div.rig-hint', 'Nothing current is missing from any machine that was surveyed.'),
+        primaryWarning,
         // Still worth drawing: "nothing missing" and "nobody looked" are the
         // two answers this strip exists to keep apart, and a clean list is
         // exactly when they are easiest to confuse.
         this.regionStrip(m.byRegion),
-      );
+      ]);
     } else {
       body.appendChild(
         h(
@@ -951,23 +989,7 @@ export class RigPanel {
         ),
       );
 
-      // Two different omissions, and only the first can hide an alarm: a
-      // machine that PLAYS a region and was not read is a finding this list
-      // cannot make at all, where an unread BACKUP leaves every verdict intact
-      // and only the repair route unknown.
-      const unreadPrimaries = m.unsurveyedPrimaries || [];
-      const unreadBackups = (m.unsurveyedHolders || []).filter((id) => !unreadPrimaries.includes(id));
-      if (unreadPrimaries.length) {
-        body.appendChild(
-          h(
-            'div.rig-warn',
-            h('b', 'This list cannot be complete. '),
-            `${unreadPrimaries.join(', ')} ${unreadPrimaries.length === 1 ? 'plays' : 'play'} some of these regions and ` +
-              `${unreadPrimaries.length === 1 ? 'was' : 'were'} not surveyed, so findings about ` +
-              `${unreadPrimaries.length === 1 ? 'that machine' : 'those machines'} cannot be made at all.`,
-          ),
-        );
-      }
+      if (primaryWarning) body.appendChild(primaryWarning);
       if (unreadBackups.length) {
         body.appendChild(
           h(
@@ -989,7 +1011,7 @@ export class RigPanel {
           key: 'rig.missing',
           columns: missingCols(),
           rows,
-          max: 500,
+          max: ROLLUP_MAX_ROWS,
           // By song, but never across the state groups: the alarms stay at the
           // top, which is the entire reason the states exist.
           order: bySongWithinState(rows),
@@ -997,7 +1019,7 @@ export class RigPanel {
           rowClass: (r) => `miss-${r.state}`,
         })),
       );
-      const shown = Math.min(rows.length, 500);
+      const shown = Math.min(rows.length, ROLLUP_MAX_ROWS);
       if (rows.length > shown) {
         body.appendChild(
           h('div.card-note', `Showing the worst ${count(shown)} of ${count(rows.length)}, listed by song within each state.`),
@@ -1145,13 +1167,13 @@ export class RigPanel {
         key: 'rig.misplaced',
         columns: misplacedCols(),
         rows,
-        max: 500,
+        max: ROLLUP_MAX_ROWS,
         order: bySongWithinState(rows),
         maxHeight: 440,
         rowClass: (r) => `misp-${r.state}`,
       })),
     );
-    const shown = Math.min(rows.length, 500);
+    const shown = Math.min(rows.length, ROLLUP_MAX_ROWS);
     if (rows.length > shown) {
       body.appendChild(
         h('div.card-note', `Showing the worst ${count(shown)} of ${count(rows.length)}, listed by song within each state.`),
@@ -1284,8 +1306,8 @@ function section(title, rows, tone, columns, widthKey) {
       key: widthKey,
       columns,
       rows,
-      max: 300,
-      // The 300 kept are the 300 biggest; the order they are READ in is by song.
+      max: SECTION_MAX_ROWS,
+      // The kept rows are the BIGGEST; the order they are READ in is by song.
       order: bySong,
       maxHeight: 320,
       rowClass: () => tone,
@@ -1308,8 +1330,11 @@ function section(title, rows, tone, columns, widthKey) {
       h('span.spacer'),
       toggle,
     ),
-    rows.length > 300
-      ? h('div.rig-hint', `Showing the largest 300 of ${count(rows.length)}, by song.`)
+    rows.length > SECTION_MAX_ROWS
+      ? h(
+          'div.rig-hint',
+          `Showing the largest ${count(SECTION_MAX_ROWS)} of ${count(rows.length)}, by song.`,
+        )
       : null,
     list,
   );

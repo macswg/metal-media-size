@@ -2,6 +2,83 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-30 — a quality pass over the rig work, and the warning that stayed quiet
+
+> *"Quality pass over the recent rig work"* — the user
+
+No new features. A review of everything that landed across v0.6–v0.10 for
+duplication, dead paths, and drift between what the docs say and what the code
+does. Four things came out of it; one of them was a real defect.
+
+**The defect: `unsurveyedPrimaries` could not see the machine it was written
+for.** v0.9.0 seeded `byRegion` from the ALLOCATION so a region nobody looked at
+says so instead of being absent — the fix that made region 0 visible when 306
+and 307 had never been surveyed. `unsurveyedPrimaries`, which is what the loud
+*"This list cannot be complete"* warning is keyed on, was left derived from the
+ROWS. And an unread primary produces no rows at all: nobody reports a region-0
+file missing when nobody read a machine that holds one. So in exactly the case
+the strip was added for, the warning said nothing.
+
+    survey 103 only; 306 plays region 0 and was never read
+
+    before   byRegion  r0=unsurveyed        unsurveyedPrimaries  []
+    after    byRegion  r0=unsurveyed        unsurveyedPrimaries  ['306']
+
+It is seeded from the allocation now, by the same route and for the same reason.
+Two consequences worth stating:
+
+- **It is no longer a subset of `unsurveyedHolders`**, and that is deliberate.
+  The two answer different questions. `unsurveyedHolders` stays rows-derived
+  because it is about repair routes for the files that ARE listed — "some of
+  what is listed as missing may in fact be restorable from the rig" is only
+  true of the rows in front of you. `unsurveyedPrimaries` is about the rows
+  that are NOT there, which is the more serious omission.
+- **The warning is drawn on a clean list too.** It used to live inside the
+  not-clean branch, which is the wrong half: "nothing is missing from the
+  machines we read" and "nothing is missing" look identical on a screen, and an
+  unread machine is the whole difference between them.
+
+Two test assertions moved rather than broke, and both moved towards the truth —
+a fixture with two regions has two actors, and an unread second actor is an
+unread actor. A new test pins the region-0 case directly: *names 306 as an
+unread PRIMARY even though it produced no rows at all*.
+
+**The drift: three file headers were still describing a macOS-only feature.**
+The Windows port landed in v0.10.0 and the *bodies* were careful — the per-
+machine badge, the per-platform caveat, `AccessOutcome.guarantee`. The headers
+were not. `src/server/routes/rig.ts`, `src/rig/mounts.ts` and `src/web/js/rig.js`
+each still opened with a flat *"EVERY MOUNT IS READ-ONLY, enforced by the
+kernel"*, which is the single thing CLAUDE.md says never to flatten — stated at
+the top of the three files a reader opens first. All three now carry both
+promises, told apart, as the UI already did.
+
+And `mounts.ts` promised **"Exactly FOUR commands"** in its CONTRACT block while
+running five. The fifth is `net use`, built from `%SystemRoot%` by `netCommand`
+rather than written down in `ALLOWED_COMMANDS` — fenced by being *built* rather
+than accepted, which is worth saying out loud in a chokepoint's own contract
+rather than leaving to a reader to notice. The enforcement test already asserted
+five; only its title said four. CLAUDE.md said four too.
+
+**Duplication.** The triple guard `machineId === null || error !== null ||
+!comparison` — "this machine told us nothing" — was written out four times
+across the two roll-ups. Both roll-ups have to answer it identically: a machine
+counted as read by one and unread by the other would put a file in `presentOn`
+here and `unknownOn` there. It is one generator now, `surveyedMachines`, and
+each roll-up makes one pass instead of two.
+
+**And the caps that could drift from their own captions.** `500` appeared four
+times across the two roll-up cards and `300` three times in `section()`, each
+time as both the cap and the number the note quotes. A note reading "the largest
+300" under a table showing 500 rows is worse than no note; `ROLLUP_MAX_ROWS` and
+`SECTION_MAX_ROWS` make it one fact.
+
+Nothing dead: every export in `src/rig/` is reachable, and the ones that look
+unused are used by a test or as a return type.
+
+669 tests pass. Checked in the browser on both branches of the missing card —
+the warning renders on a clean list and on a list with findings, and the backup
+hint stays a separate, quieter sentence.
+
 ## 2026-08-30 — the rig survey on Windows, and two promises told apart
 
 > *"Fix both of those things. Also, can we make the rig survey work on Windows?"*
