@@ -102,14 +102,37 @@
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { ReadOnlyFs } from '../fs/readonly.ts';
 
-/** The complete set of commands this application may ever run. */
+/** The complete set of commands this application may ever run on macOS. */
 export const ALLOWED_COMMANDS = Object.freeze({
   mount: '/sbin/mount',
   makeDir: '/bin/mkdir',
   mountSmbfs: '/sbin/mount_smbfs',
   umount: '/sbin/umount',
 });
+
+/**
+ * The one command this application may run on Windows, resolved from the
+ * system root rather than found on PATH -- a `net.exe` earlier in PATH than
+ * System32 is exactly the substitution an absolute path exists to prevent.
+ *
+ * `net use` is Windows' whole SMB session API from a command line. There is no
+ * mount and no mountpoint: a UNC path is read directly once the session exists.
+ */
+export function netCommand(env: NodeJS.ProcessEnv = process.env): string {
+  const root = env['SystemRoot'] || env['windir'] || 'C:\\Windows';
+  return join(root, 'System32', 'net.exe');
+}
+
+/** Which implementation a platform gets. Injected so both can be tested anywhere. */
+export type RigPlatform = 'darwin' | 'win32';
+
+export function rigPlatformOf(platform: string = process.platform): RigPlatform | null {
+  if (platform === 'darwin') return 'darwin';
+  if (platform === 'win32') return 'win32';
+  return null;
+}
 
 /**
  * Where this application puts its own mountpoints.
@@ -359,8 +382,15 @@ export interface MountOutcome {
   otherWritableMount: string | null;
 }
 
-/** Every SMB share mounted on this Mac right now. */
-export async function listSmbMounts(): Promise<SmbMount[]> {
+/**
+ * Every SMB share mounted on this Mac right now.
+ *
+ * Empty off macOS: Windows has no mount table to read, because it has no
+ * mounts -- a UNC path is read where it stands. Returning `[]` rather than
+ * running a command that is not there keeps the caller from having to know.
+ */
+export async function listSmbMounts(platform: string = process.platform): Promise<SmbMount[]> {
+  if (rigPlatformOf(platform) !== 'darwin') return [];
   const text = await run(ALLOWED_COMMANDS.mount, [], { timeoutMs: 10_000 });
   return parseMountTable(text);
 }
@@ -509,4 +539,177 @@ export async function mountShare(req: MountRequest): Promise<MountOutcome> {
 export async function unmountShare(mountPoint: string): Promise<void> {
   const abs = assertInMountRoot(mountPoint);
   await run(ALLOWED_COMMANDS.umount, [abs], { timeoutMs: 20_000 });
+}
+
+/* ===========================================================================
+ *  WINDOWS  --  NO MOUNT, NO MOUNTPOINT, AND A WEAKER PROMISE SAID OUT LOUD
+ * ===========================================================================
+ *
+ * Windows reads `\\host\share` where it stands. There is nothing to mount, so
+ * there is no mountpoint to make and none to take away -- and, crucially,
+ * **no `-o rdonly`**. Windows has no per-connection read-only flag at all.
+ *
+ * That difference is the whole reason this port was resisted, and it is not
+ * papered over anywhere:
+ *
+ *   macOS    the KERNEL refuses every write through our mountpoint, from any
+ *            process on the Mac including root. `guarantee: 'kernel'`.
+ *   Windows  THIS APPLICATION cannot write -- `ReadOnlyFs` exposes readdir,
+ *            lstat and a read-only open, no write primitive exists in `src/`
+ *            outside the export writer, and the survey never opens a file at
+ *            all -- but nothing stops another program on the PC from writing
+ *            to that share if the share's own permissions allow it.
+ *            `guarantee: 'application'`.
+ *
+ * Both are true statements; they are different statements, and the UI prints
+ * whichever one is actually in force rather than the flattering one. If you are
+ * tempted to collapse them into a single "read-only" badge: don't. The badge is
+ * the only place an operator learns which promise they have.
+ *
+ * THE CREDENTIAL reaches `net use` as an argument, exactly as it reaches
+ * `mount_smbfs` in a URL, and for the same reason -- there is no other route
+ * into either. See the header above; the user was told and chose it.
+ *
+ * A PASSWORD IS ALWAYS PASSED, even when empty, because `net use \\h\s /user:x`
+ * with no password PROMPTS, and a server has no terminal to prompt on. `''` is
+ * the guest case and the Windows analogue of `mount_smbfs -N`.
+ * =========================================================================== */
+
+/** `\\host\share`, from parts that have each been through the allowlists. */
+export function uncPath(host: string, share: string): string {
+  return `\\\\${assertHost(host)}\\${assertShare(share)}`;
+}
+
+/**
+ * `net use \\host\share <password> /user:<name> /persistent:no`
+ *
+ * `/persistent:no` so nothing is left behind in the operator's profile for the
+ * next reboot to restore: this session lasts as long as the survey does, like
+ * everything else the rig tab holds.
+ */
+export function netUseArgs(req: Pick<MountRequest, 'username' | 'password'>, unc: string): string[] {
+  const args = ['use', unc];
+  // Positional, and it must be present. See the header: an absent password
+  // makes `net use` prompt, and there is no `-N` to turn that off.
+  args.push(req.password ?? '');
+  if (req.username) args.push(`/user:${req.username}`);
+  args.push('/persistent:no');
+  return args;
+}
+
+/** `net use \\host\share /delete /y` -- only ever for a session we made. */
+export function netDeleteArgs(unc: string): string[] {
+  return ['use', unc, '/delete', '/y'];
+}
+
+/**
+ * What reaching a machine produced, whichever platform did it.
+ *
+ * `readRoot` is the one field the survey needs: the absolute path this machine
+ * is read through. A mountpoint on macOS, a UNC share on Windows.
+ */
+export interface AccessOutcome {
+  host: string;
+  share: string;
+  readRoot: string;
+  /** macOS: the mountpoint we made or reused. Null on Windows -- there is none. */
+  mountPoint: string | null;
+  /** Windows: the UNC we authenticated and must disconnect. Null otherwise. */
+  session: string | null;
+  /** True when the OS already had this connection and we did not make it. */
+  preexisting: boolean;
+  /** WHO enforces the read-only promise. Never assumed; see the header. */
+  guarantee: ReadGuarantee;
+  /** macOS: a separate read-WRITE mount of the same share somebody else made. */
+  otherWritableMount: string | null;
+}
+
+export type ReadGuarantee = 'kernel' | 'application';
+
+/**
+ * Reach one machine, by whatever means the platform has.
+ *
+ * "Connected" means the same thing on both: a path this application has
+ * successfully READ through once. On macOS that is the mount table reporting
+ * our read-only mount; on Windows it is a directory listing of the share root.
+ * Either way, a target that comes back has been proven, not assumed.
+ */
+export async function connectShare(
+  req: MountRequest,
+  platform: string = process.platform,
+): Promise<AccessOutcome> {
+  const kind = rigPlatformOf(platform);
+  if (kind === 'darwin') {
+    const m = await mountShare(req);
+    return {
+      host: m.host,
+      share: m.share,
+      readRoot: m.mountPoint,
+      mountPoint: m.mountPoint,
+      session: null,
+      preexisting: m.alreadyMounted,
+      guarantee: 'kernel',
+      otherWritableMount: m.otherWritableMount,
+    };
+  }
+  if (kind === 'win32') return connectWindowsShare(req);
+  throw new RigCommandError(
+    `The rig survey needs macOS or Windows; this is ${platform}. Everything else in the analyser works here.`,
+  );
+}
+
+async function connectWindowsShare(req: MountRequest): Promise<AccessOutcome> {
+  const host = assertHost(req.host);
+  const share = assertShare(req.share);
+  const unc = uncPath(host, share);
+  const timeoutMs = req.timeoutMs ?? DEFAULT_MOUNT_TIMEOUT_MS;
+
+  // Only when a credential was supplied. Without one, Windows uses whatever
+  // access the operator's own session already has -- and we must not disconnect
+  // a session we did not make, which is why `session` stays null here.
+  let session: string | null = null;
+  if (req.username) {
+    await run(netCommand(), netUseArgs(req, unc), { timeoutMs });
+    session = unc;
+  }
+
+  // Prove it. A share that authenticates but cannot be listed is not a machine
+  // this survey can read, and finding that out now beats finding it out per
+  // machine in the middle of a walk.
+  const rofs = new ReadOnlyFs({ allowedRoots: [unc], dirTimeoutMs: timeoutMs });
+  await rofs.readdir(unc);
+
+  return {
+    host,
+    share,
+    readRoot: unc,
+    mountPoint: null,
+    session,
+    preexisting: session === null,
+    // NOT 'kernel'. Windows has no per-connection read-only flag; this promise
+    // is made by the application, and the UI says so in those words.
+    guarantee: 'application',
+    otherWritableMount: null,
+  };
+}
+
+/**
+ * Let go of one machine.
+ *
+ * macOS unmounts OUR mountpoint, jailed to `MOUNT_ROOT`. Windows drops the
+ * session we authenticated -- and only that one: a connection the operator
+ * made themselves is left exactly where it is, the same rule that stops the
+ * Mac side unmounting a volume it did not mount.
+ */
+export async function disconnectShare(
+  target: Pick<AccessOutcome, 'mountPoint' | 'session'>,
+  platform: string = process.platform,
+): Promise<void> {
+  if (rigPlatformOf(platform) === 'win32') {
+    if (!target.session) return;
+    await run(netCommand(), netDeleteArgs(target.session), { timeoutMs: 20_000 });
+    return;
+  }
+  if (!target.mountPoint) return;
+  await unmountShare(target.mountPoint);
 }

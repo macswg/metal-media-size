@@ -34,7 +34,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../../src/server/app.ts';
 import type { AppContext } from '../../src/server/context.ts';
@@ -42,10 +42,18 @@ import { makeFixture, type Fixture } from './fixture.ts';
 import {
   assertHost,
   assertInMountRoot,
+  connectShare,
+  disconnectShare,
+  netCommand,
+  netDeleteArgs,
+  netUseArgs,
+  rigPlatformOf,
+  uncPath,
   assertShare,
   findMount,
   InvalidTargetError,
   isOurMountPoint,
+  listSmbMounts,
   mountArgs,
   MOUNT_ROOT,
   mountPointFor,
@@ -190,6 +198,128 @@ describe('the mount is read-only, and that is the whole protection', () => {
 });
 
 // ===========================================================================
+/**
+ * ============================================================================
+ *  WINDOWS  --  THE SAME SURVEY, A DIFFERENT PROMISE
+ * ============================================================================
+ *
+ * The port was resisted for one reason, recorded in CLAUDE.md: Windows has no
+ * `-o rdonly`, so the kernel-enforced read-only guarantee cannot be had there.
+ * The instruction was never "do not port it" -- it was "do not port it by
+ * QUIETLY dropping that guarantee". So these assert the two things that keep it
+ * loud: which promise each platform reports, and that a password never reaches
+ * a prompt on a machine with no terminal to prompt on.
+ *
+ * None of this runs a command. The argv is built by pure functions and asserted
+ * literally, exactly as the macOS side is.
+ */
+describe('the rig survey on Windows', () => {
+  it('reads a UNC share, with the host and share through the same allowlists', () => {
+    expect(uncPath('10.10.1.53', 'd3 Projects')).toBe('\\\\10.10.1.53\\d3 Projects');
+    // The allowlists are not bypassed just because the path shape changed.
+    expect(() => uncPath('10.10.1.999', 'd3 Projects')).toThrow(InvalidTargetError);
+    expect(() => uncPath('10.10.1.53', 'a/b')).toThrow(InvalidTargetError);
+    expect(() => uncPath('10.10.1.53', 'a"b')).toThrow(InvalidTargetError);
+  });
+
+  it('runs net.exe from the system root, never off PATH', () => {
+    // A `net.exe` earlier in PATH than System32 is exactly the substitution an
+    // absolute path exists to prevent.
+    expect(netCommand({ SystemRoot: 'C:\\Windows' })).toBe('C:\\Windows/System32/net.exe'.replace(/\//g, sepOf()));
+    expect(netCommand({ windir: 'D:\\Win' })).toContain('System32');
+    expect(netCommand({})).toContain('System32');
+  });
+
+  it('ALWAYS passes a password, because net use prompts without one', () => {
+    // The Windows analogue of `mount_smbfs -N`. A server has no terminal to
+    // prompt on, so a prompt is a hang, not a question.
+    expect(netUseArgs({ username: 'd3' }, '\\\\h\\s')).toEqual([
+      'use',
+      '\\\\h\\s',
+      '',
+      '/user:d3',
+      '/persistent:no',
+    ]);
+    expect(netUseArgs({ username: 'd3', password: 'pw' }, '\\\\h\\s')).toEqual([
+      'use',
+      '\\\\h\\s',
+      'pw',
+      '/user:d3',
+      '/persistent:no',
+    ]);
+  });
+
+  it('never leaves the connection behind for the next reboot', () => {
+    expect(netUseArgs({}, '\\\\h\\s')).toContain('/persistent:no');
+  });
+
+  it('disconnects with /delete, and only ever one share', () => {
+    expect(netDeleteArgs('\\\\h\\s')).toEqual(['use', '\\\\h\\s', '/delete', '/y']);
+  });
+
+  it('does not disconnect a session it did not make', async () => {
+    // We only ran `net use` when a credential was supplied. Anything else is
+    // the operator's own connection, and dropping it would reach outside what
+    // this application connected -- the same rule that stops the Mac side
+    // unmounting a volume it did not mount.
+    await expect(
+      disconnectShare({ mountPoint: null, session: null }, 'win32'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('refuses a platform that has neither implementation, in words', async () => {
+    expect(rigPlatformOf('linux')).toBeNull();
+    expect(rigPlatformOf('darwin')).toBe('darwin');
+    expect(rigPlatformOf('win32')).toBe('win32');
+    await expect(
+      connectShare({ host: '10.10.1.53', share: 'd3 Projects' }, 'linux'),
+    ).rejects.toThrow(/macOS or Windows/);
+  });
+
+  /**
+   * THE ASSUMPTION THE WINDOWS FENCE RESTS ON.
+   *
+   * `ReadOnlyFs` refuses any path that does not resolve inside an allowed root,
+   * and on Windows that root is a UNC share. This asserts the platform
+   * behaviour that makes that work -- run against `path.win32` explicitly, so
+   * it is checked on the Mac where the tests actually run. If Node ever changed
+   * how it resolves a UNC path, the fence would move and this fires first.
+   */
+  it('fences a UNC share the way it fences a directory — per SHARE, not per host', () => {
+    const root = String.raw`\\10.10.1.53\d3 Projects`;
+    // The same normalise/compare `ReadOnlyFs` performs.
+    const norm = (r: string): string => {
+      const x = win32.resolve(r);
+      return x.endsWith(win32.sep) ? x.slice(0, -1) : x;
+    };
+    const isUnder = (c: string, r: string): boolean => c === r || c.startsWith(r + win32.sep);
+
+    expect(win32.isAbsolute(root)).toBe(true);
+    expect(norm(root)).toBe(root);
+    expect(win32.join(root, 'SHOW/objects/VideoFile')).toBe(
+      String.raw`\\10.10.1.53\d3 Projects\SHOW\objects\VideoFile`,
+    );
+
+    expect(isUnder(norm(win32.join(root, 'SHOW')), norm(root))).toBe(true);
+    // A DIFFERENT share on the same machine is outside. The fence is the share,
+    // not the host -- otherwise surveying one share could read another.
+    expect(isUnder(norm(String.raw`\\10.10.1.53\other`), norm(root))).toBe(false);
+    expect(isUnder(norm(String.raw`C:\Windows`), norm(root))).toBe(false);
+  });
+
+  it('has no mount table to read off macOS, and does not go looking for one', async () => {
+    // `/sbin/mount` does not exist on Windows; running it would fail with an
+    // ENOENT that reads like a broken install rather than "there are no mounts".
+    await expect(listSmbMounts('win32')).resolves.toEqual([]);
+    await expect(listSmbMounts('linux')).resolves.toEqual([]);
+  });
+});
+
+/** `path.join` uses the platform separator; the test states the expectation. */
+function sepOf(): string {
+  return process.platform === 'win32' ? '\\' : '/';
+}
+
 describe('the mountpoint jail', () => {
   it('puts each machine under the application\'s own root', () => {
     expect(mountPointFor('10.10.1.53')).toBe(`${MOUNT_ROOT}/10.10.1.53`);
@@ -1553,7 +1683,7 @@ describe('choosing the directory off the machine instead of typing it', () => {
   const share = (): string => join(sandbox, 'share');
 
   it('lists the folders one level down, with the path the survey takes', async () => {
-    const listing = await browseDirectory({ mountPoint: share(), directory: 'SHOW_2026' });
+    const listing = await browseDirectory({ readRoot: share(), directory: 'SHOW_2026' });
     expect(listing.directories.map((d) => d.name)).toEqual([
       '01_Media',
       '02_Backup',
@@ -1566,14 +1696,14 @@ describe('choosing the directory off the machine instead of typing it', () => {
   });
 
   it('orders 10 after 2, because a show numbers its folders', async () => {
-    const listing = await browseDirectory({ mountPoint: share(), directory: 'SHOW_2026' });
+    const listing = await browseDirectory({ readRoot: share(), directory: 'SHOW_2026' });
     const names = listing.directories.map((d) => d.name);
     expect(names.indexOf('2_Middle')).toBeLessThan(names.indexOf('10_Late'));
   });
 
   it('counts the files sitting here without opening one', async () => {
     const listing = await browseDirectory({
-      mountPoint: share(),
+      readRoot: share(),
       directory: 'SHOW_2026/01_Media',
     });
     expect(listing.fileCount).toBe(2);
@@ -1584,10 +1714,10 @@ describe('choosing the directory off the machine instead of typing it', () => {
   });
 
   it('knows where the way back up is, and that the share root has none', async () => {
-    expect((await browseDirectory({ mountPoint: share(), directory: '' })).parent).toBeNull();
-    expect((await browseDirectory({ mountPoint: share(), directory: 'SHOW_2026' })).parent).toBe('');
+    expect((await browseDirectory({ readRoot: share(), directory: '' })).parent).toBeNull();
+    expect((await browseDirectory({ readRoot: share(), directory: 'SHOW_2026' })).parent).toBe('');
     expect(
-      (await browseDirectory({ mountPoint: share(), directory: 'SHOW_2026/01_Media' })).parent,
+      (await browseDirectory({ readRoot: share(), directory: 'SHOW_2026/01_Media' })).parent,
     ).toBe('SHOW_2026');
   });
 
@@ -1595,13 +1725,13 @@ describe('choosing the directory off the machine instead of typing it', () => {
     // The route refuses `..` with a readable message; this is the structural
     // refusal underneath it, which holds whatever the route does.
     await expect(
-      browseDirectory({ mountPoint: share(), directory: '../outside-the-share' }),
+      browseDirectory({ readRoot: share(), directory: '../outside-the-share' }),
     ).rejects.toMatchObject({ code: 'PATH_NOT_ALLOWED' });
   });
 
   it('does not follow a symlink out, and does not offer one as a folder', async () => {
     symlinkSync(join(sandbox, 'outside-the-share'), join(share(), 'escape-hatch'), 'dir');
-    const listing = await browseDirectory({ mountPoint: share(), directory: '' });
+    const listing = await browseDirectory({ readRoot: share(), directory: '' });
     expect(listing.directories.map((d) => d.name)).toEqual(['SHOW_2026']);
     // Nor is it quietly counted as a file, which would misdescribe the place.
     expect(listing.fileCount).toBe(0);
@@ -1612,7 +1742,7 @@ describe('choosing the directory off the machine instead of typing it', () => {
     for (let i = 0; i < MAX_BROWSE_ENTRIES + 5; i += 1) {
       mkdirSync(join(many, `d${String(i).padStart(4, '0')}`), { recursive: true });
     }
-    const listing = await browseDirectory({ mountPoint: sandbox, directory: 'many' });
+    const listing = await browseDirectory({ readRoot: sandbox, directory: 'many' });
     expect(listing.directories).toHaveLength(MAX_BROWSE_ENTRIES);
     expect(listing.truncated).toBe(true);
   });
@@ -1639,8 +1769,8 @@ describe('choosing the directory off the machine instead of typing it', () => {
 
     it('lists one machine, and says which one it read', async () => {
       await req('POST', '/api/rig/targets', { text: '301 10.10.1.53\n302 10.10.1.54' });
-      mountAt(ctx, '10.10.1.53', share());
-      mountAt(ctx, '10.10.1.54', join(sandbox, 'outside-the-share'));
+      connectAt(ctx, '10.10.1.53', share());
+      connectAt(ctx, '10.10.1.54', join(sandbox, 'outside-the-share'));
 
       const { status, body } = await req('GET', '/api/rig/browse?directory=SHOW_2026');
       expect(status).toBe(200);
@@ -1682,14 +1812,15 @@ describe('choosing the directory off the machine instead of typing it', () => {
 });
 
 /**
- * Put a mountpoint on a target without mounting anything.
+ * Put a read root on a target without connecting to anything.
  *
- * `connect()` runs `mount_smbfs`, which needs a rig on the other end of a
- * network. The browse route only ever reads `mountPoint`, so a local directory
- * stands in for one exactly.
+ * `connect()` runs `mount_smbfs` or `net use`, which need a rig on the other
+ * end of a network. Everything downstream only ever reads `readRoot`, so a
+ * local directory stands in for one exactly -- which is also the point: the
+ * survey does not care whether that path is a mountpoint or a UNC share.
  */
-function mountAt(context: AppContext, host: string, mountPoint: string): void {
+function connectAt(context: AppContext, host: string, readRoot: string): void {
   const target = context.rig.getTargets().find((t) => t.host === host);
   if (!target) throw new Error(`No target ${host} in the session`);
-  (target as { mountPoint: string | null }).mountPoint = mountPoint;
+  (target as { readRoot: string | null }).readRoot = readRoot;
 }

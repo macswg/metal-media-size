@@ -345,14 +345,44 @@ instead of the archive. **The id stays `rig`** everywhere else (route, panel,
 tab id, saved links); only the label moved. It is the only feature that touches
 anything outside this Mac, and it is fenced accordingly.
 
-### The mount is read-only, and the kernel enforces it
+### Two platforms, two promises, and the UI says which
 
-`src/rig/mounts.ts` mounts every share with `mount_smbfs -N -o rdonly,nobrowse`.
-From `mount(8)`: *"even the super-user may not write it."* That is a stronger
-guarantee than "this application does not write" — **nothing** on this Mac can
-write through those mountpoints, Finder and root included. Verified on the real
-rig: `touch` and `mkdir` both fail with `Read-only file system`, locally, before
-anything reaches the machine.
+The survey runs on **macOS and Windows**, and they do not make the same promise.
+`AccessOutcome.guarantee` carries which one is in force, per machine, and the
+badge prints it. **Never collapse the two into a flat "read-only".** That is the
+single thing the port was resisted over, and the badge is the only place an
+operator learns which they have.
+
+**macOS — `guarantee: 'kernel'`.** `src/rig/mounts.ts` mounts every share with
+`mount_smbfs -N -o rdonly,nobrowse`. From `mount(8)`: *"even the super-user may
+not write it."* That is stronger than "this application does not write" —
+**nothing** on this Mac can write through those mountpoints, Finder and root
+included. Verified on the real rig: `touch` and `mkdir` both fail with
+`Read-only file system`, locally, before anything reaches the machine.
+
+**Windows — `guarantee: 'application'`.** There is no mount and no mountpoint: a
+UNC path is read where it stands, and Windows has **no per-connection read-only
+flag at all**. So the promise is the application's own — `ReadOnlyFs` exposes
+`readdir`, `lstat` and a read-only open and nothing else, no write primitive
+exists in `src/` outside `writer.ts`, and the survey never opens a file — while
+the share itself stays as writable as its own permissions make it. That is a
+weaker statement, it is a true one, and it is printed in those words.
+
+- `net use` is the only command Windows runs, from `%SystemRoot%\System32` and
+  never off PATH. `/persistent:no`, so nothing survives a reboot.
+- **A password is always passed, even empty**, because `net use \\h\s /user:x`
+  with no password *prompts*, and a server has no terminal to prompt on. `''` is
+  the guest case and the analogue of `mount_smbfs -N`.
+- A session is dropped on disconnect **only when we made it** — the same rule
+  that stops the Mac side unmounting a volume it did not mount.
+- The fence is the **share, not the host**: `\\10.10.1.53\other` is not under
+  `\\10.10.1.53\d3 Projects`. Pinned against `path.win32` so it is checked on
+  the Mac where the tests run.
+
+**Neither is Linux.** `rigPlatformOf` returns null there and the tab says so in
+words instead of failing at the Connect button with `spawn /sbin/mount_smbfs
+ENOENT`, which reads like a broken install. Everything else in the analyser
+works on Linux.
 
 `readOnly` is read back out of the mount table, never assumed, and `mountShare`
 **refuses to return** a mount that did not come back read-only. A share the
@@ -678,13 +708,19 @@ UI and written into the FreeFileSync manifest); every path-boundary check uses
 `C:\archive`; `better-sqlite3` ships `win32-x64` and `win32-arm64` prebuilds, so
 no build tools are needed.
 
-**The rig survey is the one macOS-only feature.** `src/rig/mounts.ts` runs
-`/sbin/mount_smbfs` and friends. On Windows there is nothing to mount — a UNC
-path is read directly, and `ReadOnlyFs` would fence it exactly as it fences
-anything else — but there is also no `-o rdonly` equivalent, so the read-only
-guarantee would have to come from the share's own permissions instead of from
-the kernel. Do not port it by quietly dropping that guarantee; it is the reason
-the feature is shaped the way it is.
+**The rig survey now runs on Windows too**, at the user's request — see "Two
+platforms, two promises" above. The rule it was held back by is unchanged and
+was honoured rather than dropped: on Windows there is no `-o rdonly`, so the
+guarantee comes from the application instead of the kernel, and the difference
+is stated per machine in the UI, in the caveat, in `AccessOutcome.guarantee` and
+in `test/readonly-enforcement.test.ts`. **Do not flatten it back into one
+badge.**
+
+**The minimum Node is 22.6, not 22.** Running TypeScript directly needs
+`--experimental-strip-types`, which arrived in a 22.x point release, so a
+major-only check passes on 22.0 and the server then dies with `bad option` —
+an error pointing nowhere near the real problem. Both launchers compare
+major.minor; `test/portability.test.ts` pins that.
 
 ## Stack
 

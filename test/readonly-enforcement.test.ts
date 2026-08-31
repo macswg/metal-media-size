@@ -287,6 +287,20 @@ describe('read-only enforcement', () => {
     // And there are no others.
     expect(source.match(/^  \w+: '\/[^']+',$/gm)).toHaveLength(4);
 
+    // WINDOWS adds exactly one command, and it is built from the system root
+    // rather than found on PATH -- a `net.exe` earlier in PATH than System32 is
+    // exactly the substitution an absolute path exists to prevent.
+    expect(source).toMatch(/join\(root, 'System32', 'net\.exe'\)/);
+    expect(source).not.toMatch(/'net\.exe'\s*[,)]\s*$/m);
+    // No second way to reach a share: no drive letters, no PowerShell, no
+    // registry, and nothing that could mount one somewhere writable.
+    expect(source).not.toMatch(/powershell|cmd\.exe|reg\.exe|wmic|robocopy|xcopy/i);
+
+    // A password must never reach a prompt. macOS has `-N`; Windows has no
+    // such flag, so an empty password is passed positionally instead, and a
+    // server with no terminal can never be left waiting on one.
+    expect(source).toMatch(/args\.push\(req\.password \?\? ''\)/);
+
     // EVERY mount is read-only. This is the whole protection for the playback
     // machines and it rests on one option string.
     expect(source).toMatch(/'rdonly,nobrowse'/);
@@ -300,6 +314,13 @@ describe('read-only enforcement', () => {
 
     // Nothing here may remove a directory or eject a disk.
     expect(source).not.toMatch(/\bdiskutil\b|\beject\b|\brmdir\b/);
+
+    // THE TWO PROMISES STAY TOLD APART. macOS gets the kernel's; Windows gets
+    // the application's own, because it has no per-connection read-only flag.
+    // A single flat 'read-only' anywhere in here would be the quiet loss the
+    // port was resisted over -- see CLAUDE.md.
+    expect(source).toMatch(/guarantee: 'kernel'/);
+    expect(source).toMatch(/guarantee: 'application'/);
   });
 
   it('the rig session never persists what it holds', () => {

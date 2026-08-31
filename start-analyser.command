@@ -56,12 +56,17 @@ if [ -n "$EXISTING" ]; then
 fi
 
 command -v node >/dev/null 2>&1 || fail "Node is not installed, or is not on PATH.
-   Install Node 22 or newer from https://nodejs.org and run this again."
+   Install Node 22.6 or newer from https://nodejs.org and run this again."
 
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-if [ "$NODE_MAJOR" -lt 22 ]; then
-  fail "Node ${NODE_MAJOR} is too old. This needs Node 22 or newer (it runs
-   TypeScript directly, with no build step)."
+# 22.6, not 22. Running TypeScript directly needs --experimental-strip-types,
+# which arrived in a 22.x POINT release -- so a major-only check passes on
+# 22.0 and the server then dies with "bad option", which points nowhere near
+# the real problem. Compared as one number: 22.6 -> 2206, 24.1 -> 2401.
+NODE_VER="$(node -p 'process.versions.node.split(".")[0]*100 + +process.versions.node.split(".")[1]' 2>/dev/null || echo 0)"
+if [ "$NODE_VER" -lt 2206 ]; then
+  fail "Node $(node --version 2>/dev/null) is too old. This needs Node 22.6 or newer
+   (it runs TypeScript directly, with no build step, and type stripping
+   arrived in 22.6). Node 24 LTS or later is the easy answer."
 fi
 say "node   : $(node --version)"
 

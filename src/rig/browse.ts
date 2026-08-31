@@ -65,21 +65,22 @@ const byName = (a: BrowseEntry, b: BrowseEntry): number =>
  *
  * `directory` is relative to the share root and must already have been through
  * the route's `assertRelativeDirectory`. The fence here is the second check,
- * not the first: `ReadOnlyFs` is constructed with this machine's mountpoint as
+ * not the first: `ReadOnlyFs` is constructed with this machine's read root as
  * its only allowed root, so an escape is refused structurally.
  */
 export async function browseDirectory(opts: {
-  mountPoint: string;
+  /** Mountpoint on macOS, UNC share on Windows. Whatever the machine is read through. */
+  readRoot: string;
   directory: string;
   dirTimeoutMs?: number | undefined;
 }): Promise<BrowseListing> {
   const directory = opts.directory;
   const rofs = new ReadOnlyFs({
-    allowedRoots: [opts.mountPoint],
+    allowedRoots: [opts.readRoot],
     ...(opts.dirTimeoutMs === undefined ? {} : { dirTimeoutMs: opts.dirTimeoutMs }),
   });
 
-  const abs = directory === '' ? opts.mountPoint : join(opts.mountPoint, directory);
+  const abs = directory === '' ? opts.readRoot : join(opts.readRoot, directory);
   const entries = await rofs.readdir(abs);
 
   const directories: BrowseEntry[] = [];

@@ -52,6 +52,23 @@ describe('npm scripts run on cmd.exe as well as on a shell', () => {
     }
   });
 
+  /**
+   * 22.6, not 22. Running TypeScript directly needs `--experimental-strip-types`,
+   * which arrived in a 22.x POINT release -- so a major-only check passes on
+   * Node 22.0 and the server then dies with `bad option`, an error that points
+   * nowhere near the real problem. Both launchers, because both check.
+   */
+  it('both launchers require Node 22.6, not merely Node 22', () => {
+    for (const script of ['start-analyser.command', 'start-analyser.bat']) {
+      const source = readFileSync(join(PROJECT_ROOT, script), 'utf8');
+      expect(source, `${script} must compare the minor version too`).toMatch(/2206/);
+      // The old check read the major and nothing else.
+      expect(source, `${script} still has a major-only check`).not.toMatch(
+        /lss 22\b|-lt 22\b/,
+      );
+    }
+  });
+
   it('quotes globs with double quotes, which cmd.exe strips', () => {
     // cmd.exe leaves single quotes in place, so `--exclude '**/x'` reaches
     // vitest with the quotes attached and matches nothing.

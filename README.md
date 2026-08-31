@@ -22,7 +22,13 @@ yourself in FreeFileSync.
 That is the whole thing. **Start** checks Node, installs dependencies the first
 time, launches the server and opens your browser. **Stop** shuts it down.
 
-You need [Node](https://nodejs.org) 22 or newer installed. Nothing else.
+You need [Node](https://nodejs.org) **22.6 or newer** installed. Nothing else —
+no compiler, no build tools, no build step. It runs on **macOS, Windows and
+Linux**; the one dependency with native code ships prebuilt binaries for all of
+them inside the package, so `npm install` only downloads.
+
+(22.6 rather than 22 because it runs TypeScript directly, and type stripping
+arrived in that point release. Node 24 LTS or later is the easy answer.)
 
 ### First run
 
@@ -166,14 +172,18 @@ superseded. That is what this tool works out.
   and will move to a config file.
 - **Region Gaps (cluster)** — the only view that describes the machines rather
   than the archive: the same question as **Region gaps**, which it sits beside,
-  asked of the playback rig.
+  asked of the playback rig. **macOS and Windows** (not Linux).
   Paste (or import from YAML) a list of addresses, connect, and it walks the
   same directory on every playback machine and compares it with what the archive
   says should be there: current media missing, same-name-different-size,
   superseded media still taking up drive space, files that belong to another
-  machine. **Every share is mounted read-only** (`mount_smbfs -o rdonly`), which
-  the kernel enforces against every process on the Mac including root, and the
-  survey never opens a file — it reads directory entries and stats only. The
+  machine. On macOS **every share is mounted read-only** (`mount_smbfs -o
+  rdonly`), which the kernel enforces against every process on the Mac including
+  root. Windows has no such flag — it reads `\\machine\share` directly, and
+  there the read-only promise is the application's own rather than the kernel's.
+  Each machine's badge says which one you have, because they are not the same
+  promise. Either way the survey never opens a file — it reads directory entries
+  and stats only. The
   directory can be **browsed** off a connected machine rather than typed, which
   matters because a mistyped path surveys an empty directory and reports a rig
   as clean. No address, mountpoint or password is ever written to disk; the list

@@ -58,19 +58,25 @@ where node >nul 2>&1
 if %errorlevel% neq 0 (
   echo.
   echo !! Node is not installed, or is not on PATH.
-  echo    Install Node 22 or newer from https://nodejs.org and run this again.
+  echo    Install Node 22.6 or newer from https://nodejs.org and run this again.
   echo.
   pause
   popd
   exit /b 1
 )
 
-for /f "delims=" %%V in ('node -p "process.versions.node.split('.')[0]"') do set NODEMAJOR=%%V
-if !NODEMAJOR! lss 22 (
+rem 22.6, not 22. Running TypeScript directly needs --experimental-strip-types,
+rem which arrived in a 22.x POINT release -- so a major-only check passes on
+rem 22.0 and the server then dies with "bad option", which points nowhere near
+rem the real problem. Compared as one number: 22.6 -> 2206, 24.1 -> 2401.
+for /f "delims=" %%V in ('node -p "process.versions.node.split('.')[0]*100 + +process.versions.node.split('.')[1]"') do set NODEVER=%%V
+if !NODEVER! lss 2206 (
   echo.
-  echo !! Node !NODEMAJOR! is too old. This needs Node 22 or newer ^(it runs
-  echo    TypeScript directly, with no build step^).
+  echo !! This Node is too old. It needs Node 22.6 or newer ^(it runs TypeScript
+  echo    directly, with no build step, and type stripping arrived in 22.6^).
+  echo    Node 24 LTS or later is the easy answer.
   echo.
+  node --version
   pause
   popd
   exit /b 1

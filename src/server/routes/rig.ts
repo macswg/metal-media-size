@@ -208,14 +208,17 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
     return {
       share,
       targets,
-      connected: targets.filter((t) => t.mountPoint !== null).length,
-      failed: targets.filter((t) => t.mountPoint === null).length,
+      connected: targets.filter((t) => t.readRoot !== null).length,
+      failed: targets.filter((t) => t.readRoot === null).length,
       /**
-       * Every mount this application makes is read-only, enforced by the
-       * kernel. Reported as a count read back from the mount table rather than
-       * asserted, so a UI badge can never claim a protection that is not there.
+       * How many machines are protected by WHICH promise. On macOS the kernel
+       * refuses every write through our mountpoint; on Windows there is no such
+       * flag and the promise is the application's own. Counted from what each
+       * target actually reported, so a UI badge can never claim a protection
+       * that is not in force. See `AccessOutcome.guarantee`.
        */
-      readOnly: targets.filter((t) => t.readOnly).length,
+      kernelReadOnly: targets.filter((t) => t.guarantee === 'kernel').length,
+      applicationReadOnly: targets.filter((t) => t.guarantee === 'application').length,
       /** Machines that are ALSO mounted read-write by somebody else. */
       alsoWritableElsewhere: targets.filter((t) => t.otherWritableMount !== null).length,
     };
@@ -251,23 +254,23 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
     const q = req.query as Query & { host?: string; directory?: string };
     const directory = assertRelativeDirectory(q.directory);
 
-    const mounted = ctx.rig.getTargets().filter((t) => t.mountPoint !== null);
+    const mounted = ctx.rig.getTargets().filter((t) => t.readRoot !== null);
     if (mounted.length === 0) {
-      throw badRequest('not_connected', 'No machine is mounted. Connect first, then browse.');
+      throw badRequest('not_connected', 'No machine is connected. Connect first, then browse.');
     }
     const wanted = typeof q.host === 'string' ? q.host.trim() : '';
     const target = wanted === '' ? mounted[0] : mounted.find((t) => t.host === wanted);
-    if (!target?.mountPoint) {
+    if (!target?.readRoot) {
       throw badRequest(
         'unknown_host',
-        `${wanted || 'That machine'} is not mounted right now, so there is nothing to list.`,
+        `${wanted || 'That machine'} is not connected right now, so there is nothing to list.`,
       );
     }
 
     let listing: Awaited<ReturnType<typeof browseDirectory>>;
     try {
       listing = await browseDirectory({
-        mountPoint: target.mountPoint,
+        readRoot: target.readRoot,
         directory,
         dirTimeoutMs: ctx.cfg.dirTimeoutMs,
       });
@@ -308,9 +311,9 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
 
     const targets = ctx.rig.getTargets();
     if (targets.length === 0) throw badRequest('no_targets', 'Add some machine addresses first.');
-    const mounted = targets.filter((t) => t.mountPoint !== null);
+    const mounted = targets.filter((t) => t.readRoot !== null);
     if (mounted.length === 0) {
-      throw badRequest('not_connected', 'No machine is mounted. Connect first.');
+      throw badRequest('not_connected', 'No machine is connected. Connect first.');
     }
 
     const parse = makeParser(ctx.cfg.parse.pattern, ctx.cfg.parse.flags);
@@ -358,7 +361,7 @@ export function registerRigRoutes(app: FastifyInstance, ctx: AppContext): void {
       for (const r of regions ?? []) expected.push(...(expectedByRegion.get(r) ?? []));
       return {
         target,
-        root: target.mountPoint ? join(target.mountPoint, directory) : '',
+        root: target.readRoot ? join(target.readRoot, directory) : '',
         regions,
         expected,
       };

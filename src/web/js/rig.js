@@ -206,7 +206,7 @@ export class RigPanel {
    * deep, through the same read-only mount everything else on this tab uses.
    */
   openBrowser() {
-    const mounted = (this.status?.targets || []).filter((t) => t.mountPoint);
+    const mounted = (this.status?.targets || []).filter((t) => t.readRoot);
     if (!mounted.length) {
       toast('Connect a machine first — the list comes from the machine itself', 'error');
       return;
@@ -453,6 +453,12 @@ export class RigPanel {
     for (const r of results) if (r.totals?.sizeMismatchFiles) alarmMachines.add(r.machineId || r.host);
     this.onCounts?.({ high: alarmMachines.size, low: spareMachines.size });
 
+    if (this.status && this.status.rigPlatform === null) {
+      this.host.append(this.unsupportedCard());
+      this.host.scrollTop = scrollTop;
+      return;
+    }
+
     this.host.append(
       this.caveat(),
       this.targetsCard(targets),
@@ -476,15 +482,67 @@ export class RigPanel {
     this.host.scrollTop = scrollTop;
   }
 
+  /**
+   * The standing promise, worded for the platform actually in force.
+   *
+   * macOS and Windows do NOT make the same promise, and this is the one place
+   * an operator finds that out. On a Mac the kernel refuses every write through
+   * our mountpoint; on Windows there is no such flag and the promise is this
+   * application's own. Saying "read-only" flatly on both would be the quiet
+   * loss of exactly the guarantee this feature was built around.
+   */
   caveat() {
+    const win = this.status?.rigPlatform === 'win32';
     return h(
       'div.caveat',
       h(
         'div',
         h('b', 'Nothing here is stored, and nothing here removes anything. '),
-        'Every machine is mounted ',
-        h('b', 'read-only'),
-        ' — `mount_smbfs -o rdonly`, which the kernel enforces against every process on this Mac including root, so nothing here or elsewhere can alter a playback machine through it. Files are compared by name and size only; no file’s contents are ever read at all. Addresses live in this server’s memory until you press Forget or stop it; the password is held for the session, never written to the YAML file and never sent back to this page.',
+        win
+          ? h(
+              'span',
+              'Windows reads each machine at ',
+              h('code', '\\\\machine\\share'),
+              ' — there is no mount, and ',
+              h('b', 'no kernel read-only flag to set'),
+              '. The promise here is this application’s own: it reads directory entries and file sizes, never opens a file, and contains no way to write anything outside its own ',
+              h('code', 'exports/'),
+              ' folder. The share itself stays as writable as its own permissions make it. On a Mac the same survey is protected by the kernel instead; the badge on each machine says which you have.',
+            )
+          : h(
+              'span',
+              'Every machine is mounted ',
+              h('b', 'read-only'),
+              ' — `mount_smbfs -o rdonly`, which the kernel enforces against every process on this Mac including root, so nothing here or elsewhere can alter a playback machine through it.',
+            ),
+        ' Files are compared by name and size only; no file’s contents are ever read at all. Addresses live in this server’s memory until you press Forget or stop it; the password is held for the session, never written to the YAML file and never sent back to this page.',
+      ),
+    );
+  }
+
+  /**
+   * Shown instead of the whole tab where the survey cannot run at all.
+   *
+   * Linux and the rest: everything else in the analyser works, and this one
+   * feature needs an SMB client that only macOS and Windows are wired up for.
+   * Said plainly, up front — the alternative is a Connect button that fails
+   * with `spawn /sbin/mount_smbfs ENOENT`, which reads like a broken install.
+   */
+  unsupportedCard() {
+    return h(
+      'div.card',
+      h('header', h('h3', { text: 'The rig survey needs macOS or Windows' })),
+      h(
+        'div.card-body',
+        h(
+          'div.rig-hint',
+          `This server is running on ${this.status?.platform || 'this platform'}, which has no SMB client this application knows how to drive. `,
+          'macOS mounts each share read-only with ',
+          h('code', 'mount_smbfs -o rdonly'),
+          '; Windows reads ',
+          h('code', '\\\\machine\\share'),
+          ' directly. Everything else in the analyser — the scan, the index, region gaps, anomalies, duplicates, the machine allocation and the exports — works here exactly as it does anywhere else.',
+        ),
       ),
     );
   }
@@ -593,7 +651,7 @@ export class RigPanel {
       { style: { overflowX: 'auto', marginTop: '10px' } },
       h(
         'table.grid',
-        h('thead', h('tr', h('th', 'Machine'), h('th', 'Address'), h('th', 'Mounted at'), h('th', 'State'))),
+        h('thead', h('tr', h('th', 'Machine'), h('th', 'Address'), h('th', 'Read from'), h('th', 'State'))),
         h(
           'tbody',
           ...targets.map((t) =>
@@ -601,19 +659,32 @@ export class RigPanel {
               'tr',
               h('td.mono', { text: t.machineId || '—' }),
               h('td.mono', { text: t.host }),
-              h('td.mono', { text: t.mountPoint || '—' }),
+              h('td.mono', { text: t.readRoot || '—' }),
               h(
                 'td',
                 t.error
                   ? h('span.pill.broken', { text: 'failed', title: t.error })
-                  : t.mountPoint
+                  : t.readRoot
                     ? h(
                         'span',
-                        h('span.pill.kept', {
-                          text: t.readOnly ? 'read-only' : 'MOUNTED READ-WRITE',
-                          title: t.readOnly
-                            ? 'mount_smbfs -o rdonly — the kernel refuses every write through this mountpoint'
-                            : 'This mountpoint is writable. It was not made by this application.',
+                        // WHICH promise, never just "read-only". On macOS the
+                        // kernel refuses every write through the mountpoint; on
+                        // Windows there is no such flag and the promise is this
+                        // application's own. Collapsing the two into one badge
+                        // would be the quiet loss the port was resisted over.
+                        h(`span.pill.${t.guarantee === 'kernel' ? 'kept' : 'superseded'}`, {
+                          text:
+                            t.guarantee === 'kernel'
+                              ? 'read-only (kernel)'
+                              : t.guarantee === 'application'
+                                ? 'read-only (this app)'
+                                : 'connected',
+                          title:
+                            t.guarantee === 'kernel'
+                              ? 'mount_smbfs -o rdonly — the kernel refuses every write through this mountpoint, from every process on this Mac including root.'
+                              : t.guarantee === 'application'
+                                ? 'Windows has no per-connection read-only flag. Nothing in this application writes — it reads directory entries and stats, and never opens a file — but the share itself stays writable by anything on this PC with permission to write to it.'
+                                : 'Connected, with no stated guarantee. This should not happen; report it.',
                         }),
                         t.otherWritableMount
                           ? h('span.pill.superseded', {
@@ -638,7 +709,7 @@ export class RigPanel {
       h(
         'header',
         h('h3', { text: 'Connect' }),
-        h('span.n', { text: `${count(targets.filter((t) => t.mountPoint).length)} mounted` }),
+        h('span.n', { text: `${count(targets.filter((t) => t.readRoot).length)} connected` }),
         h('span.spacer'),
       ),
       h(
@@ -678,11 +749,15 @@ export class RigPanel {
         h(
           'div.rig-row',
           h('button.btn.primary', {
-            text: this.busy ? 'Working…' : 'Connect all (read-only)',
+            text: this.busy
+              ? 'Working…'
+              : s?.rigPlatform === 'win32'
+                ? 'Connect all (read-only, by this app)'
+                : 'Connect all (read-only)',
             disabled: this.busy || targets.length === 0,
             onClick: () => this.act(() => this.connect()),
           }),
-          targets.some((t) => t.mountPoint)
+          targets.some((t) => t.readRoot)
             ? h('button.btn.sm.ghost', {
                 text: 'Disconnect',
                 title: 'Unmounts only the mountpoints this application made',
@@ -694,7 +769,9 @@ export class RigPanel {
             style: { fontSize: '11.5px' },
             text: s?.hasCredentials
               ? 'A password is held for this session. Leave it blank to reuse it.'
-              : 'Leave blank to mount with whatever macOS already has saved.',
+              : s?.rigPlatform === 'win32'
+                ? 'Leave blank to use the access Windows already has. With a user name, the machine is connected for this session only and disconnected when you press Disconnect.'
+                : 'Leave blank to mount with whatever macOS already has saved.',
           }),
         ),
       ),
@@ -703,7 +780,7 @@ export class RigPanel {
 
   surveyCard(survey, targets) {
     const running = !!survey.running;
-    const mounted = targets.filter((t) => t.mountPoint).length;
+    const mounted = targets.filter((t) => t.readRoot).length;
     const pct = survey.total ? Math.round((survey.done / survey.total) * 100) : 0;
     // The one place the directory and the checkbox are shown as the single path
     // they add up to. Written imperatively because both controls change it and
@@ -1177,7 +1254,7 @@ export class RigPanel {
               : h('span.pill.broken', { text: 'needs attention' })
             : h('span.pill.unknown', { text: r.error ? 'failed' : 'listed only' }),
           h('span.spacer'),
-          h('span.n', { text: r.mountPoint || '' }),
+          h('span.n', { text: r.readRoot || '' }),
         ),
         body,
       );

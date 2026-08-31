@@ -2,6 +2,66 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-30 — the rig survey on Windows, and two promises told apart
+
+> *"Fix both of those things. Also, can we make the rig survey work on Windows?"*
+> · *"I want they have to be fully functional on Mac and windows"* — the user
+
+**The two fixes first.** Both launchers checked the Node MAJOR version only, but
+running TypeScript directly needs `--experimental-strip-types`, which arrived in
+a 22.x point release — so Node 22.0 passed the check and the server then died
+with `bad option`, an error pointing nowhere near the real problem. They compare
+major.minor now (22.6), and `test/portability.test.ts` pins it. And there was no
+platform guard anywhere in the rig path, so on Linux the Connect button failed
+with `spawn /sbin/mount_smbfs ENOENT`, which reads like a broken install; the
+tab now says what it needs, up front, instead.
+
+**Then the port.** CLAUDE.md said not to do it — but read it again: *"Do not
+port it by QUIETLY dropping that guarantee."* The instruction was never "don't",
+it was "don't be quiet about it". So:
+
+    macOS    guarantee: 'kernel'       mount_smbfs -o rdonly. No process on the
+                                       Mac can write through the mountpoint,
+                                       root included.
+    Windows  guarantee: 'application'  No mount, no mountpoint, and no
+                                       per-connection read-only flag exists.
+                                       Nothing HERE writes; the share stays as
+                                       writable as its permissions make it.
+
+Both are true, they are different, and the badge on each machine prints whichever
+is actually in force — `read-only (kernel)` in green, `read-only (this app)` in
+amber, with the full explanation on hover. The caveat at the top of the tab is
+worded per platform too. `readonly-enforcement.test.ts` now fails the build if
+either phrase disappears from the chokepoint: a single flat "read-only" is the
+quiet loss the rule was written about.
+
+`mountPoint` became `readRoot` throughout — on Windows there is no mount, and a
+field named for one would have been the first small lie.
+
+Four things on the Windows side that each needed deciding rather than guessing:
+
+- **`net use` is the only command**, resolved from `%SystemRoot%\System32`
+  rather than found on PATH, run through `execFile` with no shell, exactly as
+  the four macOS commands are.
+- **A password is always passed, even empty.** `net use \\h\s /user:x` with no
+  password PROMPTS, and a server has no terminal to prompt on — so an absent
+  password would be a hang, not a question. `''` is the guest case and the
+  analogue of `mount_smbfs -N`.
+- **A session is dropped only if we made it.** No credential means we never ran
+  `net use`, which means the connection is the operator's own and stays.
+- **The fence is the share, not the host.** `\\10.10.1.53\other` is not under
+  `\\10.10.1.53\d3 Projects`. Verified against `path.win32` explicitly, so the
+  assumption the whole Windows fence rests on is checked on the Mac where the
+  tests actually run.
+
+"Connected" means the same thing on both platforms: a path this application has
+READ through once. macOS proves it by reading the mount table back; Windows by
+listing the share root. Neither reports a machine it has not proven.
+
+668 tests. The Windows and Linux branches of the UI were rendered in a real
+browser against a fabricated status — the only honest way to check copy for a
+platform this Mac is not.
+
 ## 2026-08-30 — every region of the canvas, including the one nobody looked at
 
 > *"306 should have region 0s include that in the analysis, 307 is an understudy

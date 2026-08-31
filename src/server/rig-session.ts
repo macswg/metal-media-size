@@ -51,21 +51,43 @@ import {
   type RemoteFile,
 } from '../rig/survey.ts';
 import type { RigTarget } from '../rig/targets.ts';
-import { mountShare, unmountShare, type MountOutcome } from '../rig/mounts.ts';
+import {
+  connectShare,
+  disconnectShare,
+  rigPlatformOf,
+  type AccessOutcome,
+  type ReadGuarantee,
+  type RigPlatform,
+} from '../rig/mounts.ts';
 
 /** How many machines to walk at once. A show network is not a data centre. */
 export const DEFAULT_SURVEY_CONCURRENCY = 4;
 
 export interface ConnectedTarget extends RigTarget {
+  /**
+   * The absolute path this machine is read through: a mountpoint on macOS, a
+   * UNC share on Windows. The one field the survey and the browser need, and
+   * the reason it is not called `mountPoint` -- on Windows there is no mount.
+   */
+  readRoot: string | null;
+  /** macOS: the mountpoint to unmount later. Null on Windows. */
   mountPoint: string | null;
+  /** Windows: the UNC session to drop later. Null when we did not make one. */
+  session: string | null;
   alreadyMounted: boolean;
   /**
-   * Whether the mountpoint this survey reads through is read-only. Always true
-   * for a mount this application made -- `mountShare` refuses to report
-   * otherwise -- and reported per target rather than asserted globally so the
-   * UI never claims a protection it cannot see.
+   * WHO enforces the read-only promise on this machine:
+   *
+   *   'kernel'       macOS. `mount_smbfs -o rdonly` -- no process on this Mac
+   *                  can write through the mountpoint, root included.
+   *   'application'  Windows. Nothing here writes and no write primitive
+   *                  exists in `src/` outside the export writer, but the share
+   *                  itself is writable by anything on the PC with permission.
+   *
+   * Reported per target, never assumed, and the UI prints whichever is actually
+   * in force rather than the flattering one.
    */
-  readOnly: boolean;
+  guarantee: ReadGuarantee | null;
   /**
    * A separate read-WRITE mount of the same share that somebody else made,
    * typically in Finder. Our mountpoint is read-only; that one is not, and the
@@ -121,7 +143,8 @@ export interface SurveyPlan {
 export interface MachineResult {
   machineId: string | null;
   host: string;
-  mountPoint: string;
+  /** The path this machine was read through -- mountpoint or UNC share. */
+  readRoot: string;
   root: string;
   /** Null when this address named no machine: listed, but nothing to compare. */
   totals: MachineTotals | null;
@@ -137,6 +160,16 @@ export interface MachineResult {
 }
 
 export interface RigStatus {
+  /**
+   * Which implementation this machine gets, or null where there is none.
+   *
+   * Reported rather than inferred by the browser: the UI has to say WHICH
+   * read-only promise is in force, and a page cannot tell what platform its
+   * server is on. `null` is the honest answer on Linux -- everything else in
+   * the analyser works there; this one feature does not.
+   */
+  rigPlatform: RigPlatform | null;
+  platform: string;
   share: string | null;
   directory: string | null;
   targets: ConnectedTarget[];
@@ -224,9 +257,11 @@ export class RigSession {
     this.assertIdle();
     this.targets = targets.map((t) => ({
       ...t,
+      readRoot: null,
       mountPoint: null,
+      session: null,
       alreadyMounted: false,
-      readOnly: false,
+      guarantee: null,
       otherWritableMount: null,
       error: null,
     }));
@@ -266,21 +301,25 @@ export class RigSession {
 
     for (const t of this.targets) {
       try {
-        const outcome: MountOutcome = await mountShare({
+        const outcome: AccessOutcome = await connectShare({
           host: t.host,
           share,
           username: this.username ?? undefined,
           password: this.password ?? undefined,
         });
+        t.readRoot = outcome.readRoot;
         t.mountPoint = outcome.mountPoint;
-        t.alreadyMounted = outcome.alreadyMounted;
-        t.readOnly = outcome.readOnly;
+        t.session = outcome.session;
+        t.alreadyMounted = outcome.preexisting;
+        t.guarantee = outcome.guarantee;
         t.otherWritableMount = outcome.otherWritableMount;
         t.error = null;
       } catch (err) {
+        t.readRoot = null;
         t.mountPoint = null;
+        t.session = null;
         t.alreadyMounted = false;
-        t.readOnly = false;
+        t.guarantee = null;
         t.otherWritableMount = null;
         // From `mount_smbfs`. It is not given the password back, so it cannot
         // echo one -- but the message is scrubbed anyway, since a URL it failed
@@ -330,17 +369,21 @@ export class RigSession {
     const errors: string[] = [];
     let disconnected = 0;
     for (const t of this.targets) {
-      if (!t.mountPoint) continue;
+      if (!t.readRoot) continue;
       try {
-        await unmountShare(t.mountPoint);
+        // Only what WE made: a mountpoint under our own root, or a session we
+        // authenticated. A connection the operator made is left alone.
+        await disconnectShare(t);
         disconnected += 1;
       } catch (err) {
         errors.push(`${t.host}: ${this.scrub(err instanceof Error ? err.message : String(err))}`);
         continue;
       }
+      t.readRoot = null;
       t.mountPoint = null;
+      t.session = null;
       t.alreadyMounted = false;
-      t.readOnly = false;
+      t.guarantee = null;
       t.otherWritableMount = null;
     }
     this.clearResults();
@@ -388,6 +431,8 @@ export class RigSession {
 
   status(): RigStatus {
     return {
+      rigPlatform: rigPlatformOf(),
+      platform: process.platform,
       share: this.share,
       directory: this.directory,
       targets: this.targets.map((t) => ({ ...t })),
@@ -463,7 +508,7 @@ export class RigSession {
     const base: MachineResult = {
       machineId: job.target.machineId,
       host: job.target.host,
-      mountPoint: job.target.mountPoint ?? '',
+      readRoot: job.target.readRoot ?? '',
       root: job.root,
       totals: null,
       comparison: null,
@@ -474,15 +519,15 @@ export class RigSession {
       elapsedMs: 0,
       error: job.target.error,
     };
-    if (!job.target.mountPoint) {
-      return { ...base, error: job.target.error ?? 'Not mounted.', elapsedMs: 0 };
+    if (!job.target.readRoot) {
+      return { ...base, error: job.target.error ?? 'Not connected.', elapsedMs: 0 };
     }
 
     try {
       // Fenced to THIS machine's mountpoint and nothing else: the survey can
       // reach exactly as far as the directory the operator named.
       const rofs = new ReadOnlyFs({
-        allowedRoots: [job.target.mountPoint],
+        allowedRoots: [job.target.readRoot],
         dirTimeoutMs: plan.dirTimeoutMs,
       });
       const result = await walk(rofs, job.root, plan.exclusions);
