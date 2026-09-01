@@ -2,6 +2,69 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-31 — the word "null" on the page, and twenty-three cards nobody scrolls past
+
+> *"in the region gaps section there is a random null word, lets figure out why
+> that is there are fix it. also the individual machine sections should be
+> collapsed by default."* — the user, on the first real survey of the rig
+
+**Where the "null" came from.** The frontend has two functions called `append`
+and they do not behave the same:
+
+    append(el, children)   from dom.js   drops null, undefined and false
+    el.append(...)         the DOM's     STRINGIFIES them -> the text "null"
+
+Every conditional child in this UI is written `cond ? h(...) : null`, and `h()`
+routes its children through the filtering helper — so a null nested inside an
+`h(...)` is harmless, and only a top-level argument to a NATIVE `.append(...)`
+reaches the screen. Three did:
+
+- **The stray `null` above the cards** — `render()` passes `this.missingCard()`
+  and `this.misplacedCard()` straight to `this.host.append(...)`, and
+  `misplacedCard` returns null when nothing is misplaced. The live session
+  confirmed it: `misplaced.clean: true`.
+- **The `nullnull` at the foot of every card** — of the three trailing lines in
+  a machine card, `nameCollisions` and `skipped` are absent on a healthy
+  machine. Every surveyed machine reported `nameCollisions: 0` and `skipped:
+  []`, so every card printed exactly two. `regionlessFiles` was 303, which is
+  why the third line rendered and only two nulls showed.
+
+Fixed by routing all of them through the helper; `rig.js` now calls the DOM's
+`append` nowhere. **`test/web-render.test.ts` pins it**, because this fails
+silently — no error, no console message, just a word, in a tool whose whole
+value is that an operator can trust what it says about a playback rig. It scans
+`src/web/js/` for a nullable value passed at the top level of a native
+`.append(`, splitting arguments on top-level commas with comments blanked first,
+and holds `rig.js` to the blunter rule of not calling it at all, since no static
+check can see that a method returns null.
+
+*The test was wrong the first time and passed anyway.* It walked the argument
+list starting from `m.end`, which a regex match does not have — `undefined - 1`
+is `NaN`, the loop never ran, and every file came back with one empty argument.
+Caught by reintroducing the real bug and watching the test still pass. It now
+fails on all three of the original nulls.
+
+**The cards are collapsed by default.** Sixteen machines were surveyed and the
+rig holds twenty-three; each card carries up to five finding lists. The question
+a card answers is per-machine, and the one read first is the master list above
+them — the header's `in sync` / `needs attention` pill is what decides whether
+there is any reason to open one. Which cards are open is held on the PANEL, not
+on the card: `render()` rebuilds every card and runs on each poll while a survey
+is still going, so a card opened at machine 4 of 23 would otherwise shut itself
+a second later. **A failed machine opens itself** — its body is one line saying
+why, and that line is the whole reason to look at the card.
+
+**And the toggle was unreachable at any realistic width.** `.card` clips, and a
+mountpoint under the system temp dir is ~90 mono characters with nothing to stop
+it growing the header row — on the user's own screenshot the path ended within
+30px of the card edge, so a button after it was already off. The path shrinks
+and ellipsizes now, with the full text on its tooltip, and a control in a card
+header never shrinks.
+
+Verified against the live session with all sixteen machines' real results: no
+`null` anywhere in the rendered text, all sixteen cards collapsed, the toggle
+inside the card, and opening and closing one keeps its place.
+
 ## 2026-08-30 — a quality pass over the rig work, and the warning that stayed quiet
 
 > *"Quality pass over the recent rig work"* — the user

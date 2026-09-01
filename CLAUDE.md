@@ -519,6 +519,31 @@ the other is a name nothing here understands. Merging them hides the second
 inside the first — and the second is real: `120_LIQUID_CUE_H_LL180_v006_region0_proxy3.mov`
 writes its tokens in the wrong order, and there are 45 such files on one machine.
 
+**Never hand a nullable child to the DOM's own `append`.** `src/web/js/dom.js`
+exports an `append(el, children)` that drops `null`, `undefined` and `false`;
+the DOM's `el.append(...)` **stringifies** them, so a null child is rendered as
+the literal word `null` on the page. `h()` filters its own children, so a null
+nested inside an `h(...)` is safe — only a top-level argument to a native
+`.append(...)` reaches the screen. This was not hypothetical: the first real rig
+survey printed a stray `null` above the machine cards (`misplacedCard` returns
+null when nothing is misplaced) and `nullnull` at the foot of every one (the
+name-collision and skipped-directory lines are absent on a healthy machine).
+It fails silently — no error, no console message, just a word — so
+`test/web-render.test.ts` pins it, and `rig.js` is held to the blunter rule of
+not calling the DOM's `append` at all, because no static check can see that a
+method returns null.
+
+**The per-machine cards are COLLAPSED by default**, and a card that FAILED is
+not. Twenty-three machines with five finding lists each is a page nobody scrolls
+to the end of, and the question those cards answer is per-machine — the one read
+first is the master list above them. The header carries the verdict (`in sync` /
+`needs attention`), which is what decides whether there is a reason to open one.
+Which cards are open is held on the panel, not on the card, because `render()`
+rebuilds every card and runs on each poll while a survey is going: without that,
+a card opened at machine 4 of 23 would shut itself a second later. A failed
+machine opens itself — its body is one line saying why, and that line is the
+whole reason to look.
+
 **Every list is columned, and every column resizes.** Song, file, version and
 region are four questions and get four columns — `src/web/js/gridtable.js`, with
 the drag itself in `src/web/js/colsize.js`, shared with the virtualized Files

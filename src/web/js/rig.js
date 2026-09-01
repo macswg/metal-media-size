@@ -61,6 +61,21 @@ export class RigPanel {
     this.unknownMachineIds = [];
     this.timer = null;
     this.busy = false;
+    /**
+     * Machines whose card the operator has opened.
+     *
+     * The cards are COLLAPSED by default: on a full rig there are twenty-three
+     * of them, each with up to five finding lists, and the question they answer
+     * is per-machine -- the one you read first is the master list above. The
+     * header carries the verdict (`in sync` / `needs attention`), which is what
+     * decides whether there is any reason to open one.
+     *
+     * Held on the panel rather than on the card because `render()` rebuilds
+     * every card from scratch, and it runs on each poll while a survey is still
+     * going: without this, a card opened at machine 4 of 23 would close itself
+     * a second later.
+     */
+    this.expandedMachines = new Set();
     /** Kept out of `status` on purpose — it is never echoed by the server. */
     this.draft = {
       text: '',
@@ -469,19 +484,23 @@ export class RigPanel {
     this.onCounts?.({ high: alarmMachines.size, low: spareMachines.size });
 
     if (this.status && this.status.rigPlatform === null) {
-      this.host.append(this.unsupportedCard());
+      append(this.host, [this.unsupportedCard()]);
       this.host.scrollTop = scrollTop;
       return;
     }
 
-    this.host.append(
+    // `append` from dom.js, NOT the DOM's own: several of these return null when
+    // they have nothing to say, and native Element.append stringifies null into
+    // the literal word "null" on the page. The helper drops it. Every list of
+    // children on this tab goes through the helper for that reason.
+    append(this.host, [
       this.caveat(),
       this.targetsCard(targets),
       this.connectCard(targets),
       this.surveyCard(survey, targets),
-    );
+    ]);
     if (results.length) {
-      this.host.append(
+      append(this.host, [
         this.summaryRow(results),
         // FIRST, above the per-machine cards. A card per machine answers "what
         // is wrong with 301?"; this answers "what is wrong with the show?", and
@@ -492,7 +511,7 @@ export class RigPanel {
         // the wrong machine is both at once.
         this.misplacedCard(survey.misplaced),
         ...this.resultCards(results),
-      );
+      ]);
     }
     this.host.scrollTop = scrollTop;
   }
@@ -1208,12 +1227,15 @@ export class RigPanel {
       if (r.error) {
         body.appendChild(h('div.rig-warn', r.error));
       } else if (!c) {
-        body.append(
+        append(body, [
           h('div.rig-hint', 'This address was not tagged with a machine, so there is nothing to compare it against — the archive’s expectations are keyed by machine. Listing only.'),
           h('div.kv-inline', kv('Files', count(r.fileCount)), kv('Bytes', fmtBytes(r.totalBytes))),
-        );
+        ]);
       } else {
-        body.append(
+        // The helper, not the DOM's own append: the three lines at the end of
+        // this list are absent on a machine with nothing to report, and native
+        // Element.append would print each of those nulls as the word "null".
+        append(body, [
           h(
             'div.kv-inline',
             kv('On the machine', `${count(t.actualFiles)} · ${fmtBytes(t.actualBytes)}`),
@@ -1262,8 +1284,25 @@ export class RigPanel {
           r.skipped.length
             ? h('div.rig-hint', `${count(r.skipped.length)} directories were skipped (timeout or permission).`)
             : null,
-        );
+        ]);
       }
+
+      const key = r.machineId || r.host;
+      // A machine that FAILED opens itself. Its body is a single line saying
+      // why, and that line is the whole reason to look at the card -- putting
+      // it behind a click would hide the one thing that needs reading.
+      if (r.error) this.expandedMachines.add(key);
+      body.hidden = !this.expandedMachines.has(key);
+      const toggle = h('button.btn.sm.ghost', {
+        text: body.hidden ? 'show' : 'hide',
+        title: `Show what was found on ${title}`,
+        onClick: () => {
+          body.hidden = !body.hidden;
+          if (body.hidden) this.expandedMachines.delete(key);
+          else this.expandedMachines.add(key);
+          toggle.textContent = body.hidden ? 'show' : 'hide';
+        },
+      });
 
       return h(
         'div.card',
@@ -1276,7 +1315,10 @@ export class RigPanel {
               : h('span.pill.broken', { text: 'needs attention' })
             : h('span.pill.unknown', { text: r.error ? 'failed' : 'listed only' }),
           h('span.spacer'),
-          h('span.n', { text: r.readRoot || '' }),
+          // Ellipsized by CSS when the row is tight, so the full path lives on
+          // the tooltip rather than only in a width nobody has.
+          h('span.n', { text: r.readRoot || '', title: r.readRoot || '' }),
+          toggle,
         ),
         body,
       );
