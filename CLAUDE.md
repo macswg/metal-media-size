@@ -533,6 +533,31 @@ It fails silently — no error, no console message, just a word — so
 not calling the DOM's `append` at all, because no static check can see that a
 method returns null.
 
+**The panel disables itself while an action runs, so every action must end.**
+`RigPanel.act` sets `busy`, and only a `finally` clears it — which makes an
+unsettled promise a permanently dead tab, recoverable only by reloading the
+page. That happened. Three things now prevent it, and all three are pinned by
+`test/web-render.test.ts`:
+
+- **Every `fetch` carries an abort signal.** `api.js` gives each request a
+  deadline (60 s; 15 min for `/api/rig/connect`, which mounts shares in
+  sequence and is slow *honestly*). A request that fails is recoverable; one
+  that never settles is not. A timeout and a cancel are reported as their own
+  thing — `code: 'timeout'` / `'cancelled'` — never as a server error.
+- **The first `render()` is inside the `try`.** It was outside, so a throw while
+  drawing the disabled panel skipped the `finally` and stranded the flag.
+- **`Stop waiting`** — the sticky notice `act()` draws is the only live control
+  on the tab while an action runs, and it aborts for real, because the signal
+  reaches the slow requests. It says what is being waited for and for how long:
+  a screen that has said `Working…` for four minutes and one that has crashed
+  look identical.
+
+**And `src/rig/mounts.ts` escalates SIGTERM to SIGKILL.** `execFile`'s own
+`timeout` sends SIGTERM and then *waits* — a process blocked on an unresponsive
+SMB share never takes it, so the callback never fires, the promise never
+settles and the route never answers. That was the server half of the same
+freeze. Pinned in `test/readonly-enforcement.test.ts`.
+
 **The collapsed header names the regions the machine is expected to hold**, and
 it reads them off `MachineResult.regions` — the list `compareMachine` was
 actually given. Never look the machine up a second time to draw this: two

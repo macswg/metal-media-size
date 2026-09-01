@@ -359,13 +359,27 @@ export function parseMountTable(text: string): SmbMount[] {
   return out;
 }
 
+/**
+ * How long after the timeout a process gets before it is killed outright.
+ *
+ * `execFile`'s own `timeout` sends SIGTERM and then WAITS: if the child does
+ * not take the signal, the callback never fires and the promise never settles.
+ * That is not a corner case here -- a process blocked on an unresponsive SMB
+ * share sits in an uninterruptible wait and ignores SIGTERM -- and an unsettled
+ * promise means a route that never answers, which means a browser that waits
+ * forever with its controls disabled. Escalate instead.
+ */
+const HARD_KILL_GRACE_MS = 5_000;
+
 function run(command: string, args: readonly string[], opts: { timeoutMs: number }): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    execFile(
+    let hardKill: NodeJS.Timeout | undefined;
+    const child = execFile(
       command,
       [...args],
       { timeout: opts.timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
       (err, stdout, stderr) => {
+        if (hardKill) clearTimeout(hardKill);
         if (err) {
           const detail = String(stderr || err.message || '').trim();
           reject(new RigCommandError(detail || `${command} failed`));
@@ -374,6 +388,13 @@ function run(command: string, args: readonly string[], opts: { timeoutMs: number
         resolvePromise(String(stdout));
       },
     );
+    // SIGTERM went out at `timeoutMs`; this is what happens if it was ignored.
+    // SIGKILL cannot be caught, so anything short of a process wedged in the
+    // kernel goes away and the callback above finally runs.
+    hardKill = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs + HARD_KILL_GRACE_MS);
+    // Node keeps the event loop alive for a pending timer; this one must not
+    // hold the process open on its own.
+    hardKill.unref?.();
   });
 }
 

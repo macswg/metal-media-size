@@ -76,6 +76,8 @@ export class RigPanel {
      * a second later.
      */
     this.expandedMachines = new Set();
+    /** What `act()` is waiting for, and how to stop waiting. Null when idle. */
+    this.working = null;
     /** Kept out of `status` on purpose — it is never echoed by the server. */
     this.draft = {
       text: '',
@@ -133,17 +135,43 @@ export class RigPanel {
     }, POLL_MS);
   }
 
-  /** Run an action with the panel disabled, so nothing is double-fired. */
-  async act(fn, { rerender = true } = {}) {
+  /**
+   * Run an action with the panel disabled, so nothing is double-fired.
+   *
+   * THE PANEL MUST ALWAYS COME BACK. Disabling every control while an action
+   * runs is only safe if the action is guaranteed to end, and one of these did
+   * not: a `fetch` with no deadline, waiting on a route that was itself waiting
+   * on a wedged `mount`, never settled. `busy` stayed true, every button stayed
+   * disabled, and the only way out was reloading the page. Three things now
+   * stand between that and the operator:
+   *
+   *   - the first `render()` is INSIDE the try. It was outside, so a throw
+   *     while drawing the disabled panel skipped the `finally` and stranded the
+   *     flag with nothing to clear it;
+   *   - every request carries a deadline (see `api.js`), so `fn()` settles even
+   *     when the far end never answers;
+   *   - and `signal` reaches the slow ones, so `Stop waiting` is a real
+   *     cancel rather than a lie.
+   *
+   * `label` is what the notice says we are waiting for. A screen that says
+   * `Working...` for four minutes and a screen that has crashed look alike.
+   */
+  async act(fn, { rerender = true, label = 'Working' } = {}) {
     if (this.busy) return;
+    const controller = new AbortController();
     this.busy = true;
-    this.render();
+    this.working = { label, at: Date.now(), stop: () => controller.abort() };
     try {
-      await fn();
+      this.render();
+      await fn(controller.signal);
     } catch (err) {
-      toast(err.message, 'error');
+      // Cancelling is something the operator did, not something that went
+      // wrong. It gets a plain note, not an error.
+      if (err?.cancelled) toast(`${label} — stopped waiting.`, 'info');
+      else toast(err.message, 'error');
     } finally {
       this.busy = false;
+      this.working = null;
       if (rerender) this.render();
       this.pollIfRunning();
     }
@@ -200,14 +228,17 @@ export class RigPanel {
     toast('The loaded list is in the box — edit it, then press Use this list', 'info');
   }
 
-  async connect() {
+  async connect(signal) {
     if (this.draft.username || this.draft.password) {
       await api.rigCredentials({ username: this.draft.username, password: this.draft.password });
       // Dropped from the page as soon as the server has it. Nothing here keeps
       // a copy, so a screenshot of this tab cannot contain it.
       this.draft.password = '';
     }
-    const res = await api.rigConnect({ share: this.draft.share });
+    // The slowest thing this tab does: the shares are mounted in SEQUENCE, and
+    // a machine that is off takes its whole timeout before the next is tried.
+    // The signal is what makes `Stop waiting` real.
+    const res = await api.rigConnect({ share: this.draft.share }, { signal });
     this.status = await api.rigStatus();
     toast(
       `${res.connected} of ${res.connected + res.failed} machines mounted`,
@@ -397,8 +428,8 @@ export class RigPanel {
     go(dir);
   }
 
-  async disconnect() {
-    const res = await api.rigDisconnect();
+  async disconnect(signal) {
+    const res = await api.rigDisconnect({ signal });
     this.status = await api.rigStatus();
     toast(
       res.errors?.length
@@ -494,6 +525,7 @@ export class RigPanel {
     // the literal word "null" on the page. The helper drops it. Every list of
     // children on this tab goes through the helper for that reason.
     append(this.host, [
+      this.workingNotice(),
       this.caveat(),
       this.targetsCard(targets),
       this.connectCard(targets),
@@ -525,6 +557,42 @@ export class RigPanel {
    * application's own. Saying "read-only" flatly on both would be the quiet
    * loss of exactly the guarantee this feature was built around.
    */
+  /**
+   * What the panel is waiting for, and the way out.
+   *
+   * Every control is disabled while an action runs, so this is the only thing
+   * on the tab that can be pressed -- and it has to exist, because the alternative
+   * is what the operator hit: a screen that looks identical whether it is
+   * mounting sixteen machines or has stopped answering, with a page reload as
+   * the only move. `Stop waiting` aborts the request; it does not undo whatever
+   * the server has already done, and it says so.
+   */
+  workingNotice() {
+    const w = this.working;
+    if (!w) return null;
+    const elapsed = h('span.muted', { text: '' });
+    // Ticks on its own, because `render()` is not called while an action runs.
+    const tick = () => {
+      if (this.working !== w) return clearInterval(timer);
+      elapsed.textContent = ` · ${Math.round((Date.now() - w.at) / 1000)}s`;
+    };
+    const timer = setInterval(tick, 1000);
+    tick();
+    return h(
+      'div.rig-working',
+      h('span.spin'),
+      h('b', { text: `${w.label}…` }),
+      elapsed,
+      h('span.spacer'),
+      h('button.btn.sm.ghost', {
+        text: 'Stop waiting',
+        title:
+          'Gives up on the request and gives the controls back. It does not undo anything the server has already done — press Disconnect, or reload, to see where things stand.',
+        onClick: () => w.stop(),
+      }),
+    );
+  }
+
   caveat() {
     const win = this.status?.rigPlatform === 'win32';
     return h(
@@ -789,14 +857,18 @@ export class RigPanel {
                 ? 'Connect all (read-only, by this app)'
                 : 'Connect all (read-only)',
             disabled: this.busy || targets.length === 0,
-            onClick: () => this.act(() => this.connect()),
+            onClick: () =>
+              this.act((signal) => this.connect(signal), {
+                label: `Mounting ${targets.length} machine${targets.length === 1 ? '' : 's'}`,
+              }),
           }),
           targets.some((t) => t.readRoot)
             ? h('button.btn.sm.ghost', {
                 text: 'Disconnect',
                 title: 'Unmounts only the mountpoints this application made',
                 disabled: this.busy,
-                onClick: () => this.act(() => this.disconnect()),
+                onClick: () =>
+                  this.act((signal) => this.disconnect(signal), { label: 'Unmounting' }),
               })
             : null,
           h('span.muted', {

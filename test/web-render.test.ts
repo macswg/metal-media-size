@@ -150,6 +150,72 @@ function topLevelAppendArgs(raw: string): { line: number; args: string[] }[] {
   return out;
 }
 
+/**
+ * =============================================================================
+ *  EVERY REQUEST HAS A DEADLINE
+ * =============================================================================
+ *
+ * A `fetch` with no signal can wait forever, and this UI disables its controls
+ * while it waits. The rig tab froze exactly that way: a route waiting on a
+ * wedged `mount` never answered, `busy` stayed true, and the only way back was
+ * reloading the page. A request that fails is recoverable; one that never
+ * settles is not.
+ * =============================================================================
+ */
+describe('no request can wait forever', () => {
+  it('gives every fetch an abort signal', () => {
+    const api = files.find((f) => f.name.endsWith('api.js'));
+    expect(api, 'src/web/js/api.js is missing').toBeDefined();
+    const withoutSignal: string[] = [];
+    const call = /\bfetch\(/g;
+    const source = blankComments(api!.source);
+    for (let m = call.exec(source); m !== null; m = call.exec(source)) {
+      // The call's arguments, to its balanced closing paren.
+      let depth = 0;
+      let end = m.index;
+      for (let i = m.index + m[0].length - 1; i < source.length; i++) {
+        const ch = source[i] as string;
+        if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+        else if (ch === ')' || ch === ']' || ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            end = i;
+            break;
+          }
+        }
+      }
+      const args = source.slice(m.index, end + 1);
+      if (!/\bsignal\b/.test(args)) {
+        withoutSignal.push(`line ${source.slice(0, m.index).split('\n').length}: ${args.replace(/\s+/g, ' ').slice(0, 100)}`);
+      }
+    }
+    expect(
+      withoutSignal,
+      `A fetch with no signal can hang forever, and this UI disables itself while it waits.\n${withoutSignal.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  /**
+   * The flag is only safe to set if something is guaranteed to clear it. It is
+   * cleared in a `finally`, so everything that can throw has to be INSIDE the
+   * try -- the first `render()` was not, and a throw while drawing the disabled
+   * panel stranded it with nothing left to run.
+   */
+  it('sets the rig panel busy flag only inside a try', () => {
+    const rig = files.find((f) => f.name.endsWith('rig.js'));
+    const source = blankComments(rig!.source);
+    const set = source.indexOf('this.busy = true;');
+    expect(set, 'rig.js no longer sets this.busy').toBeGreaterThan(-1);
+    const cleared = source.indexOf('this.busy = false;', set);
+    const between = source.slice(set, cleared);
+    expect(between).toMatch(/\btry\s*\{/);
+    // Nothing that can throw may sit between setting the flag and the try.
+    const beforeTry = between.slice(0, between.search(/\btry\s*\{/));
+    expect(beforeTry).not.toMatch(/this\.render\(\)/);
+    expect(between).toMatch(/\}\s*finally\s*\{/);
+  });
+});
+
 describe('a null child never reaches the page as the word "null"', () => {
   it('passes no nullable value to the DOM’s own append', () => {
     const violations: string[] = [];

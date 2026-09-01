@@ -293,6 +293,12 @@ describe('read-only enforcement', () => {
     // exactly the substitution an absolute path exists to prevent.
     expect(source).toMatch(/join\(root, 'System32', 'net\.exe'\)/);
     expect(source).not.toMatch(/'net\.exe'\s*[,)]\s*$/m);
+    // A CHILD THAT IGNORES SIGTERM MUST NOT HANG THE ROUTE. `execFile`'s own
+    // timeout sends SIGTERM and then waits; a process blocked on an
+    // unresponsive SMB share never takes it, the callback never fires, and the
+    // request never answers. The escalation is what bounds that.
+    expect(source).toMatch(/child\.kill\('SIGKILL'\)/);
+
     // No second way to reach a share: no drive letters, no PowerShell, no
     // registry, and nothing that could mount one somewhere writable.
     expect(source).not.toMatch(/powershell|cmd\.exe|reg\.exe|wmic|robocopy|xcopy/i);

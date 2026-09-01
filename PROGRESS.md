@@ -2,6 +2,67 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-31 — the tab that disabled itself and never came back
+
+> *"something happens where the list becomes uneditable and unsaveable and I
+> have to refresh the page to restore functionality"* — the user, with the
+> Connect button stuck on `Working…` and 16 machines already connected
+
+The live server was healthy when this was reported: 16 connected, survey
+complete, no error. So the freeze was entirely in the browser — `busy` stuck
+true, every control disabled, and the only way out a reload.
+
+**`act()` disables the whole panel and clears the flag in a `finally`.** That is
+only safe if the thing it awaits is guaranteed to end, and nothing guaranteed
+it. `LIVE.request` called `fetch` **with no signal and no deadline**. A route
+that never answers is a promise that never settles, is a flag that is never
+cleared, is a tab that is dead until it is reloaded.
+
+And there was a route that could fail to answer. `run()` in `mounts.ts` used
+`execFile`'s own `timeout`, which sends SIGTERM and then *waits* — a process
+blocked on an unresponsive SMB share sits in an uninterruptible wait, never
+takes the signal, and the callback never fires. `POST /api/rig/connect` mounts
+every share in SEQUENCE, so one wedged `mount_smbfs` hangs the request for all
+of them, forever.
+
+Four changes, and the point of all four is that the panel always comes back:
+
+- **Every request has a deadline.** 60 s by default; 15 minutes for
+  `/api/rig/connect`, which is slow *honestly* — sequential mounts, and a
+  machine that is off takes its whole timeout before the next is tried. A
+  budget a real rig cannot exceed beats a number that would cut a working
+  connect short. `LIVE.text` had no signal either; it does now.
+- **A timeout and a cancel are not server errors.** They come back as
+  `code: 'timeout'` and `code: 'cancelled'`, and the timeout message says the
+  server may still be working — because it may be.
+- **The first `render()` moved inside the `try`.** It sat between
+  `busy = true` and the `try`, so a throw while drawing the disabled panel
+  stranded the flag with nothing left to clear it. A second, quieter way into
+  exactly the same dead tab.
+- **`Stop waiting`.** While an action runs, `act()` draws a sticky notice — what
+  is being waited for and for how long — carrying the only live control on the
+  tab. It aborts for real: the signal reaches `rigConnect` and `rigDisconnect`.
+  A screen that has said `Working…` for four minutes and one that has crashed
+  look identical, and the operator had no way to tell them apart or to act on
+  the difference.
+
+**Server side, `run()` escalates.** SIGTERM at the timeout as before, then
+SIGKILL five seconds later. SIGKILL cannot be caught, so anything short of a
+process wedged in the kernel goes away and the route answers with an error
+instead of hanging. The timer is `unref`'d so it cannot hold the process open.
+
+Verified end to end against a throwaway server on 8791, using an unroutable
+address so `mount_smbfs` really did sit there: the notice appeared and ticked,
+`Stop waiting` restored the panel with no reload — Connect back to its own
+label and enabled, the list editable, `Use this list` live — and the cancel came
+back as an *info* toast reading `Mounting 1 machine — stopped waiting.` rather
+than an error. The two `mount_smbfs` children were in interruptible sleep, so
+the escalation reaches them. The user's own session on 8787 was not touched.
+
+Both new guards fail the build if reverted: an unsignalled `fetch` and a
+`busy = true` with anything throwable before the `try` were each reintroduced
+and watched to fail.
+
 ## 2026-08-31 — what each machine is expected to hold, on the collapsed header
 
 > *"in the machine list header (collapsed view) can you also put the region
