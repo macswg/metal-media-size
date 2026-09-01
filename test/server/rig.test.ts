@@ -72,6 +72,7 @@ import {
 import { browseDirectory, MAX_BROWSE_ENTRIES } from '../../src/rig/browse.ts';
 import { csvField, formatMissingCsv, MISSING_CSV_COLUMNS } from '../../src/rig/missing-csv.ts';
 import { RigSession } from '../../src/server/rig-session.ts';
+import { ExclusionMatcher } from '../../src/scan/exclude.ts';
 import { assertRelativeDirectory } from '../../src/server/routes/rig.ts';
 
 let fx: Fixture;
@@ -769,6 +770,59 @@ describe('the session holds the credential and never gives it back', () => {
     expect(session.hasCredentials()).toBe(false);
     expect(session.status().username).toBeNull();
     expect(session.getTargets()).toEqual([]);
+  });
+
+  /**
+   * The card header names the regions a machine is expected to hold, and it
+   * reads them off the RESULT rather than looking the machine up again. Two
+   * lookups would be two ideas of what a machine holds, and they would part
+   * company the first time `config/machines.json` supplied a different rig from
+   * the built-in one -- naming regions the survey had not compared against.
+   *
+   * Asserted on the not-connected path on purpose: `regions` lives on the
+   * result's `base`, so it must survive every early return, including a machine
+   * that never got walked. "What did we expect of it?" is a fair question about
+   * a machine that failed.
+   */
+  it('carries the regions it compared against on every result, failures included', async () => {
+    const session = new RigSession();
+    const target = (machineId: string | null, host: string) => ({
+      machineId,
+      host,
+      readRoot: null,
+      mountPoint: null,
+      session: null,
+      alreadyMounted: false,
+      guarantee: null,
+      otherWritableMount: null,
+      error: null,
+    });
+
+    session.start({
+      jobs: [
+        { target: target('301', '10.10.1.53'), root: '', regions: [6, 7], expected: [] },
+        // An address with no machine id: nothing is expected of it, and the
+        // header must say nothing rather than guess.
+        { target: target(null, '10.10.1.99'), root: '', regions: null, expected: [] },
+      ],
+      directory: '',
+      keepN: 1,
+      snapshotId: 1,
+      exclusions: new ExclusionMatcher([], true),
+      dirTimeoutMs: 1000,
+      describeName: () => null,
+      regionHolders: new Map(),
+      primaryHolders: new Set(),
+      archiveStatusByName: new Map(),
+    });
+    await session.settle();
+
+    const results = session.status().survey.results;
+    expect(results.find((r) => r.machineId === '301')?.regions).toEqual([6, 7]);
+    expect(results.find((r) => r.machineId === null)?.regions).toBeNull();
+    // Neither was reachable, so neither has a verdict -- and both still say
+    // what was expected of them.
+    expect(results.every((r) => r.error !== null)).toBe(true);
   });
 
   it('drops stale results when the target list changes', () => {

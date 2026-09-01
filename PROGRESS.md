@@ -2,6 +2,45 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-08-31 — what each machine is expected to hold, on the collapsed header
+
+> *"in the machine list header (collapsed view) can you also put the region
+> set(s) that we're expecting"* — the user
+
+With the cards shut, `101 · in sync` says a machine is fine without saying what
+it was asked to hold — and on a rig where every region sits on two machines,
+that is the first thing to check. The header now reads:
+
+    101 · 10.232.163.101   in sync   region 1       …/10.232.163.101   [show]
+    207 · 10.232.163.110   in sync   regions 2 · 9  …/10.232.163.110   [show]
+    306 · 10.232.163.120   in sync   region 0       …/10.232.163.120   [show]
+
+**Read off the RESULT, not looked up again.** `MachineResult` carries a
+`regions` field now, set from `job.regions` — the list `compareMachine` was
+actually given. A second lookup in the UI would be a second idea of what a
+machine holds, and the two would part company the first time
+`config/machines.json` supplied a different rig from the built-in one: the card
+would name regions the survey had not compared against. It is the same rule
+`peers` follows in `machines.ts`, and the same one that keeps `presentCount`
+pinned to `region_count`.
+
+It sits on the result's `base`, so every early return carries it — including a
+machine that failed, where *"what did we expect of it?"* is still a fair
+question, and the card opens itself to show why. An address with no machine id
+has `regions: null` and the header says nothing at all rather than guessing;
+`listed only` already explains that card. A known machine the allocation gives
+no slice to reads `no regions`, which is a different statement and is spelled
+out.
+
+Numbers rather than the region strip's `rN` chips: this sits beside a machine id
+and an address, and `101 · r6 · r7` reads as three ids. Singular and plural are
+both spelled, and the set is sorted — an understudy's `[9, 2]` reads
+`regions 2 · 9`.
+
+Pinned by *carries the regions it compared against on every result, failures
+included*, asserted on the not-connected path precisely because that is the one
+an early return could drop.
+
 ## 2026-08-31 — the word "null" on the page, and twenty-three cards nobody scrolls past
 
 > *"in the region gaps section there is a random null word, lets figure out why

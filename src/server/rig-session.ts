@@ -146,6 +146,18 @@ export interface MachineResult {
   /** The path this machine was read through -- mountpoint or UNC share. */
   readRoot: string;
   root: string;
+  /**
+   * The canvas slices the allocation puts on this machine -- exactly the list
+   * the comparison was made against, carried on the result rather than looked
+   * up again by the UI.
+   *
+   * Two lookups would be two ideas of what a machine holds, and they would
+   * disagree the first time `config/machines.json` supplied a different rig
+   * from the built-in one: the card would name regions the survey had not
+   * compared. Null when the address named no machine, which is the same reason
+   * there is no verdict.
+   */
+  regions: number[] | null;
   /** Null when this address named no machine: listed, but nothing to compare. */
   totals: MachineTotals | null;
   comparison: MachineComparison | null;
@@ -510,6 +522,9 @@ export class RigSession {
       host: job.target.host,
       readRoot: job.target.readRoot ?? '',
       root: job.root,
+      // On `base`, so every return path below carries it -- including a machine
+      // that failed, where "what did we expect of it?" is still a fair question.
+      regions: job.regions,
       totals: null,
       comparison: null,
       files: null,

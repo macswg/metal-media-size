@@ -1314,6 +1314,12 @@ export class RigPanel {
               ? h('span.pill.kept', { text: 'in sync' })
               : h('span.pill.broken', { text: 'needs attention' })
             : h('span.pill.unknown', { text: r.error ? 'failed' : 'listed only' }),
+          // WHAT THE ARCHIVE EXPECTS OF THIS MACHINE, on the collapsed header:
+          // with the cards shut, "101 · in sync" says a machine is fine without
+          // saying what it was asked to hold, and on a rig where every region
+          // sits on two machines that is the first thing to check. Read off the
+          // result, which carries the list the comparison actually used.
+          regionsCell(r.regions),
           h('span.spacer'),
           // Ellipsized by CSS when the row is tight, so the full path lives on
           // the tooltip rather than only in a width nobody has.
@@ -1502,6 +1508,34 @@ function bySongWithinState(rows) {
   const group = new Map();
   for (const r of rows) if (!group.has(r.state)) group.set(r.state, group.size);
   return (a, b) => (group.get(a.state) ?? 0) - (group.get(b.state) ?? 0) || bySong(a, b);
+}
+
+/**
+ * The regions a machine is expected to hold, for its card header.
+ *
+ * Null means the address named no machine this rig knows, so there is nothing
+ * to expect of it and nothing to say -- the `listed only` pill already explains
+ * why that card has no verdict. An empty list is a machine the allocation gives
+ * no slice to, which is a different statement and is spelled out.
+ *
+ * Numbers rather than the strip's `rN` chips: this sits beside a machine id and
+ * an address, and `101 · r6 · r7` reads as three ids. The word carries it.
+ */
+function regionsCell(regions) {
+  if (regions === null || regions === undefined) return null;
+  if (!regions.length) {
+    return h('span.n', {
+      text: 'no regions',
+      title: 'The allocation gives this machine no canvas slice, so the archive expects nothing on it.',
+    });
+  }
+  const sorted = [...regions].sort((a, b) => a - b);
+  return h('span.n', {
+    text: `region${sorted.length === 1 ? '' : 's'} ${sorted.join(' · ')}`,
+    title:
+      `The archive expects every file for ${sorted.length === 1 ? 'region' : 'regions'} ` +
+      `${sorted.join(', ')} on this machine. Region 0 is the whole canvas, kept for offline editing.`,
+  });
 }
 
 function regionCell(region) {

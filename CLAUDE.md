@@ -533,6 +533,16 @@ It fails silently — no error, no console message, just a word — so
 not calling the DOM's `append` at all, because no static check can see that a
 method returns null.
 
+**The collapsed header names the regions the machine is expected to hold**, and
+it reads them off `MachineResult.regions` — the list `compareMachine` was
+actually given. Never look the machine up a second time to draw this: two
+lookups are two ideas of what a machine holds, and they part company the first
+time `config/machines.json` supplies a different rig from the built-in one,
+leaving a card naming regions the survey never compared. The field sits on the
+result's `base`, so it survives every early return — a machine that failed is
+still worth asking "what did we expect of it?". Null means the address named no
+machine, and the header then says nothing rather than guessing.
+
 **The per-machine cards are COLLAPSED by default**, and a card that FAILED is
 not. Twenty-three machines with five finding lists each is a page nobody scrolls
 to the end of, and the question those cards answer is per-machine — the one read
