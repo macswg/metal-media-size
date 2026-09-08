@@ -147,6 +147,76 @@ in the pool means "this string exists in the program", not "emit this".
   exporter makes it unrepresentable rather than merely un-defaulted.
 
 
+## Directions, settled by RUNNING FreeFileSync (2026-09-08)
+
+A third source of truth, and the strongest: **FreeFileSync 14.10 was run, headless,
+against throwaway folders in a scratch directory**, once per candidate direction
+set, and the result was read off the disk. Nothing below is inferred.
+
+### The bug this found
+
+Every removal job generated before 2026-09-08 carried:
+
+```xml
+<Changes>
+    <Left  Create="none" Update="none" Delete="right"/>
+    <Right Create="none" Update="none" Delete="none"/>
+</Changes>
+```
+
+It reads correctly — "propagate the left-side absence rightwards" — and **it
+removes nothing**. The run log says why:
+
+```
+Database file is not available: Setting default directions for synchronization.
+1 item found
+Items processed: 0 (0 bytes)
+```
+
+The `Delete` columns describe changes FreeFileSync detects **against its
+`.sync.ffs_db`** — *"this was deleted on the left since the last sync"* — and a
+first run against a delivery folder has no such database. So the job opened,
+compared, listed exactly the right files, and proposed no action: precisely the
+symptom the user reported (*"there is nothing that is set to remove or move the
+files, they're just added to a filter"*).
+
+### What actually removes a right-only file
+
+```xml
+<Changes>
+    <Left  Create="none"  Update="none" Delete="none"/>
+    <Right Create="right" Update="none" Delete="none"/>
+</Changes>
+```
+
+`Right Create` is the category **"exists on the right only"**; the value is the
+side the change is applied to, so `"right"` means *take it off the right*. Run
+against a right-hand folder holding `a` (in the include filter) and `b` (not),
+with an empty left: `a` moved into the versioning folder, `b` untouched, exit
+`"syncResult": "success"`.
+
+### Verified alongside it, in the same runs
+
+| Claim | How it was settled |
+|---|---|
+| `<Changes>` is **mandatory** in format 23 | Replacing it with `<Synchronize><Variant>Mirror</Variant>` fails to load: *"The following XML elements could not be read: `<FreeFileSync> <Synchronize> <Changes> <Left>`"*. There is no `<Variant>` under `<Synchronize>`; the GUI calls this pair "Custom". |
+| Our directions are **honoured**, not replaced | Control run with every attribute `none` on the same folders: 0 items processed. The missing-database warning appears in both runs, so it is noise, not an override. |
+| **Anchored per-file `<Include>` items work** (`/SONG/file.mov`) | The real document from `buildRemovalGui` was run end to end: two named files removed out of three present. Moves off the unverified list. |
+| Nothing is copied **into** the right side | Run with a left-only file and a same-name/different-size file present on both sides: neither was copied, the right-hand copy kept its own bytes. Only the right-only file went. |
+| An **empty `<Right>`** folder-pair path loads | FreeFileSync read a generated job and wrote it back to `LastRun.ffs_gui` as `<Right/>`, directions intact. Moves off the unverified list. |
+| The `<Batch>` block shape | `<ProgressDialog Minimized= AutoClose=/>`, `<ErrorDialog>`, `<PostSyncAction>` — accepted by 14.10 and adjacent in its literal pool. **Used only for these test runs. The application still emits `.ffs_gui` only**; a batch job runs with no human in the loop, which is the whole reason not to ship one. |
+
+FreeFileSync writes a `.sync.ffs_db` into **both** sides after a sync, whatever
+the directions say. The right-hand side of a removal job must be writable in any
+case — that is where the deletions happen — so this costs nothing, but it is the
+reason the banner no longer claims FFS "cannot write the .ffs_db it would need".
+
+**Method, if it ever needs repeating:** two temp folders, a `.ffs_batch` copy of
+the generated job with `<LogFolder>` pointed at the scratch directory, then
+`/Applications/FreeFileSync.app/Contents/MacOS/FreeFileSync <config>`. It prints a
+JSON summary and writes an HTML log. Never point such a run at the archive, at
+`/Volumes`, or at anything with real media in it.
+
 ## The user's existing job — do not collide with it
 
 `LastRun.ffs_gui` shows an active workflow:
@@ -164,8 +234,11 @@ and never overwrite `LastRun.ffs_gui`.
 
 ## Emitting a removal job
 
-Pattern (no "delete this list" mode exists in FFS): **empty left + Mirror + Include
-filter** ⇒ files present on the right but not the left are removed from the right.
+Pattern (no "delete this list" mode exists in FFS): **empty left + `Right
+Create="right"` + Include filter** ⇒ files present on the right but not the left
+are removed from the right. **Not a `Delete` attribute** — that is the
+database-driven column and does nothing on a first run; see "Directions, settled
+by RUNNING FreeFileSync" above.
 
 Safety requirements, non-negotiable:
 
@@ -192,39 +265,27 @@ Safety requirements, non-negotiable:
 
 ## Still unverified — flag to the user, don't paper over
 
-- The `<Batch>` block shape (`.ffs_batch`) — no real batch file was found. Either emit
-  `.ffs_gui` (verified) and let the user run it interactively, which is safer anyway,
-  or have the user save one batch job from the GUI so we can read its real shape.
+- The `<Batch>` block shape (`.ffs_batch`) — no real batch file was found. A shape
+  that 14.10 **accepts** was found on 2026-09-08 (see the runs above), which is not
+  the same as knowing what FFS itself writes. It stays unverified and, more to the
+  point, unemitted: `.ffs_gui` keeps a human in the loop, which is the reason for
+  the rule and does not depend on the shape.
 - Whether a filename containing a literal backslash can be filter-matched at all.
   Not relevant to this delivery folder (no such names there), so out of v1 scope.
   The exporter refuses such a path rather than guessing.
 - **The position of `<DetectMovedFiles>` within `<Synchronize>`.** Name verified,
-  ordering inferred. Expected to be harmless; confirm if a real config ever
-  surfaces one.
-- **Anchored per-file `<Include>` items** (`/SONG/file.mov`). The real config only
-  shows a bare `*_region0.mov` include and an anchored *folder* exclude. Exact
-  per-file includes rely on FFS traversing a directory when a child might match.
-  Mitigated: each generated job states its expected row count and tells the human
-  to stop if Compare disagrees.
-- **An EMPTY `<Right>` folder-pair path.** Emitted by default since 2026-08-26:
-  the job is generated on the machine that scanned the archive and run on one
-  that reaches the same delivery folder by a different path, so the operator
-  sets the folder in FreeFileSync. The real config has a path in both halves, so
-  what FFS 14.10 does with an empty one — opens with a blank field, as intended,
-  or complains on load — is **inferred, not verified**. Confirm by opening one
-  generated job once; if FFS objects, type the destination path into the
-  export dialog instead and the job ships with it filled in.
-  The include items are anchored and relative, so they bind to whatever folder
-  is chosen; the risk that moves with them is that the chosen folder must be the
-  delivery folder ITSELF. A parent finds nothing (safe). A different archive
-  with the same song and file names would find those (not safe). The job's
-  banner says both, and the manifest lists every literal path.
+  ordering inferred — but a generated job carrying it loaded into 14.10 on
+  2026-09-08 with no complaint, and that run proves FFS *does* name elements it
+  cannot read (the `<Changes>` test above). Read as accepted, not as confirmed
+  against a config FreeFileSync wrote itself.
 - **A top-level XML comment.** The real config has none. Generated jobs carry one,
   and duplicate the same text into `<Notes>` — a verified element FFS displays — so
   the warning survives even if the comment is discarded.
 
 `Style="TimeStamp-Folder"` and `DeletionPolicy=Versioning` were on this list and
-have been **moved off it**: both are confirmed in the 14.10 binary.
+have been **moved off it**: both are confirmed in the 14.10 binary. So have
+**anchored per-file includes** and **an empty `<Right>` path** — both verified by
+running FreeFileSync, see "Directions, settled by RUNNING FreeFileSync" above.
 
 ## DECIDED with the user — build exactly this
 

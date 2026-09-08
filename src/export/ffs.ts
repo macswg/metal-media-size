@@ -20,27 +20,31 @@
  * naming the exact relative paths. Items present on the right and absent on the
  * left are the removal set.
  *
- * DIRECTIONS -- narrower than Mirror, on purpose
- * ----------------------------------------------
- * A true Mirror preset is `Left Create="right" Update="right" Delete="right"`.
+ * DIRECTIONS -- narrower than Mirror, on purpose, and VERIFIED BY RUNNING IT
+ * ---------------------------------------------------------------------------
  * We emit:
  *
- *     <Left  Create="none" Update="none" Delete="right"/>
- *     <Right Create="none" Update="none" Delete="none"/>
+ *     <Left  Create="none" Update="none" Delete="none"/>
+ *     <Right Create="right" Update="none" Delete="none"/>
  *
- * The `Delete="right"` half is the Mirror behaviour we want: propagate the
- * left-side absence rightwards, i.e. take the right-only files out. The
- * `Create`/`Update` halves are pinned to `none` because the left folder is
- * empty and therefore has nothing legitimate to copy. This costs nothing and
- * makes the failure modes safe:
+ * `Right Create="right"` is the whole job: "an item that exists on the RIGHT
+ * only -- apply the change to the right side" -- which for a right-only item
+ * means delete it. Everything else is `none`, so nothing can be copied INTO the
+ * archive even if the empty-left folder somehow is not empty, and a file that
+ * differs in size on both sides is left exactly where it is.
  *
- *   - if the empty-left folder somehow is NOT empty, nothing is copied INTO the
- *     archive, because creates and updates are switched off;
- *   - if `Delete="right"` were misread by FreeFileSync, the job would simply
- *     propose nothing, which the human sees in Compare.
+ * THE DELETE ATTRIBUTES ARE A TRAP, AND THIS JOB USED TO FALL INTO IT.
+ * `Left Delete="right"` reads like "propagate the left-side absence rightwards"
+ * and does nothing at all. The `Delete` columns describe changes FreeFileSync
+ * detects against its `.sync.ffs_db` -- "this was deleted on the left SINCE THE
+ * LAST SYNC" -- and a first run against an archive has no database. FFS logs
+ * `Database file is not available: Setting default directions for
+ * synchronization` and proposes nothing. Every job generated before 2026-09-08
+ * had exactly that shape: it opened, it compared, it listed the files, and it
+ * would not have removed one. Measured, not reasoned about -- see
+ * `docs/ffs-format.md`, "Directions, settled by running FreeFileSync".
  *
- * Neither failure can move a byte the user did not ask for. The `none` and
- * `right` attribute values are both present in the verified file.
+ * Never express a removal through `Delete`. Right-only is `Right Create`.
  *
  * `Permanent` IS NOT REPRESENTABLE
  * --------------------------------
@@ -370,12 +374,15 @@ export function renderFfsGui(m: FfsGuiModel): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Directions for a removal job: delete-only, as explained in the file header.
- * Frozen so no caller can widen it into something that copies into the archive.
+ * Directions for a removal job: right-only items come off the right, and
+ * nothing else happens. `Right Create="right"` is the removal; the `Delete`
+ * attributes are database-driven and silently do nothing here, as the file
+ * header records. Frozen so no caller can widen it into something that copies
+ * into the archive.
  */
 export const REMOVAL_CHANGES: { left: ChangeDirections; right: ChangeDirections } = Object.freeze({
-  left: Object.freeze({ Create: 'none', Update: 'none', Delete: 'right' }) as ChangeDirections,
-  right: Object.freeze({ Create: 'none', Update: 'none', Delete: 'none' }) as ChangeDirections,
+  left: Object.freeze({ Create: 'none', Update: 'none', Delete: 'none' }) as ChangeDirections,
+  right: Object.freeze({ Create: 'right', Update: 'none', Delete: 'none' }) as ChangeDirections,
 });
 
 export interface RemovalGuiOptions {
@@ -478,8 +485,10 @@ export function removalHeaderText(chunk: ExportChunk, o: RemovalGuiOptions): str
     `   ${disposition}`,
     ...scope,
     '',
-    '   Copying is switched off in both directions (Create="none", Update="none"),',
-    '   so this job can never put anything INTO the archive.',
+    '   The rule that does the work is <Right Create="right"/>: a file the RIGHT',
+    '   has and the left has not is removed from the right. Everything else is',
+    '   "none", so this job can never put anything INTO the archive, and never',
+    '   overwrites a file that exists on both sides.',
     '',
     '   BEFORE YOU RUN IT',
     ...(blankRight
@@ -498,9 +507,15 @@ export function removalHeaderText(chunk: ExportChunk, o: RemovalGuiOptions): str
     '   anywhere in a generated job.',
     '',
     '   MOVE DETECTION IS SWITCHED OFF: <DetectMovedFiles>false</DetectMovedFiles>.',
-    '   The archive mount is read-only, so FreeFileSync cannot write the .ffs_db it',
-    '   would need. It cannot change this job either way: the left side is empty, so',
-    '   no right-side item has anything to be paired with as a move.',
+    '   It cannot change this job either way: the left side is empty, so no',
+    '   right-side item has anything to be paired with as a move.',
+    '',
+    '   FREEFILESYNC WILL SAY "Database file is not available: Setting default',
+    '   directions for synchronization". THAT IS EXPECTED HERE. It appears on any',
+    '   folder pair it has not synced before. This job\'s directions are decided by',
+    '   what Compare finds, not by that database, and were verified by running',
+    '   FreeFileSync 14.10 against test folders: the listed files were removed and',
+    '   nothing else was touched.',
     '',
     '   Element names in this file come from a real FreeFileSync 14.10 config and',
     '   from the 14.10 binary itself. That is not a substitute for looking: check',
@@ -529,7 +544,7 @@ export function buildRemovalGui(chunk: ExportChunk, o: RemovalGuiOptions): strin
     );
   }
   // AN EMPTY <Include> MEANS "INCLUDE EVERYTHING" IN FREEFILESYNC. Paired with
-  // an empty left folder and Delete="right", that would propose taking out the
+  // an empty left folder and Right Create="right", that would propose taking out the
   // ENTIRE right-hand folder. There is no legitimate empty chunk, so refuse.
   if (chunk.includes.length === 0) {
     throw new Error(

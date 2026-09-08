@@ -217,21 +217,35 @@ describe('the emitted removal job', () => {
     expect(child(changes, 'Left').attrs).toEqual({
       Create: 'none',
       Update: 'none',
-      Delete: 'right',
+      Delete: 'none',
     });
     expect(child(changes, 'Right').attrs).toEqual({
-      Create: 'none',
+      Create: 'right',
       Update: 'none',
       Delete: 'none',
     });
   });
 
-  it('can never copy anything INTO the archive', () => {
+  // THE BUG THIS TEST EXISTS FOR. Until 2026-09-08 the removal was written as
+  // `Left Delete="right"`, which reads correctly and does nothing: the Delete
+  // columns are resolved against FreeFileSync's .sync.ffs_db, which a first run
+  // has not got, so FFS logged "Database file is not available: Setting default
+  // directions for synchronization" and proposed zero removals. Verified by
+  // running FreeFileSync 14.10 against dummy folders -- see docs/ffs-format.md.
+  it('expresses the removal as Right Create, never through a Delete attribute', () => {
+    expect(REMOVAL_CHANGES.right.Create).toBe('right');
+    expect(REMOVAL_CHANGES.left.Delete).toBe('none');
+    expect(REMOVAL_CHANGES.right.Delete).toBe('none');
+    const changes = child(child(root, 'Synchronize'), 'Changes');
+    for (const side of ['Left', 'Right'] as const) {
+      expect(child(changes, side).attrs.Delete).toBe('none');
+    }
+  });
+
+  it('can never copy anything INTO the archive, or overwrite a file it finds there', () => {
     expect(REMOVAL_CHANGES.left.Create).toBe('none');
     expect(REMOVAL_CHANGES.left.Update).toBe('none');
-    expect(REMOVAL_CHANGES.right.Create).toBe('none');
     expect(REMOVAL_CHANGES.right.Update).toBe('none');
-    expect(REMOVAL_CHANGES.right.Delete).toBe('none');
   });
 
   it('uses only element names verified against a real config or the 14.10 binary', () => {
@@ -308,10 +322,20 @@ describe('the emitted removal job', () => {
   it('explains in the banner why move detection is off, and still says to look', () => {
     const comment = /<!--([\s\S]*?)-->/.exec(xml)?.[1] ?? '';
     expect(comment).toContain('MOVE DETECTION IS SWITCHED OFF');
-    expect(comment).toContain('read-only');
+    expect(comment).toContain('the left side is empty');
     expect(comment).toContain('check');
     expect(comment).toContain('GUI');
     expect(comment).not.toContain('--');
+  });
+
+  // FreeFileSync says this at Compare on any pair it has not synced before. An
+  // operator who has just been told the job removes files, and is then shown a
+  // warning about "default directions", needs to know it is expected -- and
+  // that the directions this job relies on are not the database-driven ones.
+  it('warns the operator about the harmless missing-database message', () => {
+    const comment = /<!--([\s\S]*?)-->/.exec(xml)?.[1] ?? '';
+    expect(comment).toContain('Database file is not available');
+    expect(comment).toContain('EXPECTED');
   });
 
   it('sets Versioning with a TimeStamp-Folder versioning path', () => {

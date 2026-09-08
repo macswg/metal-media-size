@@ -2,6 +2,61 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-09-08 — the removal job that removed nothing
+
+> *"i just get a list of the media flagged, there is nothing that is set to
+> remove or move the files, they're just added to a filter"* — the user, with a
+> generated `.ffs_gui` open in FreeFileSync
+
+They were right, and it was worse than a display quirk: **no removal job this
+tool has ever written would have deleted a file.**
+
+The directions were `<Left Create="none" Update="none" Delete="right"/>`. That
+reads as "propagate the left-side absence rightwards", it was reasoned about
+carefully in a long comment, and it does nothing. FreeFileSync's `Delete`
+columns describe changes detected **against its `.sync.ffs_db`** — *"deleted on
+the left since the last sync"* — and a first run against a delivery folder has
+no database. The log says so in one line:
+
+```
+Database file is not available: Setting default directions for synchronization.
+1 item found
+Items processed: 0 (0 bytes)
+```
+
+So the job opened, compared, listed exactly the right files in its filter, and
+proposed no action against any of them. Precisely what was reported.
+
+**The fix is one attribute:** `<Right Create="right"/>` — the "exists on the
+right only" category, with the value naming the side the change lands on. Left
+stays `none` across the board, so nothing can be copied INTO the archive and a
+file that differs in size on both sides is left alone.
+
+**Settled by running FreeFileSync, not by reading it.** 14.10 was run headless
+against throwaway folders, once per candidate direction set:
+
+- old shape → 0 items processed, files still there;
+- `Right Create="right"` → the filtered file moved into the versioning folder,
+  the unfiltered one untouched, `"syncResult": "success"`;
+- control, every attribute `none` → 0 processed, so the directions are honoured
+  and the missing-database warning is noise rather than an override;
+- the real document from `buildRemovalGui`, end to end → two named files
+  removed out of three present.
+
+Three things came off the unverified list on the way: **anchored per-file
+`<Include>` items** work, an **empty `<Right>` path** loads (FreeFileSync had
+already round-tripped one into `LastRun.ffs_gui`), and `<Changes>` is
+**mandatory** in format 23 — substituting `<Variant>Mirror</Variant>` fails to
+load with *"The following XML elements could not be read"*.
+
+Two pieces of banner text were wrong and are now right: the claim that FFS
+"cannot write the .ffs_db it would need" (it writes one on both sides regardless
+of directions), and the absence of any warning about the missing-database
+message an operator will now see at Compare and needs to be told is expected.
+
+**Any `.ffs_gui` generated before today should be re-exported.** The path list
+in it was correct; the job attached to it was inert.
+
 ## 2026-08-31 — the tab that disabled itself and never came back
 
 > *"something happens where the list becomes uneditable and unsaveable and I

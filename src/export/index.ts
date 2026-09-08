@@ -857,7 +857,7 @@ export async function writeExport(opts: WriteExportOptions): Promise<ExportResul
     //
     // It is a real directory, created here inside the fresh run directory, and
     // nothing is ever put in it. Its emptiness is not incidental: with
-    // Delete="right", the removal set is exactly "what the right has that the
+    // Right Create="right", the removal set is exactly "what the right has that the
     // left does not", so an empty left plus the include filter IS the job.
     //
     // A left side that does not exist on disk is the dangerous case, so it is

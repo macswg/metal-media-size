@@ -750,6 +750,19 @@ about it.
 Emit **`.ffs_gui` only**, never `.ffs_batch` — the `<Batch>` block shape is
 unverified, and the GUI form keeps a human in the loop before anything moves.
 
+**A removal is `<Right Create="right"/>`, NEVER a `Delete` attribute.** The
+`Delete` columns are resolved against FreeFileSync's `.sync.ffs_db`, which a
+first run against a delivery folder has not got: FFS logs *"Database file is not
+available: Setting default directions for synchronization"* and proposes
+**nothing**. Every job generated before 2026-09-08 carried `Left Delete="right"`,
+which reads exactly right and removed not one file — the operator opened it, saw
+the file list in the filter, and saw no action against any of them. `Right
+Create` is the "exists on the right only" category and the value is the side the
+change lands on. Settled by running FreeFileSync 14.10 against throwaway folders
+and reading the disk afterwards, not by reasoning; the runs and their controls
+are in `docs/ffs-format.md` under "Directions, settled by RUNNING FreeFileSync",
+and `test/ffs-format.test.ts` pins the shape.
+
 Note: **presence of a string in the FFS binary is evidence; absence is not.**
 The binary holds a deduplicated literal pool covering every format version it can
 *read*, including the legacy `<Differences>` shape. `Changes` returns zero hits

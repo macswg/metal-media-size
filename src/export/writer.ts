@@ -330,7 +330,8 @@ export async function writeExportText(
  *
  * This is not housekeeping. The left-hand side of every generated FreeFileSync
  * folder pair is an empty directory, and its emptiness IS the removal set: with
- * `Delete="right"`, whatever is absent on the left is what comes off the right.
+ * `Right Create="right"`, whatever is absent on the left is what comes off the
+ * right.
  * A left folder that is missing, or that has somehow acquired content, changes
  * what the job means, so it is checked immediately before the job is written
  * rather than assumed.
