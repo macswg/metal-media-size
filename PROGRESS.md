@@ -2,6 +2,133 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-09-09 — the versions the show was still playing
+
+> *"we'll need to cross reference this so that we aren't marking anything for
+> deletion that is in the programmed json"* — the user, dropping a Susan summary
+> export into `programmed_media_crosscheck/`
+
+The archive's rules know which version is **newest**. Only the show file knows
+which version is **programmed**. Nothing in this tool had ever asked the second
+question, and on the archive as it stands that gap was live:
+
+**A keep-1 export named five versions the show is currently cued to play —
+1.25 TiB.** The largest was `160_PUPPETS_INTRO_LL180 v002` at **974.9 GiB**.
+Every one of them would have gone into a removal manifest looking exactly like
+ordinary superseded media, and FreeFileSync would have moved them without
+complaint, because there was nothing to complain about: by the version rules
+they *are* old.
+
+### The capture maps onto the archive exactly, and that is why this is precise
+
+A media entry looks like this:
+
+```json
+{ "name": "110_engine_solo_fire_out_alpha_ll180.mov",
+  "version": "011", "regionSet": "12k-ll180-65deg" }
+```
+
+The name is the archive's `base` in lower case, no `_vNNN`, no `_regionN`. The
+`version` field looked at first like a d3 internal counter — the widths are
+inconsistent (`003` and `0003` in one file) — so it was checked rather than
+trusted. It carries sub-letters (`005b`), and of **1,699 references that matched
+an archive asset, 1,699 matched an existing version exactly, number and
+sub-letter both. Not one miss.**
+
+That measurement decided the design. Asset-level protection would have withheld
+792 of 1,814 assets and roughly 40 TiB of reclaim; version-level withholds
+1.25 TiB and is the more accurate statement of what the show needs.
+
+### The two properties that make it safe
+
+**It is applied after ranking, never during it.** A protected version keeps only
+itself — it takes no slot in the keep-N window and pushes nothing out. Feeding
+these ids into the ranking would let protecting an old version demote a newer
+one, which is the same class of mistake as filtering `computeReclaim`'s input.
+So the override is one-directional: no input makes it remove something it
+otherwise kept. `test/programmed-rule.test.ts` asserts that as a property over
+every subset, not as a case.
+
+**It rides through `ReclaimCache`**, so every route inherits it. A protection
+wired into the export path alone would be one the UI disagreed with.
+
+The exporter also refuses outright, as a last gate. That is not redundant with
+the UI declining to offer a programmed version: `versionIds` arrives from a
+request, and a request can be stale or replayed from a link saved before the
+capture existed.
+
+### Verified end to end, against the real index
+
+Snapshot 14, the capture of 2026-09-08:
+
+```
+names           : 797/808 matched
+version misses  : 0
+protected rows  : 798
+
+keepN   reclaim (before)   reclaim (after)   rescued
+  1        63.52 TiB         62.27 TiB       1.25 TiB in 5 versions
+  2        25.43 TiB         24.48 TiB       0.95 TiB in 1 version
+  3         9.55 TiB          9.55 TiB       0
+```
+
+A real `.ffs_gui` was then generated from the guarded selection: the five
+rescued versions own **75 files, and none of them appears in the job**. Asking
+for them directly is refused by name.
+
+### Silence is not a state
+
+An export with no cross-check and an export whose cross-check found nothing
+produce identical file lists. So every job now says which it is, in its own
+banner — `PROGRAMMED-MEDIA CROSS-CHECK: IN FORCE`, with the capture file and the
+date it was taken, or `NOT APPLIED` in those words, with the line *"an empty
+cross-check is not a clean bill of health"*. A capture that is present and
+unreadable **stops the server** rather than starting one that silently protects
+nothing.
+
+The 11 names that matched nothing are reported rather than swallowed: they are
+IMAG references and test cards (`me_1`, `d3_test_16-9.png`, `imag_mask_q`), not
+archive media.
+
+### On the board, in both states
+
+`/api/reclaim` now carries the cross-check's own status, and the strip draws one
+of three lines rather than staying silent: cross-checked (with the capture, how
+many versions it holds back, and how old it is), not cross-checked, or a capture
+that matched nothing. A **SHOW PLAYS** figure sits beside RETAINED, hidden when
+it would read zero — `0.00 TiB` on an unchecked archive reads as "nothing was at
+risk", which is the one thing it does not mean.
+
+**It shipped broken for one screenshot**, and the bug is worth recording because
+it is invisible by construction. `normaliseReclaim` in `api.js` rebuilds the
+response from a field whitelist, so `programmed` never reached the strip and the
+board drew its amber **"Not cross-checked against the show file"** warning over
+an archive that was fully cross-checked. Every number on the page was right;
+the single sentence saying whether they had been checked was wrong, in the
+direction that makes an operator distrust a correct answer. No error, no console
+message. `test/web-contract.test.ts` derives the field list from what the strip
+actually reads and fails if the normaliser drops any of it — verified by
+deleting the field and watching three assertions fail.
+
+### Also settled today, by running FreeFileSync rather than reasoning
+
+The user asked whether the generated job moves files to an offload folder and
+*then* deletes them, and whether two jobs were needed. Neither. Under
+`DeletionPolicy=Versioning` the move **is** the removal — there is no second
+step, and the log says so in the only verb it uses:
+
+```
+Moving file ".../right/160_PUPPETS/a_v001_region1.mov" to ".../offload/2026-09-09 003005/..."
+```
+
+Verb counts across the whole run: Moving 2, Deleting 0, Removing 0, Copying 0.
+`totalBytes: 0` for two items processed — a same-volume move is a rename, so
+nothing is read or rewritten. `RecycleBin`, the default, behaves identically.
+The unselected control file was untouched. Emptying the offload folder stays a
+separate act, by a human, whenever they choose.
+
+---
+
 ## 2026-09-08 — the removal job that removed nothing
 
 > *"i just get a list of the media flagged, there is nothing that is set to

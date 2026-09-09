@@ -122,6 +122,10 @@ const KEEP_REASON = {
     short: 'preview above the current master',
     long: 'This version is a low-res preview and nothing else — it has no region files. It sits above the newest region-bearing version, so it is most likely the preview of a render still in progress. A preview can never supersede a master, so this is protected at every keep-N.',
   },
+  'kept-programmed': {
+    short: 'the show plays this version',
+    long: 'The show file is cued to play this version, so it is held back from removal whatever the keep-N policy says. Only set where the policy had decided otherwise. A capture is a point in time: if the show has been re-programmed since it was taken, export a fresh Susan summary into programmed_media_crosscheck/.',
+  },
   'superseded-proxy-only': {
     short: 'a newer full render replaces this preview',
     long: 'A low-res preview with no region files, sitting below a kept region-bearing version that supersedes it.',

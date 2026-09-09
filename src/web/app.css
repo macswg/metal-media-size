@@ -221,6 +221,31 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
    from reclaim.js as "REGION 0s" and keeps its lower-case plural. */
 .fact.region0 .k { text-transform: none; }
 .fact.flagged .k { color: var(--superseded); cursor: help; }
+/* Not a verdict colour either: this is media the SHOW needs, which the keep-N
+   slider has no opinion about. */
+.fact.programmed .v { color: var(--kept); }
+
+/* ------------------------------------------------- show-file cross-check */
+/* Drawn in BOTH states on purpose. An archive with no capture loaded and one
+   whose capture protected nothing produce identical figures everywhere else on
+   the board; this line is the only thing that tells them apart. */
+.crosscheck {
+  flex: 1 0 100%;
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+.crosscheck b { font-weight: 600; }
+.crosscheck code { font-family: var(--mono); font-size: 11.5px; }
+.crosscheck.ok { color: var(--faint); background: var(--panel); border-color: var(--line); }
+.crosscheck.ok b { color: var(--kept); }
+.crosscheck.warn { color: var(--fg); background: color-mix(in srgb, var(--superseded) 12%, transparent); border-color: color-mix(in srgb, var(--superseded) 40%, transparent); }
+.crosscheck.warn b { color: var(--superseded); }
+.crosscheck.aging { border-color: color-mix(in srgb, var(--patch) 45%, transparent); }
+.cc-meta { color: var(--faint); white-space: nowrap; }
+.cc-stale { color: var(--patch); }
 
 /* ------------------------------------------------------------- workspace */
 

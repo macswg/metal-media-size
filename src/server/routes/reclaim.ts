@@ -89,6 +89,8 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
     let supersededFiles = 0;
     let protectedPatchBytes = 0;
     let protectedPatchCount = 0;
+    let programmedBytes = 0;
+    let programmedCount = 0;
     let keptBytes = 0;
     let totalBytes = 0;
     let totalFiles = 0;
@@ -131,11 +133,21 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
           protectedPatchBytes += r.bytes;
           protectedPatchCount += 1;
         }
+        // Versions the SHOW is cued to play, which the supersession rules had
+        // decided against. Summed over the rows in view like every other figure
+        // here, so it reads "of what I am looking at" -- the whole-snapshot
+        // count is on `programmed.protectedVersions` for the other question.
+        if (r.keepReason === 'kept-programmed') {
+          programmedBytes += r.bytes;
+          programmedCount += 1;
+        }
       }
     }
 
     const bySong = [...bySongMap.values()].sort((a, b) => b.reclaimBytes - a.reclaimBytes);
-    const whole = ctx.reclaim.get(snapshot.id, keepN).whole;
+    const entry = ctx.reclaim.get(snapshot.id, keepN);
+    const whole = entry.whole;
+    const prot = entry.programmed;
 
     return {
       snapshotId: snapshot.id,
@@ -163,12 +175,43 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
        * the proxy token.
        */
       region0Bytes,
+      /** Bytes and versions the cross-check rescued, within the rows in view. */
+      programmedBytes,
+      programmedCount,
+      /**
+       * THE CROSS-CHECK'S OWN STATUS. **Null means no show-file capture is
+       * loaded**, which is NOT the same as a capture that protected nothing --
+       * the reclaim figures are identical in both cases and this field is the
+       * only thing that tells them apart. The UI must state which it is; an
+       * unchecked archive is not a clean bill of health.
+       */
+      programmed: prot
+        ? {
+            captures: prot.captures.map((c) => ({
+              sourceFile: c.sourceFile,
+              capturedAt: c.capturedAt,
+              project: c.project,
+            })),
+            /** Version rows held back across the WHOLE snapshot. */
+            protectedVersions: prot.protectedVersionIds.size,
+            matchedNames: prot.matchedNames,
+            totalNames: prot.totalNames,
+            /** Names in the capture the archive has no asset for. */
+            unmatchedNames: prot.unmatchedNames.length,
+            /** Versions the capture named that the archive does not hold. */
+            unmatchedVersions: prot.unmatchedVersions.length,
+            /** False when a capture is loaded but resolved to nothing at all. */
+            usable: prot.usable,
+          }
+        : null,
       /** Whole-snapshot totals, so the UI can show "of the archive" alongside. */
       archive: {
         reclaimBytes: whole.reclaimableBytes,
         supersededCount: whole.supersededVersions,
         supersededFiles: whole.supersededFiles,
         protectedPatchBytes: whole.protectedPatchBytes,
+        programmedBytes: whole.programmedProtectedBytes,
+        programmedCount: whole.programmedProtectedVersions,
         totalBytes: whole.keptBytes + whole.reclaimableBytes,
       },
     };

@@ -18,6 +18,17 @@
  *   the FULL archive says are superseded" -- never "these would be superseded
  *   if the archive contained only what I can see".
  *
+ * THE PROGRAMMED-MEDIA CROSS-CHECK RIDES THROUGH HERE, and that placement is
+ * the point. Every route that says whether a version is superseded -- reclaim,
+ * versions, files, rig, machines, export -- reads its verdict from this cache,
+ * so resolving the protection in one place means no route can be written that
+ * forgets it. A protection wired into the export path alone would be a
+ * protection the UI disagreed with, and the operator would be reading the
+ * disagreement without knowing it was one.
+ *
+ * The protection is resolved per SNAPSHOT (it maps names onto version row ids)
+ * and is independent of keepN, so it is memoised separately from the verdicts.
+ *
  * A completed snapshot is immutable (a scan only ever INSERTs a new one), so
  * the verdict map for a given (snapshotId, keepN) can be memoised for the life
  * of the process. `invalidate()` exists for the one case that is not immutable:
@@ -28,6 +39,8 @@
 import type { Database as Db } from 'better-sqlite3';
 import { loadReclaimInput } from '../db/index.ts';
 import { computeReclaim, type ReclaimResult, type VersionVerdict } from '../scan/reclaim.ts';
+import type { ProgrammedCapture } from '../programmed/parse.ts';
+import { resolveProgrammed, type ProgrammedProtection } from '../programmed/protect.ts';
 
 export interface Verdicts {
   keepN: number;
@@ -36,6 +49,13 @@ export interface Verdicts {
   whole: ReclaimResult;
   /** versionId -> verdict, for annotating any row the routes select. */
   byVersionId: Map<number, VersionVerdict>;
+  /**
+   * What the programmed-media cross-check resolved to for this snapshot, or
+   * null when no capture is loaded. Carried on the entry so a route can state
+   * the protection in the same breath as the number it protected -- and so
+   * "no capture loaded" is never rendered as "nothing is programmed".
+   */
+  programmed: ProgrammedProtection | null;
 }
 
 /** Small bounded memo. There are only ever a handful of live (snapshot, N) pairs. */
@@ -44,9 +64,28 @@ const MAX_ENTRIES = 32;
 export class ReclaimCache {
   private readonly db: Db;
   private readonly entries = new Map<string, Verdicts>();
+  private readonly protections = new Map<number, ProgrammedProtection>();
+  private captures: readonly ProgrammedCapture[];
 
-  constructor(db: Db) {
+  constructor(db: Db, captures: readonly ProgrammedCapture[] = []) {
     this.db = db;
+    this.captures = captures;
+  }
+
+  /**
+   * Replace the loaded captures. Drops every memoised verdict, because a
+   * verdict computed under the old protection is exactly the kind of stale
+   * answer this whole feature exists to prevent.
+   */
+  setCaptures(captures: readonly ProgrammedCapture[]): void {
+    this.captures = captures;
+    this.protections.clear();
+    this.entries.clear();
+  }
+
+  /** The captures currently in force. Reporting only. */
+  loadedCaptures(): readonly ProgrammedCapture[] {
+    return this.captures;
   }
 
   get(snapshotId: number, keepN: number): Verdicts {
@@ -60,10 +99,24 @@ export class ReclaimCache {
     }
 
     const input = loadReclaimInput(this.db, snapshotId);
-    const whole = computeReclaim(input, keepN);
+
+    // Resolved against the WHOLE snapshot, for the same reason the verdicts
+    // are: a name that fails to find its asset is protection lost, and a
+    // filtered input loses them silently.
+    let programmed: ProgrammedProtection | null = null;
+    if (this.captures.length > 0) {
+      programmed = this.protections.get(snapshotId) ?? resolveProgrammed(this.captures, input);
+      this.protections.set(snapshotId, programmed);
+    }
+
+    const whole = computeReclaim(
+      input,
+      keepN,
+      programmed ? { protectedVersionIds: programmed.protectedVersionIds } : undefined,
+    );
     const byVersionId = new Map<number, VersionVerdict>();
     for (const v of whole.verdicts) byVersionId.set(v.versionId, v);
-    const entry: Verdicts = { keepN, snapshotId, whole, byVersionId };
+    const entry: Verdicts = { keepN, snapshotId, whole, byVersionId, programmed };
 
     this.entries.set(key, entry);
     while (this.entries.size > MAX_ENTRIES) {
@@ -78,8 +131,10 @@ export class ReclaimCache {
   invalidate(snapshotId?: number): void {
     if (snapshotId === undefined) {
       this.entries.clear();
+      this.protections.clear();
       return;
     }
+    this.protections.delete(snapshotId);
     for (const key of [...this.entries.keys()]) {
       if (key.startsWith(`${snapshotId}:`)) this.entries.delete(key);
     }

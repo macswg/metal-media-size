@@ -86,6 +86,13 @@ export interface ExportRequest {
    */
   parsePattern?: string;
   parseFlags?: string;
+  /**
+   * The programmed-media cross-check resolved for this snapshot, or null when
+   * no capture is loaded. Typed `unknown` for the same reason `db` is: this
+   * route does not import the exporter's types, because the exporter may not
+   * have shipped.
+   */
+  programmed?: unknown;
   /** Roots the writer must refuse to write into. The archive, always. */
   forbiddenRoots: string[];
   /** Test-only override of the export directory; omitted in normal operation. */
@@ -297,12 +304,19 @@ export function registerExportRoutes(app: FastifyInstance, ctx: AppContext): voi
       { versionCount: 0, fileCount: 0, totalBytes: 0 },
     );
 
+    // Read from the SAME cache every other route reads its verdicts from, so
+    // the export cannot be protecting a different set from the one the screen
+    // was showing. Null here means no capture is loaded, which the generated
+    // job states in words rather than leaving to be assumed.
+    const programmed = ctx.reclaim.get(snapshotId, keepN).programmed;
+
     const request: ExportRequest = {
       db: ctx.db,
       versionIds,
       formats,
       deletionPolicy,
       keepN,
+      programmed,
       parsePattern: ctx.cfg.parse.pattern,
       parseFlags: ctx.cfg.parse.flags,
       // The archive itself is never a legal write target, whatever else is.

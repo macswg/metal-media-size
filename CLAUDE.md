@@ -147,6 +147,99 @@ that day, not a live reading — the archive grows, and keep-1 measures 49.87 Ti
 at snapshot 8. What must never come back is the 3.17 TiB of last-copy masters
 the rule protects; the headline figure is expected to drift.
 
+### The programmed-media cross-check outranks supersession
+
+`programmed_media_crosscheck/*.json` are **Susan summary** exports from the d3
+project: a list of every piece of media the show is actually cued to play. The
+archive's rules know which version is **newest**; only the show file knows which
+is **programmed**. The second question wins. A version the show plays is not
+superseded by anything, however many newer renders sit above it.
+
+Without it, keep-1 on snapshot 14 named **5 programmed versions, 1.25 TiB** for
+removal — 974.9 GiB of it `160_PUPPETS_INTRO_LL180 v002`, still cued. Keep-2
+named one, 0.95 TiB. Keep-3 and above, none.
+
+**The capture maps onto the archive exactly, and that was measured.** A media
+entry's `name` is the archive's `base` in lower case with no `_vNNN` and no
+`_regionN`; its `version` is the archive's version, zero-padding aside, and it
+**carries sub-letters** (`005b`). Of 1,699 references that matched an asset,
+**1,699 matched an existing version exactly — number and sub-letter both, zero
+misses**. That measurement is the whole reason the protection is version-precise
+rather than asset-wide, which is the difference between withholding 1.25 TiB and
+withholding roughly 40.
+
+**It is applied AFTER ranking, never during it** (`ReclaimOptions.protected
+VersionIds`). A protected version keeps only itself: it takes no slot in the
+keep-N window and pushes no other version out. Feeding these ids into the
+ranking would let protecting an old version demote a newer one — the same class
+of mistake as filtering `computeReclaim`'s input, with the same consequence. So
+the override can only ever move a verdict from superseded to kept; there is no
+input that makes it remove something it otherwise kept, and
+`test/programmed-rule.test.ts` asserts that as a property, not a case.
+
+**It rides through `ReclaimCache`**, so every route — reclaim, versions, files,
+rig, machines, export — inherits it and no route can be written that forgets it.
+A protection wired into the export path alone would be one the UI disagreed
+with, and the operator would read the disagreement without knowing it was one.
+
+**The exporter refuses outright**, as a last gate, and that is not redundant
+with the UI declining to offer a programmed version: `versionIds` arrives from a
+request, and a request can be stale, hand-written, or replayed from a link saved
+before a capture was dropped in.
+
+**Every ambiguity resolves towards protection**, and the code is deliberately
+not balanced between the two errors. Over-matching protects a version nobody
+needed to and costs some reclaim; under-matching removes a master the show
+plays. So: an entry with no readable version protects the **whole asset**; a
+base protects that base in **every song folder** carrying it (`asset` is unique
+on (song, base), and four `999_TECH_*` bases live in two folders each);
+`normaliseProgrammedName` strips trailing edit markers (` f23`, `_f755`,
+` trim`, ` hold`, ` start`) and loops to a fixed point, because the real capture
+writes the extension in the middle (`..._ll180.mov hold`) and a single
+fixed-order pass silently fails to match.
+
+**Silence is not a state.** These three are distinct and must stay so:
+
+- **no capture loaded** — the cross-check is not in use;
+- **a capture that matched nothing** — `usable: false`, and an export must
+  refuse rather than proceed;
+- **a capture that matched and protected nothing at this keep-N** — normal.
+
+A broken or unreadable capture **stops the server**; it is never read as an
+empty list. Every generated `.ffs_gui` states which case it was built under —
+`IN FORCE` with the capture and its date, or `NOT APPLIED` in those words —
+because the file lists are otherwise identical. Same principle as
+`probeCoverage`: an empty list on an unchecked archive is not a clean bill of
+health.
+
+**A capture is a point in time.** It records what the show played at
+`capturedAt` and nothing can detect re-programming, so the date is carried into
+the UI and every export banner rather than read once and discarded. All `.json`
+files in the directory are read and their protections **unioned** — a second
+capture adds knowledge, it does not replace the first.
+
+**Names that match nothing are reported, never swallowed.** 797 of 808 matched;
+the other 11 are IMAG references and test cards.
+
+**The board states it in both states.** `/api/reclaim` returns a `programmed`
+block (null when no capture is loaded) plus `programmedBytes`/`programmedCount`
+over the rows in view, and `ReclaimStrip.paintCrosscheck` draws one of three
+lines — cross-checked, not cross-checked, or a capture that matched nothing —
+never nothing at all. The **SHOW PLAYS** fact tile is hidden when the figure
+would be zero, because `0.00 TiB` on an unchecked archive reads as "nothing was
+at risk", which is the one thing it does not mean.
+
+**`normaliseReclaim` in `src/web/js/api.js` is a WHITELIST**, and adding a field
+to the route is not enough to get it on screen. This shipped broken exactly
+once: the route returned `programmed`, the strip read `r.programmed`, the
+normaliser named neither, and the board drew "NOT cross-checked" over a fully
+cross-checked archive — every number right, the one sentence about whether they
+had been checked wrong, and wrong in the direction that makes an operator
+distrust a correct answer. `test/web-contract.test.ts` now derives the field
+list from what the strip reads and fails if the normaliser drops any of it.
+
+The directory's contents are gitignored — a capture is real show data.
+
 ### Region gaps measure against the CANVAS, anomalies against the SIBLINGS
 
 `/api/coverage` and the **Region gaps** tab answer one question: which versions

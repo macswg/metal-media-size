@@ -11,3 +11,9 @@ src/web/mock/fixture.json
 # The scan root names a client's storage layout, so it is configured locally
 # and never committed. See config/local.example.json and src/config.ts.
 config/local.json
+
+# Programmed-media crosscheck exports from the d3 project. Real show data --
+# track names, cue lists, media paths -- so the contents stay local. The
+# directory is kept so the app has somewhere to look for them.
+programmed_media_crosscheck/*
+!programmed_media_crosscheck/.gitkeep

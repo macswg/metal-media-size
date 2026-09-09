@@ -18,6 +18,7 @@ import { ProbeRunner } from './probe-runner.ts';
 import { RigSession } from './rig-session.ts';
 import { badRequest, notFound } from './errors.ts';
 import { intParam, type Query } from './query.ts';
+import type { ProgrammedCapture } from '../programmed/parse.ts';
 
 export interface AppContext {
   db: Db;
@@ -44,8 +45,21 @@ export interface AppContext {
   exportsDir?: string;
 }
 
-export function createContext(db: Db, cfg: AppConfig, exportsDir?: string): AppContext {
-  const reclaim = new ReclaimCache(db);
+/**
+ * @param captures Programmed-media captures already loaded from disk. Passed in
+ *   rather than read here because loading is async and this is not -- and
+ *   because a test wants to hand in a capture without a directory existing.
+ *   An empty list means the cross-check is not in use, which is NOT the same
+ *   as a capture that matched nothing; `ReclaimCache.programmed` keeps the two
+ *   apart for anything that reports on it.
+ */
+export function createContext(
+  db: Db,
+  cfg: AppConfig,
+  exportsDir?: string,
+  captures: readonly ProgrammedCapture[] = [],
+): AppContext {
+  const reclaim = new ReclaimCache(db, captures);
   const scans = new ScanRunner(db, cfg, (snapshotId) => reclaim.invalidate(snapshotId));
   const probes = new ProbeRunner(db, cfg);
   const rig = new RigSession();

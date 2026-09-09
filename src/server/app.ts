@@ -25,6 +25,7 @@ import { resolve } from 'node:path';
 import type { Database as Db } from 'better-sqlite3';
 import { PROJECT_ROOT, type AppConfig } from '../config.ts';
 import { createContext, type AppContext } from './context.ts';
+import type { ProgrammedCapture } from '../programmed/parse.ts';
 import { hasStatusCode, isHttpError, messageOf } from './errors.ts';
 import { registerAnomalyRoutes } from './routes/anomalies.ts';
 import { registerCoverageRoutes } from './routes/coverage.ts';
@@ -77,6 +78,13 @@ export interface BuildServerOptions {
   exportsDir?: string;
   /** Override the directory the browser app is served from. Tests only. */
   webRoot?: string;
+  /**
+   * Programmed-media captures, already read from `programmed_media_crosscheck/`.
+   * Versions the show is cued to play are held back from removal whatever the
+   * supersession rules say -- see `src/programmed/`. Empty means the
+   * cross-check is not in use.
+   */
+  captures?: readonly ProgrammedCapture[];
 }
 
 export interface BuiltServer {
@@ -91,7 +99,7 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
     routerOptions: { maxParamLength: 500 },
   });
 
-  const ctx = createContext(opts.db, opts.cfg, opts.exportsDir);
+  const ctx = createContext(opts.db, opts.cfg, opts.exportsDir, opts.captures ?? []);
 
   // Fastify types the thrown value as `unknown`, which is correct: a route can
   // throw anything. Each shape is narrowed with a real guard rather than cast,

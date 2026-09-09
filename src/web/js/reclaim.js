@@ -85,6 +85,12 @@ export class ReclaimStrip {
     // the edit needs, whatever the slider is set to.
     this.factRegion0 = fact('Region 0s', 'region0', 'REGION 0s');
     this.factMatched = fact('In view', '');
+    // What the show-file cross-check rescued from this keep-N, within the rows
+    // in view. Hidden entirely when no capture is loaded: a `0.00 TiB` on an
+    // unchecked archive reads as "nothing was at risk", which is the one thing
+    // it does not mean. The line below says which case we are in.
+    this.factProgrammed = fact('Show plays', 'programmed');
+    this.factProgrammed.node.hidden = true;
 
     // On a phone the slider is a 7-stop track you drag with a thumb that
     // covers three of the stops, and it costs two rows -- the track and the
@@ -124,8 +130,12 @@ export class ReclaimStrip {
         this.factMatched.node,
         this.factProtected.node,
         this.factKept.node,
+        this.factProgrammed.node,
         this.factRegion0.node,
       ),
+      // Never a null child: `append` here is the DOM's own, which stringifies
+      // null into the literal word on the page. See dom.js.
+      (this.crosscheckEl = h('div.crosscheck')),
     );
 
     this.paintSliderLabel();
@@ -266,6 +276,90 @@ export class ReclaimStrip {
       r.region0Bytes != null ? fmtBytes(r.region0Bytes) : '—',
       'whole-canvas region0 files in view — what offline editing is cut against',
     );
+    this.paintCrosscheck(r);
+  }
+
+  /**
+   * THE CROSS-CHECK STATUS LINE.
+   *
+   * It exists because the two states it distinguishes produce IDENTICAL
+   * numbers everywhere else on this screen: an archive with no show-file
+   * capture loaded and one whose capture happened to protect nothing read the
+   * same in every figure above. Only this line tells them apart, so it is drawn
+   * in both cases and never hidden. Same principle as `probeCoverage` on the
+   * anomalies tab — an empty result on an unchecked archive is not a clean bill
+   * of health.
+   */
+  paintCrosscheck(r) {
+    const el = this.crosscheckEl;
+    if (!el) return;
+    clear(el);
+    const p = r.programmed ?? null;
+
+    // NOT APPLIED. The loud case, and the default state of a fresh install.
+    if (!p) {
+      el.className = 'crosscheck warn';
+      this.factProgrammed.node.hidden = true;
+      el.append(
+        h('b', { text: 'Not cross-checked against the show file.' }),
+        ' Nothing here has been checked against what the show actually plays — ',
+        'an empty cross-check is not a clean bill of health. Put a Susan summary ',
+        'export into ',
+        h('code', { text: 'programmed_media_crosscheck/' }),
+        ' and restart the server.',
+      );
+      return;
+    }
+
+    // Loaded, but it resolved to nothing at all. Almost always a capture of a
+    // different show, or of a project whose media never reached this archive.
+    if (!p.usable) {
+      el.className = 'crosscheck warn';
+      this.factProgrammed.node.hidden = true;
+      el.append(
+        h('b', { text: 'The show-file capture matched nothing in this archive.' }),
+        ` None of its ${count(p.totalNames)} media names resolved to an asset here, so it is `,
+        'protecting nothing. Check it is a capture of this show, and of a project whose ',
+        'media came from this delivery folder.',
+      );
+      return;
+    }
+
+    // IN FORCE.
+    el.className = 'crosscheck ok';
+    const inView = r.programmedBytes ?? 0;
+    this.factProgrammed.node.hidden = inView <= 0;
+    this.factProgrammed.set(
+      fmtBytes(inView),
+      `${count(r.programmedCount ?? 0)} version(s) in view that the show is cued to play, held ` +
+        'back from removal whatever the keep-N policy says',
+    );
+
+    const newest = p.captures.map((c) => c.capturedAt).filter(Boolean).sort().at(-1) ?? null;
+    el.append(
+      h('b', { text: 'Cross-checked against the show file.' }),
+      ` ${count(p.protectedVersions)} version(s) the show plays are held back from removal`,
+      inView > 0
+        ? ` — ${fmtBytes(inView)} of them in view at keep-${r.keepN ?? state.keepN}.`
+        : `; none of them is inside the current view at keep-${r.keepN ?? state.keepN}.`,
+      h('span.cc-meta', {
+        text:
+          `  ·  ${count(p.matchedNames)} of ${count(p.totalNames)} media names matched` +
+          (p.unmatchedNames > 0 ? ` (${count(p.unmatchedNames)} did not)` : ''),
+      }),
+      h('span.cc-meta', { text: `  ·  ${captureAge(newest)}` }),
+    );
+
+    // A capture is a point in time and nothing here can detect re-programming,
+    // so age is stated rather than left to be worked out from a timestamp.
+    if (staleDays(newest) != null && staleDays(newest) > 30) {
+      el.classList.add('aging');
+      el.append(
+        h('span.cc-stale', {
+          text: '  ·  a capture is a point in time — take a fresh one if the show has moved on',
+        }),
+      );
+    }
   }
 }
 
@@ -292,4 +386,30 @@ function fact(label, cls, display = label) {
       node.classList.toggle('flagged', !!on);
     },
   };
+}
+
+/**
+ * Whole days since a capture was taken, or null if it carried no readable date.
+ * A capture with no date is not treated as fresh -- see `captureAge`.
+ */
+function staleDays(iso) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86_400_000);
+}
+
+/**
+ * How old the capture is, in the words an operator would use.
+ *
+ * A missing date says so rather than being silently omitted: "we do not know
+ * when this was taken" is a materially different thing from "taken today", and
+ * the whole risk this line exists to surface is a stale capture.
+ */
+function captureAge(iso) {
+  const d = staleDays(iso);
+  if (d == null) return 'capture date unknown';
+  if (d <= 0) return 'captured today';
+  if (d === 1) return 'captured yesterday';
+  return `captured ${d} days ago`;
 }

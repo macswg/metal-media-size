@@ -166,6 +166,13 @@ export type KeepReason =
   | 'superseded-proxy-only'
   /** A full version pushed out of the latest-N window by newer full versions. */
   | 'superseded-full'
+  /**
+   * THE SHOW PLAYS THIS VERSION. Held back by the programmed-media cross-check
+   * regardless of how many newer renders sit above it. Only ever set where the
+   * supersession rules had decided otherwise -- a version that was already kept
+   * keeps its own reason, which is the more informative of the two.
+   */
+  | 'kept-programmed'
   /** A patch overtaken by a kept full version newer than it. */
   | 'superseded-patch';
 
@@ -200,8 +207,35 @@ export interface ReclaimResult {
   /** Bytes retained (kept versions). */
   keptBytes: number;
   keptVersions: number;
+  /**
+   * Versions the programmed-media cross-check rescued: they WOULD have been
+   * superseded and are kept because the show is cued to play them. Zero when no
+   * capture is loaded. Reported separately from `keptBytes` because it is the
+   * figure that answers "what did the cross-check actually save?" -- and
+   * because a run where it is unexpectedly zero is worth noticing.
+   */
+  programmedProtectedBytes: number;
+  programmedProtectedVersions: number;
   /** Per-version verdicts, in input order. */
   verdicts: VersionVerdict[];
+}
+
+export interface ReclaimOptions {
+  /**
+   * `asset_version.id`s the programmed-media cross-check says the show plays.
+   * See `src/programmed/protect.ts`.
+   *
+   * THIS IS APPLIED AFTER RANKING, NEVER DURING IT, and the distinction is the
+   * whole safety property. A protected version keeps only itself: it takes no
+   * slot in the keep-N window and pushes no other version out. Feeding these
+   * ids into the ranking instead would let protecting an old version demote a
+   * newer one -- the same class of mistake as filtering the INPUT to
+   * `computeReclaim`, and with the same consequence.
+   *
+   * It can therefore only ever move a verdict from superseded to kept. There is
+   * no input to this function that makes it remove something it otherwise kept.
+   */
+  protectedVersionIds?: ReadonlySet<number>;
 }
 
 /**
@@ -210,10 +244,12 @@ export interface ReclaimResult {
  *
  * @param assets  Assets with their versions. Version order does not matter.
  * @param keepN   How many FULL versions to keep per asset. Must be >= 1.
+ * @param options Optional protections applied AFTER ranking. See ReclaimOptions.
  */
 export function computeReclaim(
   assets: readonly ReclaimAssetInput[],
   keepN: number,
+  options?: ReclaimOptions,
 ): ReclaimResult {
   if (!Number.isInteger(keepN) || keepN < 1) {
     throw new Error(`keepN must be an integer >= 1, got ${keepN}`);
@@ -228,6 +264,9 @@ export function computeReclaim(
   let protectedPatchVersions = 0;
   let keptBytes = 0;
   let keptVersions = 0;
+  let programmedProtectedBytes = 0;
+  let programmedProtectedVersions = 0;
+  const programmed = options?.protectedVersionIds;
 
   for (const asset of assets) {
     // Rule 2: rank using FULL versions only. Patches never enter the ranking.
@@ -315,6 +354,17 @@ export function computeReclaim(
         protectedPatchVersions += 1;
       }
 
+      // THE PROGRAMMED-MEDIA OVERRIDE. Last word, and one-directional: it can
+      // turn a supersede into a keep and never the reverse. Applied here rather
+      // than up in the ranking so it cannot change any OTHER version's fate --
+      // see ReclaimOptions.
+      if (!keep && programmed?.has(v.id)) {
+        keep = true;
+        reason = 'kept-programmed';
+        programmedProtectedBytes += v.bytes;
+        programmedProtectedVersions += 1;
+      }
+
       verdicts.push({
         versionId: v.id,
         assetId: asset.id,
@@ -347,6 +397,8 @@ export function computeReclaim(
     protectedPatchVersions,
     keptBytes,
     keptVersions,
+    programmedProtectedBytes,
+    programmedProtectedVersions,
     verdicts,
   };
 }

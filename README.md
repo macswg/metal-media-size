@@ -114,6 +114,48 @@ Layer 1 alone is enough to point it at another **d3 delivery folder using the
 Other conventions — screen codes, embedded screen names, bracketed part tags —
 need new parse rules, not just a new root. Don't assume the grammar generalises.
 
+## Cross-checking against the show file
+
+The archive's rules know which version is **newest**. Only the show file knows
+which version is **programmed**. Those are different questions, and the second
+one wins: a version the show is cued to play is not superseded by anything,
+however many newer renders sit above it.
+
+**Export a Susan summary from the d3 project and drop the `.json` into
+`programmed_media_crosscheck/`.** That is the whole setup. Restart `npm run
+serve` and it is in force — the startup line says how many captures and media
+references it read, and says so just as plainly when it read none.
+
+From then on, every version the show plays is held back from removal: it cannot
+be selected, cannot reach a FreeFileSync job, and the exporter refuses outright
+if something asks for one anyway. The generated `.ffs_gui` states in its own
+banner which capture protected it and when that capture was taken.
+
+Measured on the archive at snapshot 14, against the capture of 2026-09-08: **five
+programmed versions, 1.25 TiB, would have gone into a keep-1 removal job** —
+including 974.9 GiB of `160_PUPPETS_INTRO_LL180 v002`, a version the show is
+still cued to play. At keep-2 it is one version and 0.95 TiB. At keep-3 and
+above, none.
+
+A few things worth knowing:
+
+- **Put every capture you have in there.** All the `.json` files are read and
+  their protections are unioned — a second capture adds knowledge, it does not
+  replace the first.
+- **A capture is a point in time.** It records what the show played when it was
+  taken. Re-programme the show and the capture is stale; take a fresh one. The
+  capture date is printed in the UI and in every export banner for exactly this
+  reason.
+- **A broken capture stops the server** rather than starting one that silently
+  protects nothing. An empty directory is fine and simply means the cross-check
+  is not in use — which every artefact then says out loud, because an export
+  with no cross-check and an export whose cross-check found nothing produce
+  identical file lists.
+- **Names that match nothing are reported, never swallowed.** In the 2026-09-08
+  capture, 797 of 808 media names matched an archive asset; the other 11 are
+  IMAG references and test cards that are not archive media.
+- The directory's contents are **gitignored** — a capture is real show data.
+
 ## Sharing it
 
 Nobody needs to install anything to *use* this. Node has to run on the machine

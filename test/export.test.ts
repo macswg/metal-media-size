@@ -883,3 +883,86 @@ describe('THE PATH LIST CANNOT DIVERGE', () => {
     expect(items.every((i) => i.startsWith('/'))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('the programmed-media cross-check reaches the export', () => {
+  /** A guard protecting exactly the versions named. */
+  function guard(labels: string[], extra: Partial<Record<string, unknown>> = {}) {
+    return {
+      protectedVersionIds: new Set(labels.map((l) => versionIds.get(l) as number)),
+      captures: [{ sourceFile: 'susan.json', capturedAt: '2026-09-08T20:52:05-07:00' }],
+      matchedNames: 797,
+      totalNames: 808,
+      unmatchedNames: [{ rawName: 'me_1' }],
+      ...extra,
+    };
+  }
+
+  it('REFUSES to export a version the show is programmed to play', async () => {
+    // The last gate. `versionIds` arrives from a request, and a request can be
+    // stale or replayed from a link made before the capture was dropped in.
+    await expect(
+      writeExport({
+        ...BASE_OPTS,
+        versionIds: supersededIds(),
+        db,
+        exportsDir,
+        runId: 'RUN-PROG-REFUSE',
+        programmed: guard(['v001']),
+      }),
+    ).rejects.toThrow(/programmed to play/);
+  });
+
+  it('exports normally when nothing selected is programmed', async () => {
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-PROG-OK',
+      // A cross-check that protects something outside this selection must not
+      // get in the way of it.
+      programmed: { ...guard([]), protectedVersionIds: new Set<number>([999999]) },
+    });
+    expect(res.files.length).toBeGreaterThan(0);
+  });
+
+  it('states the cross-check IN FORCE in the job banner, with the capture date', async () => {
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-PROG-BANNER',
+      programmed: { ...guard([]), protectedVersionIds: new Set<number>([999999]) },
+    });
+    const gui = res.files.find((f) => f.format === 'ffs_gui');
+    const xml = readFileSync((gui as { path: string }).path, 'utf8');
+    expect(xml).toContain('PROGRAMMED-MEDIA CROSS-CHECK: IN FORCE');
+    expect(xml).toContain('susan.json');
+    expect(xml).toContain('2026-09-08T20:52:05-07:00');
+    expect(xml).toContain('797 of 808 media names matched');
+    // `--` is illegal inside an XML comment and is rewritten to `- -`, which
+    // reads like a typo. The banner text is written to avoid it entirely.
+    expect(xml).not.toContain('protected nothing - -');
+  });
+
+  it('says NOT APPLIED, loudly, when no capture was loaded', async () => {
+    // An export with no cross-check and one whose cross-check found nothing
+    // produce identical file lists. The banner is the only thing that tells
+    // the operator which they are holding, so silence is not an option.
+    const res = await writeExport({
+      ...BASE_OPTS,
+      versionIds: supersededIds(),
+      db,
+      exportsDir,
+      runId: 'RUN-PROG-ABSENT',
+    });
+    const gui = res.files.find((f) => f.format === 'ffs_gui');
+    const xml = readFileSync((gui as { path: string }).path, 'utf8');
+    expect(xml).toContain('PROGRAMMED-MEDIA CROSS-CHECK: NOT APPLIED');
+    expect(xml).toContain('not a clean bill of health');
+    expect(xml).toContain('programmed_media_crosscheck/');
+  });
+});

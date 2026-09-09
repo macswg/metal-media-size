@@ -38,6 +38,19 @@ import { join } from 'node:path';
 
 import { openDb, getSnapshot, loadReclaimInput } from '../db/index.ts';
 import { computeReclaim, type KeepReason } from '../scan/reclaim.ts';
+
+/**
+ * What the exporter needs to know about the cross-check. A structural subset of
+ * `ProgrammedProtection`, restated so the exporter does not depend on the
+ * loader -- and so a test can hand in a guard without a capture file.
+ */
+export interface ProgrammedExportGuard {
+  protectedVersionIds: ReadonlySet<number>;
+  captures: ReadonlyArray<{ sourceFile: string; capturedAt: string | null }>;
+  matchedNames: number;
+  totalNames: number;
+  unmatchedNames: ReadonlyArray<{ rawName: string }>;
+}
 import { compareVersions } from '../scan/derive.ts';
 
 import {
@@ -180,6 +193,20 @@ export interface WriteExportOptions {
    * contract: without it the export cannot state WHY a version is superseded.
    */
   keepN?: number;
+
+  /**
+   * THE PROGRAMMED-MEDIA CROSS-CHECK, resolved for this snapshot.
+   *
+   * Two jobs, and the second is the one that matters. It feeds
+   * `computeReclaim` here so this module's verdicts match the UI's, AND it
+   * makes the export REFUSE outright if a caller asks to remove a version the
+   * show is cued to play. The refusal is not redundant with the UI declining
+   * to offer it: `versionIds` arrives from a request, and a request can be
+   * stale, hand-written, or replayed from a saved link made before a capture
+   * was dropped in. The last gate before a removal manifest is written should
+   * not be a screen somebody was looking at earlier.
+   */
+  programmed?: ProgrammedExportGuard | null;
 
   /** An open database handle. Preferred; the API layer already has one. */
   db?: Db;
@@ -520,7 +547,28 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
   // keep-N scenarios on the report's first page. Both run over the whole
   // snapshot, which is the only input `computeReclaim` may be given.
   const reclaimInput = loadReclaimInput(db, snapshotId);
-  const reclaim = computeReclaim(reclaimInput, keepN);
+  const guard = opts.programmed ?? null;
+  const reclaim = computeReclaim(
+    reclaimInput,
+    keepN,
+    guard ? { protectedVersionIds: guard.protectedVersionIds } : undefined,
+  );
+
+  // THE LAST GATE. Nothing the show plays reaches a removal manifest, whatever
+  // the request said. Named rather than counted: an operator who hits this
+  // needs to know WHICH version, not that "some" were refused.
+  if (guard) {
+    const offending = opts.versionIds.filter((id) => guard.protectedVersionIds.has(id));
+    if (offending.length > 0) {
+      throw new Error(
+        `Refusing to export ${offending.length} version(s) the show is programmed to play ` +
+          `(version id(s) ${offending.slice(0, 20).join(', ')}${offending.length > 20 ? ', ...' : ''}). ` +
+          'The programmed-media cross-check protects these; a selection that contains one was ' +
+          'made before the capture was loaded, or against a different snapshot. Re-run the ' +
+          'selection and export again.',
+      );
+    }
+  }
   const verdictById = new Map(reclaim.verdicts.map((v) => [v.versionId, v]));
 
   // Archive-wide, deliberately independent of `versionIds` and of any filter
@@ -773,6 +821,21 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
       unparsedCount: snap.unparsed_count,
     },
     keepN,
+    // Recorded on the dataset so EVERY artefact -- job banner, JSON, markdown,
+    // report -- states the same thing about the cross-check, including the
+    // case where there was not one.
+    programmed: guard
+      ? {
+          captures: guard.captures.map((c) => ({
+            sourceFile: c.sourceFile,
+            capturedAt: c.capturedAt,
+          })),
+          protectedVersions: guard.protectedVersionIds.size,
+          matchedNames: guard.matchedNames,
+          totalNames: guard.totalNames,
+          unmatchedNames: guard.unmatchedNames.length,
+        }
+      : null,
     scenarios,
     scenarioBasis: scenarioBasis(reclaimInput, snap.total_bytes),
     machines,
@@ -876,6 +939,9 @@ export async function writeExport(opts: WriteExportOptions): Promise<ExportResul
       runId: dataset.runId,
       generatedAt: dataset.generatedAt,
       note: dataset.note,
+      // Null when no capture was loaded. The banner prints that case LOUDLY
+      // rather than staying silent -- see ProgrammedJobSummary.
+      programmed: dataset.programmed,
     };
     for (const chunk of dataset.chunks) {
       const o = { ...guiOpts, manifestFileName: chunk.manifestFileName };

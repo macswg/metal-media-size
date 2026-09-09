@@ -275,6 +275,10 @@ export interface ExportSongRollup {
   latestMtime: number;
 }
 
+/** Re-exported so the renderers need not reach into the FreeFileSync module. */
+import type { ProgrammedJobSummary } from './ffs.ts';
+export type { ProgrammedJobSummary };
+
 /** Everything the renderers need. Built once, shared by all three. */
 export interface ExportDataset {
   /** Stable id for this export run, used as the directory name. */
@@ -284,6 +288,13 @@ export interface ExportDataset {
   snapshot: ExportSnapshotProvenance;
   /** The keep-latest-N the verdicts were computed under. */
   keepN: number;
+  /**
+   * The programmed-media cross-check in force for this run, or null when no
+   * show-file capture was loaded. Null is a REPORTABLE STATE, not a missing
+   * field: every artefact says which of the two it was generated under, because
+   * the file lists are indistinguishable otherwise.
+   */
+  programmed: ProgrammedJobSummary | null;
   /**
    * Keep-latest-N costed at several values of N over the WHOLE snapshot, for
    * the executive summary. Independent of `selected` and of any filter: see
