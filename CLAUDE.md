@@ -225,7 +225,7 @@ the other 11 are IMAG references and test cards.
 block (null when no capture is loaded) plus `programmedBytes`/`programmedCount`
 over the rows in view, and `ReclaimStrip.paintCrosscheck` draws one of three
 lines — cross-checked, not cross-checked, or a capture that matched nothing —
-never nothing at all. The **SHOW PLAYS** fact tile is hidden when the figure
+never nothing at all. The **CROSSCHECK SAVES** fact tile is hidden when the figure
 would be zero, because `0.00 TiB` on an unchecked archive reads as "nothing was
 at risk", which is the one thing it does not mean.
 

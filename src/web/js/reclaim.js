@@ -84,12 +84,15 @@ export class ReclaimStrip {
     // whole-canvas region0 copy the offline edit is cut against -- material
     // the edit needs, whatever the slider is set to.
     this.factRegion0 = fact('Region 0s', 'region0', 'REGION 0s');
+    // Region 0s plus untagged (valid name, no region token) files -- every
+    // whole-canvas file in view. Roughly what a director drive holds.
+    this.factWholeCanvas = fact('Region 0 + untagged', 'region0', 'REGION 0 + UNTAGGED');
     this.factMatched = fact('In view', '');
     // What the show-file cross-check rescued from this keep-N, within the rows
     // in view. Hidden entirely when no capture is loaded: a `0.00 TiB` on an
     // unchecked archive reads as "nothing was at risk", which is the one thing
     // it does not mean. The line below says which case we are in.
-    this.factProgrammed = fact('Show plays', 'programmed');
+    this.factProgrammed = fact('Crosscheck saves', 'programmed');
     this.factProgrammed.node.hidden = true;
 
     // On a phone the slider is a 7-stop track you drag with a thumb that
@@ -132,6 +135,7 @@ export class ReclaimStrip {
         this.factKept.node,
         this.factProgrammed.node,
         this.factRegion0.node,
+        this.factWholeCanvas.node,
       ),
       // Never a null child: `append` here is the DOM's own, which stringifies
       // null into the literal word on the page. See dom.js.
@@ -275,6 +279,12 @@ export class ReclaimStrip {
     this.factRegion0.set(
       r.region0Bytes != null ? fmtBytes(r.region0Bytes) : '—',
       'whole-canvas region0 files in view — what offline editing is cut against',
+    );
+    this.factWholeCanvas.set(
+      r.region0Bytes != null && r.regionlessBytes != null ? fmtBytes(r.region0Bytes + r.regionlessBytes) : '—',
+      r.regionlessBytes != null
+        ? `region0 files plus ${fmtBytes(r.regionlessBytes)} of files with no region token — every whole-canvas file in view`
+        : 'region0 files plus files with no region token',
     );
     this.paintCrosscheck(r);
   }

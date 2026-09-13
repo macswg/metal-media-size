@@ -54,6 +54,35 @@ import type { AppContext } from '../context.ts';
 import { resolveSnapshot } from '../context.ts';
 import { isEmptyFilter, parseFilters, parseKeepN, type Query } from '../query.ts';
 import { selectVersions } from '../select.ts';
+import { makeParser } from '../../scan/parse.ts';
+
+/**
+ * Bytes per version held in files whose name parsed but carries no region
+ * token -- legal whole-canvas deliverables (e.g. `888_IMAG_*_RECT_v001.mov`).
+ * Read with the scan's own parser, the same test `/api/machines` uses for its
+ * `regionless` bucket, so the two figures cannot disagree. Memoised per
+ * snapshot: snapshots are insert-only, so the map never goes stale.
+ */
+const regionlessCache = new Map<number, Map<number, number>>();
+
+function regionlessBytesByVersion(ctx: AppContext, snapshotId: number): Map<number, number> {
+  const hit = regionlessCache.get(snapshotId);
+  if (hit) return hit;
+  const parse = makeParser(ctx.cfg.parse.pattern, ctx.cfg.parse.flags);
+  const out = new Map<number, number>();
+  const files = ctx.db
+    .prepare(
+      `SELECT name, size, asset_version_id AS v FROM file
+        WHERE snapshot_id = ? AND asset_version_id IS NOT NULL`,
+    )
+    .all(snapshotId) as { name: string; size: number; v: number }[];
+  for (const f of files) {
+    const p = parse(f.name);
+    if (p.ok && p.region === null) out.set(f.v, (out.get(f.v) ?? 0) + f.size);
+  }
+  regionlessCache.set(snapshotId, out);
+  return out;
+}
 
 interface SongTally {
   songFolder: string;
@@ -85,6 +114,8 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
     let reclaimBytes = 0;
     let reclaimProxyBytes = 0;
     let region0Bytes = 0;
+    let regionlessBytes = 0;
+    const regionlessByVersion = regionlessBytesByVersion(ctx, snapshot.id);
     let supersededCount = 0;
     let supersededFiles = 0;
     let protectedPatchBytes = 0;
@@ -105,6 +136,7 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
       // offline edit needs", which is a property of the archive and not of the
       // keep-N verdict.
       region0Bytes += r.region0Bytes;
+      regionlessBytes += regionlessByVersion.get(r.versionId) ?? 0;
 
       let tally = bySongMap.get(r.songFolder);
       if (!tally) {
@@ -175,6 +207,13 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
        * the proxy token.
        */
       region0Bytes,
+      /**
+       * Bytes in files with a valid name and NO region token, across the rows
+       * in view. Separate from `region0Bytes`: a regionless file is a legal
+       * whole-canvas deliverable, not a region 0. Unparsed names are in
+       * neither. The UI shows the two summed as "Region 0 + untagged".
+       */
+      regionlessBytes,
       /** Bytes and versions the cross-check rescued, within the rows in view. */
       programmedBytes,
       programmedCount,

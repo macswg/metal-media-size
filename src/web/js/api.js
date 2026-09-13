@@ -192,6 +192,7 @@ function normaliseReclaim(r) {
     // Null, not 0: a server that does not report this has not told us there is
     // no offline-edit material, and the strip shows an em dash for that.
     region0Bytes: r.region0Bytes ?? null,
+    regionlessBytes: r.regionlessBytes ?? null,
     // The show-file cross-check. `programmed` is null when no capture is
     // loaded, and NULL IS ALSO THE SAFE DEFAULT for a server too old to report
     // it: the strip's null branch is the warning, so an unknown state reads as

@@ -2,6 +2,22 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-09-12 — Region 0 + untagged, checked against a real director
+
+The REGION 0s tile (2.06 TiB at snapshot 3) was checked against the director
+drive `moose/objects/VideoFile`, read-only (list and stat, no file opened):
+2,499 region0 files match the archive by name and size with zero size
+mismatches, 5 are extra on the drive, 1 is absent. The drive also holds
+0.63 TiB of `.mov` files with no region token (`888_IMAG_*_RECT_v001.mov`),
+which is why the drive reads larger than the tile.
+
+- **New tile, REGION 0 + UNTAGGED**: region0 bytes plus bytes in parsed names
+  with no region token, over the rows in view. `/api/reclaim` returns
+  `regionlessBytes` (read with the scan's parser, the same test as
+  `/api/machines`' `regionless`). Archive: 2.679 TiB; director: 2.758 TiB.
+- **SHOW PLAYS renamed CROSSCHECK SAVES** at the user's request. Label only;
+  fields and behaviour unchanged.
+
 ## 2026-09-09 — the versions the show was still playing
 
 > *"we'll need to cross reference this so that we aren't marking anything for
