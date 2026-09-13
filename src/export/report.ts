@@ -50,17 +50,6 @@ import type {
   ExportVersionRow,
 } from './types.ts';
 
-/**
- * Literal paths reproduced in the report before it starts summarising.
- *
- * The report is the document that gets forwarded; the complete list always
- * lives in the `.paths.txt` manifest beside each job and in `manifest.json`.
- * When the cap bites, the page says exactly how many paths it is not showing
- * and where the full list is -- a truncated list that looked complete would be
- * the single worst failure this document could have.
- */
-export const MAX_REPORT_PATHS = 2000;
-
 /** Assets given a full ladder table before the report switches to a summary. */
 export const MAX_REPORT_LADDERS = 400;
 
@@ -324,7 +313,6 @@ ol.steps li { margin-bottom: 5px; }
 ul.warn { margin: 8px 0; padding-left: 18px; font-size: 12.5px; }
 ul.warn li { margin-bottom: 6px; }
 
-.paths { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 10px; line-height: 1.45; white-space: pre-wrap; word-break: break-all; background: var(--tint); border: 1px solid var(--rule-soft); padding: 8px; margin: 6px 0 0; }
 .foot { margin-top: 24px; padding-top: 8px; border-top: 1px solid var(--rule); font-size: 10.5px; color: var(--ink-faint); }
 
 .ladder { margin-bottom: 14px; break-inside: avoid; }
@@ -703,7 +691,7 @@ function decisionPage(d: ExportDataset): string {
     <p class="small muted" style="margin-top:16px">
       Detail follows: the proposal attached to this report and what running it does (page 2),
       where the numbers come from and the per-song split (page 3), then every affected asset
-      showing what goes next to what stays, and finally the literal file list.
+      showing what goes next to what stays.
     </p>
   </section>`;
 }
@@ -1009,8 +997,8 @@ function ladderPages(d: ExportDataset): string {
           d.ladders.length - shown.length,
         )} further asset(s) are in this export but are not shown as ladders here, to keep the
          document readable. Every one of them is listed in full in <code>review.md</code> and
-         <code>manifest.json</code> beside this report, and every file is in the path list that
-         follows.</p>`
+         <code>manifest.json</code> beside this report, and every literal file path is in the
+         <code>.paths.txt</code> manifest shipped beside each job.</p>`
       : '';
 
   return `
@@ -1025,52 +1013,6 @@ function ladderPages(d: ExportDataset): string {
     </p>
     ${blocks.join('')}
     ${omitted}
-  </section>`;
-}
-
-// ---------------------------------------------------------------------------
-// The literal path list
-// ---------------------------------------------------------------------------
-
-function pathPage(d: ExportDataset): string {
-  const all: { chunk: number; path: string }[] = [];
-  for (const c of d.chunks) for (const p of c.relPaths) all.push({ chunk: c.index, path: p });
-  const shown = all.slice(0, MAX_REPORT_PATHS);
-
-  const blocks = d.chunks
-    .map((c) => {
-      const mine = shown.filter((r) => r.chunk === c.index).map((r) => r.path);
-      if (mine.length === 0) return '';
-      return `
-      <h3>Job ${n(c.index)} — <code>${esc(c.guiFileName)}</code></h3>
-      <div class="cap small muted">${n(c.fileCount)} file(s), ${esc(formatBytes(c.bytes))}${
-        mine.length < c.fileCount ? ` — first ${n(mine.length)} shown` : ''
-      }</div>
-      <pre class="paths">${mine.map((p) => esc(`${d.snapshot.root}/${p}`)).join('\n')}</pre>`;
-    })
-    .join('');
-
-  const omitted =
-    all.length > shown.length
-      ? `<div class="banner alert"><strong>${n(all.length - shown.length)} of ${n(
-          all.length,
-        )} paths are not printed here.</strong> This report caps the list at ${n(
-          MAX_REPORT_PATHS,
-        )} so it stays a document rather than a phone book. The COMPLETE list — the one
-        FreeFileSync will act on — is in the <code>.paths.txt</code> manifest shipped beside each
-        job, and in <code>manifest.json</code>. Review that list, not this excerpt.</div>`
-      : '';
-
-  return `
-  <section class="page">
-    <h2>The file list</h2>
-    <p class="small muted" style="margin-top:0">
-      These are the concrete files, reproduced from the same array that generates the filter
-      inside each FreeFileSync job — so what is approved here and what the job acts on cannot
-      drift apart. Review concrete paths, never filter patterns.
-    </p>
-    ${omitted}
-    ${blocks}
   </section>`;
 }
 
@@ -1095,7 +1037,6 @@ ${decisionPage(d)}
 ${exportPage(d)}
 ${provenancePage(d)}
 ${ladderPages(d)}
-${pathPage(d)}
 <div class="foot">
   Produced by metal-media-size · run ${esc(d.runId)} · snapshot #${n(d.snapshot.snapshotId)} ·
   ${esc(d.generatedAt)} · read-only analysis, no archive file was altered ·

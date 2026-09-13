@@ -111,7 +111,7 @@ export {
 } from './ffs.ts';
 export { buildJsonExport, renderJsonExport } from './json.ts';
 export { renderMarkdown, formatBytes } from './markdown.ts';
-export { renderReport, reportFileName, MAX_REPORT_PATHS, MAX_REPORT_LADDERS } from './report.ts';
+export { renderReport, reportFileName, MAX_REPORT_LADDERS } from './report.ts';
 export { buildMachineFill } from './machine-fill.ts';
 export {
   buildScenarios,

@@ -32,7 +32,7 @@ import type { Database as Db } from 'better-sqlite3';
 
 import { openDb, loadReclaimInput } from '../src/db/index.ts';
 import { buildDataset, writeExport, buildScenarios, scenarioLabel } from '../src/export/index.ts';
-import { MAX_REPORT_PATHS, renderReport, reportFileName, esc } from '../src/export/report.ts';
+import { renderReport, reportFileName, esc } from '../src/export/report.ts';
 import { formatBytes } from '../src/export/markdown.ts';
 import type { ExportDataset } from '../src/export/types.ts';
 
@@ -481,10 +481,21 @@ describe('the rendered report', () => {
     expect(html).toContain(`#${d.snapshot.snapshotId}`);
   });
 
-  it('lists every literal path when the list is short enough to print', () => {
-    const paths = d.chunks.flatMap((c) => c.relPaths);
-    expect(paths.length).toBeLessThanOrEqual(MAX_REPORT_PATHS);
-    for (const p of paths) expect(html).toContain(esc(`${ROOT}/${p}`));
+  it('does NOT reproduce the literal file list', () => {
+    // The report is the document that gets forwarded and read. The complete
+    // path list -- the one FreeFileSync acts on, and the one an approver must
+    // actually check -- ships as `.paths.txt` beside each job and in
+    // `manifest.json`. Printing a copy here made the report enormous and put a
+    // second list in circulation that could be read as the authoritative one.
+    expect(html).not.toContain('The file list');
+    for (const p of d.chunks.flatMap((c) => c.relPaths)) {
+      expect(html).not.toContain(esc(`${ROOT}/${p}`));
+    }
+  });
+
+  it('still points the reader at the manifest that does carry every path', () => {
+    // Removing the list must not remove the instruction to review one.
+    expect(html).toContain('.paths.txt');
   });
 });
 
@@ -725,31 +736,5 @@ describe('the report is named for when it was produced', () => {
     expect(months.map((f) => f.slice('media_cleanup_report_01'.length, -'2026_0000.html'.length))).toEqual(
       ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
     );
-  });
-});
-
-describe('the path list never truncates silently', () => {
-  it('says how many paths it is not printing, and where the full list is', () => {
-    // Hand-built: producing 2,000+ real files in the fixture would cost more
-    // than it proves. What matters is the wording when the cap bites.
-    const d = dataset();
-    const chunk = d.chunks[0] as { relPaths: string[]; fileCount: number; bytes: number };
-    const inflated: ExportDataset = {
-      ...d,
-      chunks: [
-        {
-          ...(d.chunks[0] as ExportDataset['chunks'][number]),
-          relPaths: Array.from(
-            { length: MAX_REPORT_PATHS + 37 },
-            (_, i) => `${SONG_B}/pad_v001_region${i}.mov`,
-          ),
-          fileCount: MAX_REPORT_PATHS + 37,
-        },
-      ],
-    };
-    const html = renderReport(inflated);
-    expect(html).toContain('37 of 2,037 paths are not printed here');
-    expect(html).toContain('.paths.txt');
-    expect(chunk.relPaths.length).toBeGreaterThan(0);
   });
 });
