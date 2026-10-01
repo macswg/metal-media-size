@@ -8,7 +8,11 @@
  *
  *   1. IT BINDS 127.0.0.1 ONLY. `startServer` hard-codes the loopback host, so
  *      there is no configuration path that exposes this to a network. No auth,
- *      no CORS, no external exposure -- because there is no external surface.
+ *      no CORS. The one way in from elsewhere is `tailscale serve`, which
+ *      start-analyser.command sets up when Tailscale is connected: a proxy to
+ *      this loopback port, tailnet members only, removed when the window
+ *      closes. Everyone on the tailnet therefore gets the whole API -- never
+ *      `tailscale funnel`, which would hand it to the internet.
  *
  *   2. IT DOES NOT TOUCH THE ARCHIVE. Every route reads the project's own
  *      SQLite index. The single exception is `POST /api/scan`, which delegates

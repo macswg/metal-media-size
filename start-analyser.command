@@ -11,11 +11,20 @@
 #
 # WHAT IS RUNNING: a read-only analyser bound to 127.0.0.1. It never modifies
 # the archive. See CLAUDE.md for the safety invariants.
+#
+# TAILSCALE: if Tailscale is running, the page is also published to your
+# tailnet with `tailscale serve` -- HTTPS on the full name, plain HTTP on the
+# same port as the local server -- tailnet members only, never the public
+# internet (that would be `tailscale funnel`, which this never runs).
+# The server itself still binds loopback; Tailscale proxies to it. The proxy
+# is removed when this window closes. Opt out with TAILSCALE=0; pick the
+# tailnet port with TS_HTTPS_PORT (default 443).
 
 set -uo pipefail
 
 PORT="${PORT:-8787}"
 URL="http://127.0.0.1:${PORT}/"
+TS_HTTPS_PORT="${TS_HTTPS_PORT:-443}"
 
 # `.command` files launch with the home directory as cwd, so derive the repo
 # from the script's own location rather than from wherever Finder started us.
@@ -33,6 +42,92 @@ is_our_server() {
   curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" 2>/dev/null | grep -q '"ok"'
 }
 
+# ------------------------------------------------------------------ tailscale
+#
+# Publish the loopback server to the tailnet. Every failure here is a warning,
+# never fatal: the analyser works locally without it.
+
+TS_CLI=""
+TS_OURS=""    # the listeners WE set up ("https=443 http=8787"), so only we take them down
+TS_URLS=""
+
+find_tailscale() {
+  [ "${TAILSCALE:-1}" = "0" ] && return 1
+  for c in "$(command -v tailscale 2>/dev/null)" \
+           /Applications/Tailscale.app/Contents/MacOS/Tailscale; do
+    [ -n "$c" ] && [ -x "$c" ] && { TS_CLI="$c"; return 0; }
+  done
+  return 1
+}
+
+# What a tailnet port currently proxies to on THIS node's name, or empty.
+ts_current_target() {
+  "$TS_CLI" serve status --json 2>/dev/null | node -e '
+    let raw = ""; process.stdin.on("data", d => raw += d).on("end", () => {
+      try {
+        const [host, port] = process.argv.slice(1);
+        const h = JSON.parse(raw)?.Web?.[`${host}:${port}`]?.Handlers?.["/"];
+        if (h && h.Proxy) process.stdout.write(h.Proxy);
+      } catch { /* no config, or not JSON */ }
+    });
+  ' "$1" "$2"
+}
+
+# ts_publish <dns> <https|http> <tailnet port> -- one listener, never taking
+# over a port something else is already published on.
+ts_publish() {
+  local dns="$1" mode="$2" port="$3" want="http://127.0.0.1:${PORT}" target url
+  target="$(ts_current_target "$dns" "$port")"
+  if [ -n "$target" ] && [ "$target" != "$want" ]; then
+    say "tailnet: ${mode} port ${port} already serves ${target} -- left alone."
+    return 0
+  fi
+  if [ -z "$target" ]; then
+    "$TS_CLI" serve --bg --yes --"$mode"="$port" "$want" >/dev/null 2>&1 || {
+      say "tailnet: 'tailscale serve --${mode}=${port}' failed."
+      return 0
+    }
+    TS_OURS="${TS_OURS} ${mode}=${port}"
+  fi
+  if [ "$mode" = "https" ] && [ "$port" = "443" ]; then url="https://${dns}/"
+  elif [ "$mode" = "http" ] && [ "$port" = "80" ]; then url="http://${dns}/"
+  else url="${mode}://${dns}:${port}/"; fi
+  TS_URLS="${TS_URLS} ${url}"
+}
+
+start_tailscale() {
+  find_tailscale || return 0
+  local dns
+  dns="$("$TS_CLI" status --self --json 2>/dev/null | node -e '
+    let raw = ""; process.stdin.on("data", d => raw += d).on("end", () => {
+      try {
+        const s = JSON.parse(raw);
+        if (s.BackendState === "Running") process.stdout.write(String(s.Self.DNSName).replace(/\.$/, ""));
+      } catch {}
+    });
+  ' 2>/dev/null)"
+  if [ -z "$dns" ]; then
+    say "tailnet: Tailscale is not connected -- local access only."
+    return 0
+  fi
+  # HTTPS needs the FULL name: the certificate does not cover the short one,
+  # so https://vesmacmini/ fails the handshake. Plain HTTP on the same port as
+  # the local server is what people type -- http://<machine>:8787/ -- and
+  # works by short name too. Still WireGuard-encrypted end to end.
+  ts_publish "$dns" https "$TS_HTTPS_PORT"
+  ts_publish "$dns" http "$PORT"
+  local short="${dns%%.*}"
+  [ -n "$TS_URLS" ] && say "tailnet:${TS_URLS}  (also http://${short}:${PORT}/ -- tailnet members only)"
+}
+
+stop_tailscale() {
+  local l
+  for l in $TS_OURS; do
+    "$TS_CLI" serve --yes --"${l%%=*}"="${l#*=}" off >/dev/null 2>&1 || true
+  done
+  TS_OURS=""
+}
+
 say "Media Allocation Analyzer"
 say "================"
 say "folder : $(pwd)"
@@ -43,6 +138,10 @@ EXISTING="$(pid_on_port)"
 if [ -n "$EXISTING" ]; then
   if is_our_server; then
     say "Already running (pid ${EXISTING}). Opening the browser."
+    start_tailscale
+    # The server outlives this window, so the proxy does too; stop-analyser
+    # removes both.
+    TS_OURS=""
     say "To stop it, run stop-analyser.command."
     open "$URL" 2>/dev/null || true
     say ""
@@ -180,13 +279,19 @@ OPENER=$!
 
 cleanup() {
   kill "$OPENER" 2>/dev/null
+  stop_tailscale
   printf '\nServer stopped.\n'
 }
-trap cleanup EXIT INT TERM
+# HUP too: closing the Terminal window sends it, and the tailnet proxy must
+# not outlive the server it points at.
+trap cleanup EXIT INT TERM HUP
+
+start_tailscale
 
 say ""
 say "Starting. This window keeps the server alive -- close it or press Ctrl-C to stop."
 say "  ${URL}"
+for u in $TS_URLS; do say "  ${u}"; done
 say ""
 
 # Foreground on purpose: the process dies with the window, so closing the

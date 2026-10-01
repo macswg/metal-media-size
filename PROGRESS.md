@@ -2,6 +2,24 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-09-30 — the launcher publishes to the tailnet
+
+`start-analyser.command` now runs `tailscale serve --bg --https=443
+http://127.0.0.1:<port>` when Tailscale is connected, prints the tailnet URL,
+and turns the proxy off when the window closes (EXIT/INT/TERM/HUP; HUP is what
+closing a Terminal window sends). `stop-analyser.command` removes it too, but
+only if it points at the analyser's port. A tailnet port already publishing
+something else is left alone with a warning. The server bind is unchanged:
+still 127.0.0.1, still pinned by `test/server/api.test.ts`. Opt out with
+`TAILSCALE=0`; `TS_HTTPS_PORT` picks the tailnet port. Verified end to end on
+spare ports: tailnet URL answered 200, and the proxy was gone after hangup.
+
+Follow-up the same day: HTTPS alone was not reachable the way people type it.
+`http://vesmacmini:8787/` had nothing listening on the tailnet, and
+`https://vesmacmini/` fails the TLS handshake because the certificate covers
+only the full `*.ts.net` name. The launcher now also publishes plain HTTP on
+the tailnet at the same port as the local server; all three forms answered 200.
+
 ## 2026-09-12 — Region 0 + untagged, checked against a real director
 
 The REGION 0s tile (2.06 TiB at snapshot 3) was checked against the director

@@ -14,6 +14,9 @@ Target: `/Users/Shared/ObjectMount.noindex/show-archive/SHOW_2026/00_D3_Delivery
 two levels deep. A full walk takes ~12 s cold.
 
 Run it: `npm run scan` then `npm run serve`, then open `http://127.0.0.1:<port>/`.
+`start-analyser.command` also publishes the page to the tailnet with `tailscale
+serve` (tailnet only, never `funnel`) and removes the proxy when its window
+closes. The server still binds 127.0.0.1; Tailscale proxies to it.
 `npm run probe` is a separate, optional pass that reads pixel dimensions from
 the file headers — see "The one place that reads bytes" below.
 

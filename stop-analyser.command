@@ -7,7 +7,8 @@
 # different window than the one you are looking at.
 #
 # It stops the SERVER only. Nothing in the archive is affected -- the server
-# never modified it in the first place.
+# never modified it in the first place. It also removes the tailnet proxy
+# start-analyser set up, if that proxy points at this port.
 
 set -uo pipefail
 
@@ -24,6 +25,36 @@ is_our_server() {
   curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" 2>/dev/null | grep -q '"ok"'
 }
 
+# Remove the `tailscale serve` proxy only if it points at OUR port -- a
+# tailnet port publishing something else is not ours to take down.
+stop_tailscale() {
+  local cli
+  cli="$(command -v tailscale 2>/dev/null)"
+  [ -x "$cli" ] || cli=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+  [ -x "$cli" ] || return 0
+  # "https=443 http=8787": every listener on any name that points at us.
+  local mine l
+  mine="$("$cli" serve status --json 2>/dev/null | node -e '
+    let raw = ""; process.stdin.on("data", d => raw += d).on("end", () => {
+      try {
+        const want = process.argv[1];
+        const c = JSON.parse(raw);
+        const out = new Set();
+        for (const [k, v] of Object.entries(c?.Web ?? {})) {
+          if (v?.Handlers?.["/"]?.Proxy !== want) continue;
+          const port = k.slice(k.lastIndexOf(":") + 1);
+          out.add(`${c?.TCP?.[port]?.HTTPS ? "https" : "http"}=${port}`);
+        }
+        process.stdout.write([...out].join(" "));
+      } catch {}
+    });
+  ' "http://127.0.0.1:${PORT}" 2>/dev/null)"
+  for l in $mine; do
+    "$cli" serve --yes --"${l%%=*}"="${l#*=}" off >/dev/null 2>&1 \
+      && say "Tailnet proxy ${l} removed."
+  done
+}
+
 say "Archive Analyser -- stop"
 say "========================"
 say "port : ${PORT}"
@@ -32,6 +63,7 @@ say ""
 PID="$(pid_on_port)"
 if [ -z "$PID" ]; then
   say "Nothing is listening on port ${PORT}. Nothing to stop."
+  stop_tailscale
   hold
   exit 0
 fi
@@ -73,4 +105,5 @@ if [ -n "$(pid_on_port)" ]; then
 fi
 
 say "Stopped. Port ${PORT} is free."
+stop_tailscale
 hold

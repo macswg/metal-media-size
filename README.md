@@ -197,6 +197,14 @@ superseded. That is what this tool works out.
   set is read from the rig (`1`–`14`), not hard-coded, and region 0 is never one
   of them. It is not the same check as the missing-region anomaly — that
   compares a version against its own siblings, this compares it against the
+`start-analyser.command` does this for you when Tailscale is connected: it
+publishes `https://<machine>.<tailnet>.ts.net/` (the certificate covers only the
+full name, so `https://<machine>/` fails) and `http://<machine>:8787/`, prints
+both beside the local URL and removes the proxy when its
+window closes (`stop-analyser.command` removes it too). It never takes over a
+tailnet port already publishing something else. `TAILSCALE=0` opts out;
+`TS_HTTPS_PORT=8445` picks a port other than 443.
+
   canvas — and the panel accounts for every version in view in one of four
   buckets so the numbers add up. Nothing here is proposed for removal.
 - **Duplicates** — metadata only, never reads file bytes (the mount is object
