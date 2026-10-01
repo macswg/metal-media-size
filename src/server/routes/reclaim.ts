@@ -229,6 +229,8 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
             captures: prot.captures.map((c) => ({
               sourceFile: c.sourceFile,
               capturedAt: c.capturedAt,
+              capturedAtSource: c.capturedAtSource,
+              kind: c.kind,
               project: c.project,
             })),
             /** Version rows held back across the WHOLE snapshot. */

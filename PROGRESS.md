@@ -2,6 +2,24 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-10-01 — read the d3 project directly; filter on what the show plays
+
+- **`.d3` files in `programmed_media_crosscheck/` are read as captures**, with
+  `d3_snapshot_diff`'s vendored extractor (`src/programmed/vendor/d3extract.cjs`,
+  byte-for-byte). Checked against the user's `moose_sphere_backup_1Oct2026_0648`:
+  the `.d3` and the summary exported from it give identical references (959),
+  tracks (47) and setlists (6). Parse time ~0.3 s for 293 MB. The date is the
+  file's mtime and is labelled "saved", never "captured".
+- **Programmed in show filter** (`programmed=0|1`) on every list, plus **Hide
+  setlists** / **Hide tracks** (`excludeSetlist`, `excludeTrack`). View-only:
+  protection is untouched. At snapshot 24: 13,184 files / 54.92 TiB programmed,
+  22,707 / 104.25 TiB not; 901 programmed versions, 211 once `qc` is hidden, 63
+  once `band review - all current tracks` is hidden.
+- **Drill-down**: the version ladder lists, per version, each track that plays
+  it and that track's setlists.
+- Tests: `test/programmed-d3.test.ts` (17). Real-project cases read only the
+  local `programmed_media_crosscheck/`, and say so when it is empty.
+
 ## 2026-09-30 — the launcher publishes to the tailnet
 
 `start-analyser.command` now runs `tailscale serve --bg --https=443

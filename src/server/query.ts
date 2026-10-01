@@ -39,8 +39,27 @@
  *                                            slices behind it
  *   status       verdict of the file's       verdict of the version at keepN
  *                version at keepN
+ *   programmed   the file's version is       the version is in the loaded
+ *   (0|1)        in the loaded show capture  show capture (see below)
+ *   excludeTrack the file's version is NOT   the version is NOT programmed
+ *                programmed on any of these  on any of these tracks
+ *                tracks
+ *   excludeSetlist  as excludeTrack, for every track on these setlists
  *   q            substring of rel_path       substring of
  *                                            "song_folder/base ver_label"
+ *
+ * THE PROGRAMMED FILTERS DECIDE WHAT IS SHOWN, NEVER WHAT IS PROTECTED. They
+ * read the cross-check's protection set, which was resolved over the whole
+ * snapshot, and hide rows. Hiding a track's media does not unprotect it, and
+ * `programmed=0` does not mark anything removable. All three refuse with a 400
+ * when no capture is loaded, or the capture matched nothing: "not programmed"
+ * against no evidence would read as "the show plays none of this". A name not
+ * in the capture is refused too -- a typo or a stale link that hid nothing
+ * would look like a filter that worked.
+ *
+ * `excludeTrack` and `excludeSetlist` are NEWLINE-separated, because a track
+ * name is a file stem and can carry a comma. A version programmed on an
+ * excluded track AND on another one is hidden: it is "from" that track.
  *
  * `family` is a DISPLAY LABEL. It filters the view; it never classifies
  * anything as removable. Only `computeReclaim` decides that.
@@ -82,6 +101,12 @@ export interface FilterSpec {
   status?: StatusValue;
   isPatch?: 0 | 1;
   hasProxy?: 0 | 1 | 'only';
+  /** 1 = only versions the show capture programs; 0 = only those it does not. */
+  programmed?: 0 | 1;
+  /** Hide versions programmed on any of these track ids. */
+  excludeTrack?: string[];
+  /** Hide versions programmed on any track on these setlists. */
+  excludeSetlist?: string[];
   q?: string;
   /**
    * Restrict to these version ids. Exists so the UI can show "only what I have
@@ -161,6 +186,19 @@ function proxyParam(q: Query): 0 | 1 | 'only' | undefined {
   if (s === '1' || s === 'true') return 1;
   if (s === '0' || s === 'false') return 0;
   throw badRequest('bad_param', `hasProxy must be 0, 1 or 'only', got ${JSON.stringify(s)}`);
+}
+
+/**
+ * A list of names, one per line. Repeated params are accepted too. Names are
+ * matched exactly -- they are track and setlist names from a show file, and
+ * trimming one could make two of them collide.
+ */
+function lineListParam(q: Query, key: string): string[] | undefined {
+  const v = q[key];
+  if (v === undefined || v === null || v === '') return undefined;
+  const raw = (Array.isArray(v) ? v : [v]).map(String);
+  const list = [...new Set(raw.flatMap((s) => s.split('\n')).filter((s) => s !== ''))];
+  return list.length === 0 ? undefined : list;
 }
 
 export function parseKeepN(q: Query): number {
@@ -316,6 +354,13 @@ export function parseFilters(q: Query): FilterSpec {
   if (isPatch !== undefined) f.isPatch = isPatch;
   const hasProxy = proxyParam(q);
   if (hasProxy !== undefined) f.hasProxy = hasProxy;
+
+  const programmed = boolIntParam(q, 'programmed');
+  if (programmed !== undefined) f.programmed = programmed;
+  const excludeTrack = lineListParam(q, 'excludeTrack');
+  if (excludeTrack !== undefined) f.excludeTrack = excludeTrack;
+  const excludeSetlist = lineListParam(q, 'excludeSetlist');
+  if (excludeSetlist !== undefined) f.excludeSetlist = excludeSetlist;
 
   const qq = str(q, 'q');
   if (qq !== undefined) f.q = qq;

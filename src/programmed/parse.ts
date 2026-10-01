@@ -61,6 +61,28 @@ export interface ProgrammedRef {
   rawVersion: string | null;
   /** Track the reference was found on, for the operator's own reporting. */
   trackName: string | null;
+  /**
+   * The track's id in the capture -- its name, disambiguated where two tracks
+   * share one. This is the key the track filter and the drill-down use, so a
+   * name two tracks share cannot merge them.
+   */
+  trackId: string | null;
+  /**
+   * Setlists the track is on, by name. Every track in a capture is on at least
+   * one -- the top-level `tracks` array is the union of what the setlists
+   * reference -- but an older capture with no `transports` block leaves this
+   * empty, and that is reported as "setlist unknown", never as "on none".
+   */
+  setlists: string[];
+}
+
+/** One setlist in a capture, as the transport that plays it names it. */
+export interface ProgrammedSetlist {
+  setlist: string;
+  /** Transport the setlist is loaded on (`show_a`, `editor`). */
+  transport: string | null;
+  /** Track ids, in running order. */
+  trackIds: string[];
 }
 
 /** A whole capture file, parsed. */
@@ -73,6 +95,27 @@ export interface ProgrammedCapture {
   schemaVersion: number | null;
   /** Every media reference, in file order. Duplicates are kept. */
   refs: ProgrammedRef[];
+  /** Setlists the capture's transports carry. Empty on a capture without them. */
+  setlists: ProgrammedSetlist[];
+  /**
+   * What the file was. A Susan summary is the plugin's export; a d3 project is
+   * the `.d3` archive itself, read by `src/programmed/d3.ts`. Both reach this
+   * shape through the same parser.
+   */
+  kind: 'summary' | 'project';
+  /**
+   * Where `capturedAt` came from. A summary states its own capture time; a
+   * `.d3` archive does not, so its date is the file's modification time -- when
+   * the project was last saved, or when it was copied by something that does
+   * not preserve dates. Carried so no banner calls a file date a capture date.
+   */
+  capturedAtSource: 'capture' | 'file-mtime';
+  /**
+   * Things the extractor could not resolve -- a track or media resource the
+   * archive names but does not hold. Each one is a reference that protects
+   * less than it should, so they are printed at startup, never dropped.
+   */
+  warnings: string[];
 }
 
 /**
@@ -182,6 +225,9 @@ export function parseProgrammedCapture(text: string, sourceFile: string): Progra
           rawName: m.name,
           rawVersion: typeof m.version === 'string' ? m.version : null,
           trackName,
+          // Filled in by the caller, which knows the track's id and setlists.
+          trackId: null,
+          setlists: [],
         });
       }
       // Nested groups. The real capture is flat today; a nested one that went
@@ -190,10 +236,43 @@ export function parseProgrammedCapture(text: string, sourceFile: string): Progra
     }
   };
 
+  // Setlists first, so every reference can say which setlists its track is on.
+  // `trackRefs` names track ids (schema 5 and later); a capture without a
+  // `transports` block simply has no setlists to report.
+  const setlists: ProgrammedSetlist[] = [];
+  const setlistsOfTrack = new Map<string, string[]>();
+  for (const t of Array.isArray(d.transports) ? (d.transports as unknown[]) : []) {
+    if (t === null || typeof t !== 'object') continue;
+    const tr = t as { name?: unknown; setlist?: unknown; trackRefs?: unknown };
+    if (typeof tr.setlist !== 'string' || tr.setlist === '') continue;
+    const trackIds = Array.isArray(tr.trackRefs)
+      ? tr.trackRefs.filter((x): x is string => typeof x === 'string')
+      : [];
+    setlists.push({
+      setlist: tr.setlist,
+      transport: typeof tr.name === 'string' ? tr.name : null,
+      trackIds,
+    });
+    for (const id of trackIds) {
+      const list = setlistsOfTrack.get(id) ?? [];
+      if (!list.includes(tr.setlist)) list.push(tr.setlist);
+      setlistsOfTrack.set(id, list);
+    }
+  }
+
   for (const t of d.tracks as unknown[]) {
     if (t === null || typeof t !== 'object') continue;
-    const track = t as { name?: unknown; layers?: RawLayer[] | null };
-    walk(track.layers, typeof track.name === 'string' ? track.name : null);
+    const track = t as { id?: unknown; name?: unknown; layers?: RawLayer[] | null };
+    const trackName = typeof track.name === 'string' ? track.name : null;
+    const trackId = typeof track.id === 'string' ? track.id : trackName;
+    const before = refs.length;
+    walk(track.layers, trackName);
+    const onSetlists = trackId === null ? [] : (setlistsOfTrack.get(trackId) ?? []);
+    for (let i = before; i < refs.length; i += 1) {
+      const ref = refs[i] as ProgrammedRef;
+      ref.trackId = trackId;
+      ref.setlists = [...onSetlists];
+    }
   }
 
   return {
@@ -202,5 +281,9 @@ export function parseProgrammedCapture(text: string, sourceFile: string): Progra
     project: typeof d.project === 'string' ? d.project : null,
     schemaVersion: typeof d.schemaVersion === 'number' ? d.schemaVersion : null,
     refs,
+    setlists,
+    kind: 'summary',
+    capturedAtSource: 'capture',
+    warnings: [],
   };
 }

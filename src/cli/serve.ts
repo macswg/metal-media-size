@@ -69,6 +69,17 @@ async function main(): Promise<void> {
           `${programmed.captures.reduce((n, c) => n + c.refs.length, 0)} media reference(s), ` +
           `newest ${programmed.captures.map((c) => c.capturedAt ?? '?').sort().at(-1)}`,
   );
+  // One line per file, so an operator can see a dropped .d3 was read as a
+  // project and that its date is the file's, not a capture time.
+  for (const c of programmed.captures) {
+    console.log(
+      `           ${c.sourceFile}: ${c.kind === 'project' ? 'd3 project, saved' : 'Susan summary, captured'} ` +
+        `${c.capturedAt ?? 'date unknown'}; ${c.refs.length} reference(s) on ${c.setlists.length} setlist(s)`,
+    );
+    // Each is a reference the extractor could not resolve, so it protects
+    // less than it should. Printed, never dropped.
+    for (const w of c.warnings) console.log(`             warning: ${w}`);
+  }
   console.log(`listening: ${address}  (bound to ${BIND_HOST} only)`);
 }
 

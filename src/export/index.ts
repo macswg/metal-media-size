@@ -46,7 +46,11 @@ import { computeReclaim, type KeepReason } from '../scan/reclaim.ts';
  */
 export interface ProgrammedExportGuard {
   protectedVersionIds: ReadonlySet<number>;
-  captures: ReadonlyArray<{ sourceFile: string; capturedAt: string | null }>;
+  captures: ReadonlyArray<{
+    sourceFile: string;
+    capturedAt: string | null;
+    capturedAtSource?: 'capture' | 'file-mtime';
+  }>;
   matchedNames: number;
   totalNames: number;
   unmatchedNames: ReadonlyArray<{ rawName: string }>;
@@ -829,6 +833,7 @@ export function buildDataset(db: Db, opts: WriteExportOptions): ExportDataset {
           captures: guard.captures.map((c) => ({
             sourceFile: c.sourceFile,
             capturedAt: c.capturedAt,
+            capturedAtSource: c.capturedAtSource,
           })),
           protectedVersions: guard.protectedVersionIds.size,
           matchedNames: guard.matchedNames,

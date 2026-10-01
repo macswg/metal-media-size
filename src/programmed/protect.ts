@@ -51,13 +51,57 @@ export interface UnmatchedVersion {
   count: number;
 }
 
+/** One place a version is programmed: a track, and the setlists it is on. */
+export interface ProgrammedUse {
+  /** Track id in the capture. */
+  track: string;
+  /** Setlists carrying that track. Empty only when the capture had none. */
+  setlists: string[];
+}
+
+/** A track in the loaded captures, for the filter panel's picker. */
+export interface ProgrammedTrackSummary {
+  track: string;
+  setlists: string[];
+  /** Archive versions this track's references resolved to. */
+  versions: number;
+}
+
+/** A setlist in the loaded captures. */
+export interface ProgrammedSetlistSummary {
+  setlist: string;
+  /** Transports it is loaded on, across every capture. */
+  transports: string[];
+  /** Distinct tracks on it. */
+  tracks: number;
+}
+
 export interface ProgrammedProtection {
   /** `asset_version.id`s that must be kept whatever the supersession rules say. */
   protectedVersionIds: ReadonlySet<number>;
   /** Assets protected in full because a reference named no version. */
   wholeAssetIds: ReadonlySet<number>;
   /** Captures that fed this, newest `capturedAt` first. */
-  captures: Array<{ sourceFile: string; capturedAt: string | null; project: string | null; refs: number }>;
+  captures: Array<{
+    sourceFile: string;
+    capturedAt: string | null;
+    capturedAtSource: 'capture' | 'file-mtime';
+    kind: 'summary' | 'project';
+    project: string | null;
+    refs: number;
+    warnings: number;
+  }>;
+  /**
+   * Where each protected version is programmed, by `asset_version.id`. Drives
+   * the drill-down and the track/setlist filters. A version protected because
+   * a reference named no version is listed under that reference's track too:
+   * it is what the track asks for, as far as the capture can say.
+   */
+  programmedOn: ReadonlyMap<number, readonly ProgrammedUse[]>;
+  /** Every track that carries media, in name order. */
+  tracks: ProgrammedTrackSummary[];
+  /** Every setlist, in name order. */
+  setlists: ProgrammedSetlistSummary[];
   /** Distinct media names in the captures. */
   totalNames: number;
   /** Distinct names that resolved to at least one archive asset. */
@@ -112,6 +156,32 @@ export function resolveProgrammed(
   const allRefs: ProgrammedRef[] = [];
   for (const c of captures) allRefs.push(...c.refs);
 
+  // versionId -> track -> setlists. Sets, because the same track reaches the
+  // same version once per layer that plays it and once per capture loaded.
+  const uses = new Map<number, Map<string, Set<string>>>();
+  const trackVersions = new Map<string, Set<number>>();
+  const trackSetlists = new Map<string, Set<string>>();
+  const use = (versionId: number, ref: ProgrammedRef): void => {
+    protectedVersionIds.add(versionId);
+    const track = ref.trackId ?? ref.trackName;
+    if (track === null) return;
+    let byTrack = uses.get(versionId);
+    if (!byTrack) uses.set(versionId, (byTrack = new Map()));
+    let lists = byTrack.get(track);
+    if (!lists) byTrack.set(track, (lists = new Set()));
+    for (const sl of ref.setlists) lists.add(sl);
+    let tv = trackVersions.get(track);
+    if (!tv) trackVersions.set(track, (tv = new Set()));
+    tv.add(versionId);
+  };
+  for (const ref of allRefs) {
+    const track = ref.trackId ?? ref.trackName;
+    if (track === null) continue;
+    let ts = trackSetlists.get(track);
+    if (!ts) trackSetlists.set(track, (ts = new Set()));
+    for (const sl of ref.setlists) ts.add(sl);
+  }
+
   for (const ref of allRefs) {
     names.add(ref.base);
     const hits = byBase.get(ref.base);
@@ -134,7 +204,7 @@ export function resolveProgrammed(
         // No readable version: the show plays this asset and the capture will
         // not say which render. Protect all of them -- see the header.
         wholeAssetIds.add(asset.id);
-        for (const v of asset.versions) protectedVersionIds.add(v.id);
+        for (const v of asset.versions) use(v.id, ref);
         continue;
       }
       const want = identity(ref.verNum, ref.subLetter);
@@ -156,16 +226,55 @@ export function resolveProgrammed(
           });
         continue;
       }
-      for (const v of rows) protectedVersionIds.add(v.id);
+      for (const v of rows) use(v.id, ref);
     }
   }
+
+  const byName = (a: string, b: string): number => a.localeCompare(b);
+  const programmedOn = new Map<number, ProgrammedUse[]>();
+  for (const [versionId, byTrack] of uses) {
+    programmedOn.set(
+      versionId,
+      [...byTrack]
+        .map(([track, lists]) => ({ track, setlists: [...lists].sort(byName) }))
+        .sort((a, b) => byName(a.track, b.track)),
+    );
+  }
+
+  const tracks: ProgrammedTrackSummary[] = [...trackSetlists]
+    .map(([track, lists]) => ({
+      track,
+      setlists: [...lists].sort(byName),
+      versions: trackVersions.get(track)?.size ?? 0,
+    }))
+    .sort((a, b) => byName(a.track, b.track));
+
+  const setlistMap = new Map<string, { transports: Set<string>; tracks: Set<string> }>();
+  for (const c of captures) {
+    for (const sl of c.setlists) {
+      let e = setlistMap.get(sl.setlist);
+      if (!e) setlistMap.set(sl.setlist, (e = { transports: new Set(), tracks: new Set() }));
+      if (sl.transport !== null) e.transports.add(sl.transport);
+      for (const t of sl.trackIds) e.tracks.add(t);
+    }
+  }
+  const setlists: ProgrammedSetlistSummary[] = [...setlistMap]
+    .map(([setlist, e]) => ({
+      setlist,
+      transports: [...e.transports].sort(byName),
+      tracks: e.tracks.size,
+    }))
+    .sort((a, b) => byName(a.setlist, b.setlist));
 
   const captureSummaries = captures
     .map((c) => ({
       sourceFile: c.sourceFile,
       capturedAt: c.capturedAt,
+      capturedAtSource: c.capturedAtSource,
+      kind: c.kind,
       project: c.project,
       refs: c.refs.length,
+      warnings: c.warnings.length,
     }))
     .sort((a, b) => (b.capturedAt ?? '').localeCompare(a.capturedAt ?? ''));
 
@@ -173,6 +282,9 @@ export function resolveProgrammed(
     protectedVersionIds,
     wholeAssetIds,
     captures: captureSummaries,
+    programmedOn,
+    tracks,
+    setlists,
     totalNames: names.size,
     matchedNames: matched.size,
     unmatchedNames: [...unmatchedNames.values()].sort((a, b) => b.count - a.count),

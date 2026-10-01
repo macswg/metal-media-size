@@ -345,6 +345,21 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .chip.clear { font-family: var(--sans); color: var(--faint); border-style: dashed; }
 .chip.clear:hover { color: var(--text-2); }
 
+/* The "Hide tracks" checklist under Programmed in show. A capture carries
+   dozens of tracks, too many for chips, so it scrolls in place. */
+.track-list {
+  max-height: 220px; overflow-y: auto; margin-top: 6px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--bg-2);
+}
+.track-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 8px;
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-2); cursor: pointer;
+}
+.track-row:hover { background: var(--panel-3); }
+.fgroup .track-row input { width: auto; flex: none; }
+.track-row .track-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-row .track-n { color: var(--faint); font-variant-numeric: tabular-nums; }
+
 .seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .seg button {
   flex: 1; background: var(--bg-2); border: 0; border-right: 1px solid var(--line);
@@ -597,6 +612,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 13px; height: 13px;
   padding-top: 6px; display: flex; gap: 6px; align-items: flex-start;
 }
 .lad-reason .why { color: var(--faint); }
+/* Where in the show a version is programmed: one line per track. */
+.lad-prog { display: grid; gap: 2px; margin-top: 2px; }
+.lad-prog-row { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.lad-prog-row .muted { font-family: var(--sans); }
 .lad-timeline { display: flex; align-items: center; gap: 6px; }
 
 /* --------------------------------------------------------------- panels */

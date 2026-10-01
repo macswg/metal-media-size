@@ -118,6 +118,15 @@ export class LadderPanel {
       ),
     );
 
+    // Silence is not a state: with no capture loaded, "Programmed on" would be
+    // missing from every version and read as "the show plays none of these".
+    const prog = this.data.programmed;
+    if (prog === null || prog === undefined) {
+      body.appendChild(h('div.muted', { style: { fontSize: '11.5px' } }, 'Not cross-checked — no show capture is loaded, so where these versions are programmed is unknown.'));
+    } else if (!prog.usable) {
+      body.appendChild(h('div.muted', { style: { fontSize: '11.5px' } }, 'The loaded show capture matched nothing in this archive, so it cannot say where these versions are programmed.'));
+    }
+
     if (supers.length) {
       body.appendChild(
         h(
@@ -196,6 +205,10 @@ export class LadderPanel {
           ),
         ),
       );
+      // Not passed to the DOM's own append above: that would print a null
+      // child as the word "null". See CLAUDE.md.
+      const shows = programmedBlock(v.programmedOn);
+      if (shows) item.appendChild(shows);
       body.appendChild(item);
     }
 
@@ -207,6 +220,30 @@ export class LadderPanel {
       ),
     );
   }
+}
+
+/**
+ * "Programmed on": every track that plays this version, and the setlists each
+ * track is on. Null means no usable capture -- stated once at the top of the
+ * ladder, so nothing is drawn here. An empty list is a finding: the show does
+ * not play this version.
+ */
+function programmedBlock(uses) {
+  if (uses == null) return null;
+  const rows = uses.length
+    ? uses.map((u) =>
+        h(
+          'div.lad-prog-row',
+          { text: u.track },
+          h('span.muted', { text: u.setlists.length ? `  ·  ${u.setlists.join(', ')}` : '  ·  setlist unknown' }),
+        ),
+      )
+    : [h('div.lad-prog-row', h('span.muted', { text: 'Not programmed in the loaded show capture.' }))];
+  return h(
+    'div.lad-reason',
+    h('span.why', 'Show:'),
+    h('div.lad-prog', ...rows),
+  );
 }
 
 function cell(label, value) {

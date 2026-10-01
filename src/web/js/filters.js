@@ -11,7 +11,7 @@ import { parseSize, bytes as fmtBytes, parseDateInput, date as fmtDate } from '.
 export class FilterPanel {
   constructor(host) {
     this.host = host;
-    this.options = { songFolders: [], families: [], extensions: [], byExtension: [] };
+    this.options = { songFolders: [], families: [], extensions: [], byExtension: [], programmed: undefined };
     this.pushSoon = debounce((patch) => update({ filters: patch }), 260);
   }
 
@@ -64,6 +64,125 @@ export class FilterPanel {
     const row = (this.options.byExtension || []).find((e) => e.ext === ext);
     if (!row) return `Filter to .${ext}`;
     return `${row.count.toLocaleString()} file${row.count === 1 ? '' : 's'} · ${fmtBytes(row.bytes)}`;
+  }
+
+  /**
+   * The show-capture controls: programmed / not programmed, and setlists and
+   * tracks to hide. They HIDE ROWS and nothing else -- what the show plays is
+   * still protected whatever is hidden, and the copy must not suggest
+   * otherwise.
+   *
+   * Three states, never collapsed into one (see CLAUDE.md, "Silence is not a
+   * state"): still loading, no capture, and a capture that matched nothing.
+   * Offering the controls in either of the last two would invite a filter the
+   * server refuses.
+   */
+  programmedGroup() {
+    const p = this.options.programmed;
+    const f = state.filters;
+    if (p === undefined) return group('Programmed in show', hint('Loading the show capture…'));
+    if (p === null) {
+      return group(
+        'Programmed in show',
+        hint('No show capture loaded. Drop a .d3 project or a Susan summary .json into programmed_media_crosscheck/ and restart the server.'),
+      );
+    }
+    if (!p.usable) {
+      return group('Programmed in show', hint('The loaded show capture matched nothing in this archive, so it cannot filter.'));
+    }
+
+    const source = p.captures
+      .map((c) => `${c.sourceFile} · ${c.capturedAtSource === 'file-mtime' ? 'saved' : 'captured'} ${(c.capturedAt ?? '?').slice(0, 16).replace('T', ' ')}`)
+      .join('\n');
+
+    // Setlists: few enough for chips.
+    const setlistChips = new Map();
+    const paintSetlists = () => {
+      const on = lineSet(state.filters.excludeSetlist);
+      for (const [name, el] of setlistChips) {
+        el.classList.toggle('on', on.has(name));
+        el.setAttribute('aria-pressed', on.has(name) ? 'true' : 'false');
+      }
+    };
+    for (const sl of p.setlists) {
+      setlistChips.set(
+        sl.setlist,
+        h('button.chip', {
+          type: 'button',
+          text: sl.setlist,
+          title: `${sl.tracks} track(s)${sl.transports.length ? ` · on ${sl.transports.join(', ')}` : ''}. Click to hide everything programmed on it.`,
+          onClick: () => {
+            this.set('excludeSetlist', toggleLine(state.filters.excludeSetlist, sl.setlist));
+            paintSetlists();
+          },
+        }),
+      );
+    }
+    paintSetlists();
+
+    // Tracks: too many for chips, so a searchable checklist. Only tracks that
+    // reach a version in this archive are offered -- hiding one that reaches
+    // nothing would hide nothing.
+    const tracks = p.tracks.filter((t) => t.versions > 0);
+    const hidden = lineSet(f.excludeTrack);
+    const rows = tracks.map((t) => {
+      const cb = h('input', {
+        type: 'checkbox',
+        checked: hidden.has(t.track),
+        onChange: () => {
+          this.set('excludeTrack', toggleLine(state.filters.excludeTrack, t.track));
+          paintTrackCount();
+        },
+      });
+      const row = h(
+        'label.track-row',
+        { title: t.setlists.length ? `On ${t.setlists.join(', ')}` : 'Setlist unknown' },
+        cb,
+        h('span.track-name', { text: t.track }),
+        h('span.track-n', { text: String(t.versions) }),
+      );
+      row.dataset.name = t.track.toLowerCase();
+      return row;
+    });
+    const trackCount = h('span.fhint');
+    const paintTrackCount = () => {
+      const n = lineSet(state.filters.excludeTrack).size;
+      trackCount.textContent = n ? `${n} track(s) hidden` : `${tracks.length} tracks reach this archive · number = versions`;
+    };
+    paintTrackCount();
+    const search = h('input', {
+      type: 'text',
+      placeholder: 'find a track…',
+      spellcheck: 'false',
+      onInput: (e) => {
+        const q = e.target.value.trim().toLowerCase();
+        for (const r of rows) r.hidden = q !== '' && !r.dataset.name.includes(q);
+      },
+    });
+
+    return group(
+      'Programmed in show',
+      seg(
+        [
+          ['', 'All'],
+          ['1', 'Programmed'],
+          ['0', 'Not programmed'],
+        ],
+        f.programmed,
+        (v) => this.set('programmed', v),
+      ),
+      h('div.fhint', { style: { whiteSpace: 'pre-line' }, text: source }),
+      hint(`${p.protectedVersions.toLocaleString()} version(s) programmed. Hiding rows never unprotects them.`),
+      h('div', { style: { height: '8px' } }),
+      h('span.flabel', 'Hide setlists'),
+      p.setlists.length
+        ? h('div.chips', ...setlistChips.values())
+        : hint('This capture lists no setlists.'),
+      h('span.flabel', 'Hide tracks'),
+      search,
+      h('div.track-list', ...rows),
+      trackCount,
+    );
   }
 
   /** Show the clear button only when there is something to clear. */
@@ -182,6 +301,9 @@ export class FilterPanel {
         hint('status= — recomputed whenever the keep-latest-N slider moves'),
       ),
     );
+
+    /* ---- programmed in the show ---------------------------------------- */
+    this.host.appendChild(this.programmedGroup());
 
     /* ---- manifest view ------------------------------------------------ */
     // Separate from "Status at current keep-N" on purpose. That control is the
@@ -430,6 +552,19 @@ export class FilterPanel {
 
     this.syncCount();
   }
+}
+
+/** Filter values for track and setlist lists are newline-separated: a track
+ *  name is a file stem and may carry a comma. */
+function lineSet(raw) {
+  return new Set(String(raw || '').split('\n').filter(Boolean));
+}
+
+function toggleLine(raw, name) {
+  const s = lineSet(raw);
+  if (s.has(name)) s.delete(name);
+  else s.add(name);
+  return [...s].join('\n');
 }
 
 function group(label, ...children) {

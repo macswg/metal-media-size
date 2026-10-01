@@ -261,6 +261,8 @@ async function loadSummary() {
       families,
       extensions: s?.extensions || [],
       byExtension: Array.isArray(s?.byExtension) ? s.byExtension : [],
+      // Null when no show capture is loaded; the panel says so in words.
+      programmed: s?.programmed ?? null,
     });
     // The fallback stays: /api/summary only started reporting songFolders
     // later, so a page served against an older API still fills its dropdown.

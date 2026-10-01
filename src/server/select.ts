@@ -16,6 +16,7 @@
  */
 
 import type { AppContext } from './context.ts';
+import { badRequest } from './errors.ts';
 import {
   toFileRow,
   toVersionRow,
@@ -52,6 +53,74 @@ const FILE_FROM = `FROM file f
   LEFT JOIN file_media fm ON fm.file_id = f.id`;
 
 /**
+ * The programmed-media filters as one predicate over a version id, or null
+ * when none is in use. A file with no version (an unparsed name) is never
+ * programmed: no capture can name it.
+ *
+ * Reads the protection the reclaim cache resolved over the WHOLE snapshot, so
+ * the filter and the verdicts agree about what the show plays. It hides rows
+ * and does nothing else -- see the note in `query.ts`.
+ */
+export function programmedPredicate(
+  ctx: AppContext,
+  snapshotId: number,
+  keepN: number,
+  filters: FilterSpec,
+): ((versionId: number | null) => boolean) | null {
+  const wantsProgrammed = filters.programmed !== undefined;
+  const tracks = filters.excludeTrack ?? [];
+  const setlists = filters.excludeSetlist ?? [];
+  if (!wantsProgrammed && tracks.length === 0 && setlists.length === 0) return null;
+
+  const prot = ctx.reclaim.get(snapshotId, keepN).programmed;
+  if (prot === null) {
+    throw badRequest(
+      'no_capture',
+      'The programmed-media filters need a show capture, and none is loaded. Drop a .d3 ' +
+        'project or a Susan summary .json into programmed_media_crosscheck/ and restart.',
+    );
+  }
+  if (!prot.usable) {
+    throw badRequest(
+      'capture_unusable',
+      'The loaded show capture matched nothing in this archive, so it cannot say which ' +
+        'files are programmed. Filtering on it would hide nothing, or everything, for no reason.',
+    );
+  }
+
+  const knownTracks = new Set(prot.tracks.map((t) => t.track));
+  const knownSetlists = new Set(prot.setlists.map((s) => s.setlist));
+  const badTrack = tracks.find((t) => !knownTracks.has(t));
+  if (badTrack !== undefined) {
+    throw badRequest('bad_param', `excludeTrack names a track the capture does not have: ${JSON.stringify(badTrack)}`);
+  }
+  const badSetlist = setlists.find((t) => !knownSetlists.has(t));
+  if (badSetlist !== undefined) {
+    throw badRequest('bad_param', `excludeSetlist names a setlist the capture does not have: ${JSON.stringify(badSetlist)}`);
+  }
+
+  const hideTracks = new Set(tracks);
+  const hideSetlists = new Set(setlists);
+  const hidden = (versionId: number): boolean => {
+    for (const u of prot.programmedOn.get(versionId) ?? []) {
+      if (hideTracks.has(u.track)) return true;
+      if (u.setlists.some((s) => hideSetlists.has(s))) return true;
+    }
+    return false;
+  };
+
+  return (versionId) => {
+    const isProgrammed = versionId !== null && prot.protectedVersionIds.has(versionId);
+    if (filters.programmed === 1 && !isProgrammed) return false;
+    if (filters.programmed === 0 && isProgrammed) return false;
+    if (versionId !== null && (hideTracks.size > 0 || hideSetlists.size > 0) && hidden(versionId)) {
+      return false;
+    }
+    return true;
+  };
+}
+
+/**
  * Every asset-version in `snapshotId` that passes `filters`, annotated with its
  * keep/supersede verdict at `keepN`.
  *
@@ -83,10 +152,12 @@ export function selectVersions(
     pathPredicate === null ? null : versionIdsMatchingPath(ctx.db, snapshotId, pathPredicate);
 
   const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
+  const programmed = programmedPredicate(ctx, snapshotId, keepN, filters);
 
   const out: VersionRow[] = [];
   for (const r of dbRows) {
     if (allowedIds !== null && !allowedIds.has(r.version_id)) continue;
+    if (programmed !== null && !programmed(r.version_id)) continue;
     const row = toVersionRow(r, verdicts.get(r.version_id));
     if (filters.status !== undefined && row.status !== filters.status) continue;
     out.push(row);
@@ -103,6 +174,9 @@ export function fileNeedsJsPass(filters: FilterSpec, sortKey: string): boolean {
     filters.path !== undefined ||
     filters.pathRe !== undefined ||
     filters.status !== undefined ||
+    filters.programmed !== undefined ||
+    filters.excludeTrack !== undefined ||
+    filters.excludeSetlist !== undefined ||
     sortKey === 'status'
   );
 }
@@ -148,7 +222,8 @@ export function selectFilesPaged(
 }
 
 /**
- * Slow path: SQL narrows, JS applies `path` / `pathRe` / `status`. The caller
+ * Slow path: SQL narrows, JS applies `path` / `pathRe` / `status` and the
+ * programmed-media filters. The caller
  * pages the result.
  */
 export function selectFilesFiltered(
@@ -174,10 +249,12 @@ export function selectFilesFiltered(
   // Always loaded now, not only when filtering: every file row reports the
   // verdict on its version, so the Files view can show it.
   const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
+  const programmed = programmedPredicate(ctx, snapshotId, keepN, filters);
 
   const out: FileRow[] = [];
   for (const r of dbRows) {
     if (pathPredicate !== null && !pathPredicate(r.rel_path)) continue;
+    if (programmed !== null && !programmed(r.asset_version_id)) continue;
     const v = r.asset_version_id === null ? undefined : verdicts.get(r.asset_version_id);
     if (filters.status !== undefined) {
       const status = v === undefined ? 'unknown' : v.keep ? 'kept' : 'superseded';

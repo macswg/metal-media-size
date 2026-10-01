@@ -71,7 +71,9 @@ export function registerVersionRoutes(app: FastifyInstance, ctx: AppContext): vo
       | undefined;
     if (!asset) throw notFound('asset_not_found', `No asset with id ${assetId}`);
 
-    const verdicts = ctx.reclaim.get(asset.snapshot_id, keepN).byVersionId;
+    const entry = ctx.reclaim.get(asset.snapshot_id, keepN);
+    const verdicts = entry.byVersionId;
+    const prot = entry.programmed;
 
     // Oldest first. `v002 < v002a < v002d < v003`: a bare version sorts before
     // its lettered siblings, which SQLite gives us because NULL sorts first in
@@ -89,7 +91,13 @@ export function registerVersionRoutes(app: FastifyInstance, ctx: AppContext): vo
       )
       .all(assetId) as VersionDbRow[];
 
-    const versions = dbRows.map((r) => toVersionRow(r, verdicts.get(r.version_id)));
+    // The drill-down: where in the show each version is programmed. Null when
+    // no usable capture is loaded, which is a different statement from an
+    // empty list -- "not cross-checked" is not "not programmed".
+    const versions = dbRows.map((r) => ({
+      ...toVersionRow(r, verdicts.get(r.version_id)),
+      programmedOn: prot?.usable ? (prot.programmedOn.get(r.version_id) ?? []) : null,
+    }));
     let totalBytes = 0;
     let supersededBytes = 0;
     for (const v of versions) {
@@ -109,6 +117,18 @@ export function registerVersionRoutes(app: FastifyInstance, ctx: AppContext): vo
         supersededBytes,
       },
       keepN,
+      /** The cross-check behind `programmedOn`, or null when none is loaded. */
+      programmed: prot
+        ? {
+            usable: prot.usable,
+            captures: prot.captures.map((c) => ({
+              sourceFile: c.sourceFile,
+              capturedAt: c.capturedAt,
+              capturedAtSource: c.capturedAtSource,
+              kind: c.kind,
+            })),
+          }
+        : null,
       versions,
     };
   });

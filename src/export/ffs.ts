@@ -413,7 +413,15 @@ export interface RemovalGuiOptions {
 
 /** What a generated job records about the cross-check. Reporting only. */
 export interface ProgrammedJobSummary {
-  captures: ReadonlyArray<{ sourceFile: string; capturedAt: string | null }>;
+  /**
+   * `capturedAtSource: 'file-mtime'` marks a `.d3` project, whose only date is
+   * when the file was saved. Absent reads as a summary's own capture time.
+   */
+  captures: ReadonlyArray<{
+    sourceFile: string;
+    capturedAt: string | null;
+    capturedAtSource?: 'capture' | 'file-mtime';
+  }>;
   /** Version rows held back from removal across the whole snapshot. */
   protectedVersions: number;
   matchedNames: number;
@@ -493,7 +501,11 @@ export function removalHeaderText(chunk: ExportChunk, o: RemovalGuiOptions): str
         '   job and CANNOT appear in the list below, whatever the keep-N policy said',
         '   about them.',
         `   Capture(s): ${p.captures
-          .map((c) => `${c.sourceFile} (captured ${c.capturedAt ?? 'date unknown'})`)
+          .map(
+            (c) =>
+              `${c.sourceFile} (${c.capturedAtSource === 'file-mtime' ? 'project file saved' : 'captured'} ` +
+              `${c.capturedAt ?? 'date unknown'})`,
+          )
           .join('; ')}`,
         `   ${p.matchedNames} of ${p.totalNames} media names matched an archive asset` +
           (p.unmatchedNames > 0

@@ -121,10 +121,43 @@ which version is **programmed**. Those are different questions, and the second
 one wins: a version the show is cued to play is not superseded by anything,
 however many newer renders sit above it.
 
-**Export a Susan summary from the d3 project and drop the `.json` into
-`programmed_media_crosscheck/`.** That is the whole setup. Restart `npm run
-serve` and it is in force — the startup line says how many captures and media
-references it read, and says so just as plainly when it read none.
+**Drop the d3 project file (`.d3`) into `programmed_media_crosscheck/`.** That
+is the whole setup. A Susan summary `.json` exported from the project works
+too, and so does a mix of the two. Restart `npm run serve` and it is in force —
+the startup line names each file, whether it was read as a project or a
+summary, and how many media references and setlists it held, and says so just
+as plainly when it read none.
+
+A `.d3` is read with the same extractor `d3_snapshot_diff` uses, and produces
+exactly what the plugin's summary would have: on `moose_sphere_backup_1Oct2026_0648`
+the `.d3` and the summary exported from it yield the same 959 media references
+from the same 47 tracks on the same six setlists. A project has no capture time
+of its own, so its date is **when the file was saved** (its modification time),
+and the UI and the export banner say "saved" rather than "captured". Copying it
+with something that does not preserve dates moves that date.
+
+Only tracks on a setlist count as programmed — the same rule the plugin's
+summary follows. A track that exists in the project but is on no setlist is not
+played by any transport.
+
+### Programmed / not programmed in the file lists
+
+The **Programmed in show** filter splits any list — files, versions, songs, the
+reclaim board — into what the show plays and what it does not. On the archive
+at snapshot 24 with the 1 October project, 13,184 files (54.92 TiB) are
+programmed and 22,707 (104.25 TiB) are not.
+
+Beneath it, **Hide setlists** and **Hide tracks** remove whatever is programmed
+on them from the view: hide `band review` and `qc`, say, and what remains is the
+media the show setlists play plus everything nothing plays. A version on a
+hidden track *and* on another one is hidden — it is from that track.
+
+These filters **hide rows and do nothing else**. A hidden version is still
+programmed, still protected, and still cannot reach a removal job.
+
+**Which tracks play this file?** Click a file or version to open its version
+ladder. Every version lists each track that plays it and the setlists that
+track is on, or says it is not programmed in the loaded capture.
 
 From then on, every version the show plays is held back from removal: it cannot
 be selected, cannot reach a FreeFileSync job, and the exporter refuses outright
@@ -139,7 +172,7 @@ above, none.
 
 A few things worth knowing:
 
-- **Put every capture you have in there.** All the `.json` files are read and
+- **Put every capture you have in there.** All the `.d3` and `.json` files are read and
   their protections are unioned — a second capture adds knowledge, it does not
   replace the first.
 - **A capture is a point in time.** It records what the show played when it was
@@ -163,6 +196,14 @@ holding the archive, but the UI is a plain web page: expose it over Tailscale
 (`tailscale serve --bg http://127.0.0.1:8787`) and it works from any browser on
 your tailnet — phone, tablet, someone else's laptop — with a proper TLS
 certificate and nothing to install. The interface adapts to a phone screen.
+
+`start-analyser.command` does this for you when Tailscale is connected: it
+publishes `https://<machine>.<tailnet>.ts.net/` (the certificate covers only the
+full name, so `https://<machine>/` fails) and `http://<machine>:8787/`, prints
+both beside the local URL and removes the proxy when its
+window closes (`stop-analyser.command` removes it too). It never takes over a
+tailnet port already publishing something else. `TAILSCALE=0` opts out;
+`TS_HTTPS_PORT=8445` picks a port other than 443.
 
 That is tailnet-only, not public. `funnel` is the one that puts a service on the
 open internet, and this tool has no business there.
@@ -197,14 +238,6 @@ superseded. That is what this tool works out.
   set is read from the rig (`1`–`14`), not hard-coded, and region 0 is never one
   of them. It is not the same check as the missing-region anomaly — that
   compares a version against its own siblings, this compares it against the
-`start-analyser.command` does this for you when Tailscale is connected: it
-publishes `https://<machine>.<tailnet>.ts.net/` (the certificate covers only the
-full name, so `https://<machine>/` fails) and `http://<machine>:8787/`, prints
-both beside the local URL and removes the proxy when its
-window closes (`stop-analyser.command` removes it too). It never takes over a
-tailnet port already publishing something else. `TAILSCALE=0` opts out;
-`TS_HTTPS_PORT=8445` picks a port other than 443.
-
   canvas — and the panel accounts for every version in view in one of four
   buckets so the numbers add up. Nothing here is proposed for removal.
 - **Duplicates** — metadata only, never reads file bytes (the mount is object

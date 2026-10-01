@@ -17,6 +17,9 @@ export const FILTER_KEYS = [
   'status',
   'isPatch',
   'hasProxy',
+  'programmed',
+  'excludeTrack',
+  'excludeSetlist',
   'q',
 ];
 

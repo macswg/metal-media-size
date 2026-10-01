@@ -128,7 +128,9 @@ export function registerSummaryRoutes(app: FastifyInstance, ctx: AppContext): vo
       )
       .all(snapshot.id) as { ext: string; count: number; bytes: number }[];
 
-    const current = ctx.reclaim.get(snapshot.id, keepN).whole;
+    const currentEntry = ctx.reclaim.get(snapshot.id, keepN);
+    const current = currentEntry.whole;
+    const prot = currentEntry.programmed;
 
     return {
       snapshot: toSnapshotView(snapshot),
@@ -151,6 +153,21 @@ export function registerSummaryRoutes(app: FastifyInstance, ctx: AppContext): vo
       songCount: totals.songs,
       /** Every song folder in the snapshot, sorted. Fills the filter dropdown. */
       songFolders,
+      /**
+       * The show capture, for the filter panel's Programmed controls: which
+       * file it is, and the tracks and setlists it can filter on. Null when no
+       * capture is loaded -- the panel says so rather than offering a filter
+       * that would refuse.
+       */
+      programmed: prot
+        ? {
+            usable: prot.usable,
+            protectedVersions: prot.protectedVersionIds.size,
+            captures: prot.captures,
+            tracks: prot.tracks,
+            setlists: prot.setlists,
+          }
+        : null,
       /** Extensions present, most common first. Fills the extension picker. */
       extensions: byExtension.map((e) => e.ext),
       /** The same list with counts, alongside `byFamily`. Display only. */

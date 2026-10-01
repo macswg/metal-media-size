@@ -14,7 +14,11 @@
  * Nothing here can detect that, so the date is carried through to the UI and
  * into every export banner rather than being read once and discarded.
  *
- * EVERY `.json` IN THE DIRECTORY IS READ, and the protections are UNIONED.
+ * TWO KINDS OF FILE ARE READ: a Susan summary (`.json`) and a d3 project
+ * archive (`.d3`, through `d3.ts`). Both become the same `ProgrammedCapture`.
+ * Anything else in the directory is ignored, `.DS_Store` included.
+ *
+ * EVERY CAPTURE IN THE DIRECTORY IS READ, and the protections are UNIONED.
  * Two captures from two dates protect what either one plays. That is the
  * conservative reading and it is the right one: an operator who drops in a
  * second capture is adding knowledge, not replacing it, and a loader that
@@ -25,6 +29,10 @@
 
 import { ReadOnlyFs } from '../fs/readonly.ts';
 import { parseProgrammedCapture, type ProgrammedCapture } from './parse.ts';
+import { parseD3Project } from './d3.ts';
+
+/** File types read as captures. Lower-cased extension, leading dot. */
+const CAPTURE_EXTENSIONS = ['.json', '.d3'];
 
 /** Directory, relative to the project root, the operator drops captures into. */
 export const PROGRAMMED_DIR = 'programmed_media_crosscheck';
@@ -44,7 +52,7 @@ export interface LoadProgrammedResult {
 /**
  * Read every capture in `directory`.
  *
- * THROWS if a `.json` file is present and unreadable. A capture that half-loads
+ * THROWS if a `.json` or `.d3` file is present and unreadable. A capture that half-loads
  * protects half of what the show plays and the other half looks exactly like
  * ordinary superseded media, so the only safe response to a broken capture is
  * to stop. An EMPTY directory is not an error -- it means the cross-check is
@@ -67,17 +75,20 @@ export async function loadProgrammedCaptures(
   }
 
   const files = entries
-    .filter((e) => e.isFile && e.name.toLowerCase().endsWith('.json'))
+    .filter((e) => e.isFile && CAPTURE_EXTENSIONS.some((x) => e.name.toLowerCase().endsWith(x)))
     .map((e) => e.name)
     .sort();
 
   for (const name of files) {
     const full = `${directory}/${name}`;
-    let text: string;
+    const isProject = name.toLowerCase().endsWith('.d3');
+    let bytes: Buffer;
+    let modifiedMs = 0;
     try {
+      if (isProject) modifiedMs = (await fs.lstat(full)).mtimeMs;
       const handle = await fs.openRead(full);
       try {
-        text = await handle.readFile('utf8');
+        bytes = await handle.readFile();
       } finally {
         await handle.close();
       }
@@ -88,9 +99,13 @@ export async function loadProgrammedCaptures(
           'what an empty directory also produces.',
       );
     }
-    // parseProgrammedCapture throws on anything it cannot read. Deliberately
-    // not caught -- see the header.
-    captures.push(parseProgrammedCapture(text, name));
+    // Both parsers throw on anything they cannot read. Deliberately not
+    // caught -- see the header.
+    captures.push(
+      isProject
+        ? parseD3Project(bytes, name, modifiedMs)
+        : parseProgrammedCapture(bytes.toString('utf8'), name),
+    );
   }
 
   return { captures, directory, skipped };

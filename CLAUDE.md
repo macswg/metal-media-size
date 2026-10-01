@@ -243,6 +243,58 @@ list from what the strip reads and fails if the normaliser drops any of it.
 
 The directory's contents are gitignored — a capture is real show data.
 
+### A `.d3` project is a capture too
+
+`programmed_media_crosscheck/` reads `.d3` project archives as well as Susan
+summary `.json`. `src/programmed/d3.ts` hands the bytes (read through
+`ReadOnlyFs`, like everything else) to `src/programmed/vendor/d3extract.cjs`,
+which builds the same schema-7 document the plugin writes, and the result goes
+through `parseProgrammedCapture` like any summary. So every rule above applies
+to a `.d3` unchanged.
+
+- **The extractor is vendored, not ours.** A byte-for-byte copy of
+  `../d3_snapshot_diff/vendor/d3extract.js`, renamed `.cjs` only because this
+  package is ESM and the file is UMD. Never edit it here; change it upstream
+  and copy it over. `test/programmed-d3.test.ts` fails on drift when the
+  sibling checkout exists, and fails if the file ever reaches for `require` or
+  `import` — the read-only fence only walks `.ts`, so it is held to "no I/O at
+  all" there instead.
+- **It goes through JSON** (`toJson` then `JSON.parse`), as in
+  `d3_snapshot_diff`: the layer `uid` is a BigInt, and the round trip makes a
+  `.d3` identical to the summary the extractor would write. Measured: the
+  `moose_sphere_backup_1Oct2026_0648` `.d3` and the summary exported from it
+  give the same 959 references, 47 tracks, six setlists.
+- **Its date is the file's mtime**, and `capturedAtSource: 'file-mtime'` says
+  so. The extractor would otherwise stamp it with server start time, which looks
+  exactly like a capture time and is not one. The UI says "saved", the FFS
+  banner says "project file saved".
+- **Only setlist tracks count**, as in a summary. A project carries tracks on no
+  setlist (75 of 122 in the 1 October project); no transport plays them.
+- Extractor debug lines that mean a reference could not be resolved are kept as
+  `warnings` and printed at startup, never dropped.
+
+### Where a version is programmed, and the filters built on it
+
+Each reference carries its track id and the setlists that track is on.
+`resolveProgrammed` turns that into `programmedOn` (version id → tracks and
+their setlists), plus `tracks` and `setlists` summaries for the filter panel.
+
+- **`programmed=0|1`, `excludeTrack`, `excludeSetlist` HIDE ROWS and nothing
+  else.** They read the protection set resolved over the whole snapshot and are
+  applied in the same JS pass as `status`, in `programmedPredicate`
+  (`src/server/select.ts`), so every list route gets them. They never feed
+  `computeReclaim`, and hiding a track never unprotects its media.
+- **They refuse (400) with no capture, or one that matched nothing.**
+  "Not programmed" against no evidence would read as "the show plays none of
+  this". A track or setlist name the capture lacks is refused too: a typo that
+  hid nothing would look like a filter that worked.
+- Exclusion lists are **newline-separated** — a track name is a file stem and
+  can carry a comma. A version on an excluded track AND another one is hidden.
+- The drill-down is the version ladder: `/api/assets/:id/versions` returns
+  `programmedOn` per version — **null when no usable capture is loaded, `[]`
+  when it is and the show does not play that version.** Those differ, and the
+  ladder says which.
+
 ### Region gaps measure against the CANVAS, anomalies against the SIBLINGS
 
 `/api/coverage` and the **Region gaps** tab answer one question: which versions
