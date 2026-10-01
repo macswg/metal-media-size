@@ -73,6 +73,8 @@ export const state = {
    * a column of dashes tells you nothing except that a column exists.
    */
   mediaProbed: 0,
+  /** True when a usable show capture is loaded. Drives the Programmed column. */
+  programmedLoaded: false,
 };
 
 const listeners = new Set();

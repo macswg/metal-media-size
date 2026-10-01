@@ -19,6 +19,7 @@ import { RigSession } from './rig-session.ts';
 import { badRequest, notFound } from './errors.ts';
 import { intParam, type Query } from './query.ts';
 import type { ProgrammedCapture } from '../programmed/parse.ts';
+import type { ProgrammedUse } from '../programmed/protect.ts';
 
 export interface AppContext {
   db: Db;
@@ -128,6 +129,13 @@ export interface FileRow {
   /** False until `npm run probe` has read this file's header. */
   probed: boolean;
   /**
+   * Where the show plays this file's version: each track and the setlists it
+   * is on. NULL when no usable show capture is loaded -- "not cross-checked",
+   * which is not the same as `[]`, "the show does not play this". A file with
+   * no version is `[]` under a capture: no capture can name it.
+   */
+  programmedOn: readonly ProgrammedUse[] | null;
+  /**
    * The asset this file belongs to, so a file row can open the version ladder
    * without a second lookup. NULL exactly when `parseOk` is false -- an
    * unparsed file has no asset-version and therefore no asset.
@@ -154,6 +162,7 @@ export interface FileDbRow {
 export function toFileRow(
   r: FileDbRow,
   verdict?: { keep: boolean; reason: KeepReason } | undefined,
+  programmedOn: readonly ProgrammedUse[] | null = null,
 ): FileRow {
   return {
     id: r.id,
@@ -174,6 +183,7 @@ export function toFileRow(
     // 'we read it and it has no header' both arrive as null, and the second of
     // those is an interrupted render -- bytes on disk that will not play.
     probed: r.probed === 1,
+    programmedOn,
   };
 }
 

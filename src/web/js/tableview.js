@@ -399,7 +399,12 @@ export class TableView {
     // the versions view has to be able to repaint them too -- otherwise the
     // Status and Why cells keep showing the policy's answer after you have
     // overruled it.
-    if (state.mode === 'files') return `${row.id}|${effectiveStatus(row)}`;
+    // The tracks too: Reload captures can change where a file is programmed
+    // without changing its verdict, and a cached row would keep the old cell.
+    if (state.mode === 'files') {
+      const on = row.programmedOn == null ? '-' : row.programmedOn.map((u) => u.track).join('\n');
+      return `${row.id}|${effectiveStatus(row)}|${on}`;
+    }
     if (state.mode !== 'versions') return null;
     return `${row.versionId}|${effectiveStatus(row)}|${inManifest(row) ? 1 : 0}|${row.assetId === this.activeAssetId ? 1 : 0}`;
   }
@@ -791,6 +796,37 @@ export class TableView {
         tooltip: (row) => {
           if (effectiveStatus(row) === 'kept-by-you') return overrideReasonDetail(row.keepReason);
           return row.keepReason ? `${row.keepReason}\n\n${keepReasonDetail(row.keepReason)}` : '';
+        },
+      },
+      // Where the show plays this file: its tracks, and their setlists on the
+      // tooltip. Present only with a usable capture loaded -- without one a
+      // column of dashes would read as "nothing here is programmed", when the
+      // truth is that nothing was checked. The board says that instead.
+      state.programmedLoaded && {
+        key: 'programmed',
+        label: 'Programmed',
+        width: 'minmax(160px, 1.2fr)',
+        sortable: false,
+        render: (row) => {
+          const on = row.programmedOn;
+          if (on == null || row.assetVersionId == null) return h('span.muted', { text: '—' });
+          if (on.length === 0) return h('span.muted', { text: 'not programmed' });
+          const first = on[0].track;
+          return h(
+            'span.mono',
+            { style: { fontSize: '11.8px' } },
+            first,
+            on.length > 1 ? h('span.muted', { text: ` +${on.length - 1}` }) : null,
+          );
+        },
+        tooltip: (row) => {
+          const on = row.programmedOn;
+          if (on == null) return '';
+          if (row.assetVersionId == null) return 'This filename did not match the version grammar, so no show capture can name it.';
+          if (on.length === 0) return 'Not programmed in the loaded show capture.';
+          return on
+            .map((u) => `${u.track}  ·  ${u.setlists.length ? u.setlists.join(', ') : 'setlist unknown'}`)
+            .join('\n');
         },
       },
       {

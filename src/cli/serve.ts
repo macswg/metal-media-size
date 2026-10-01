@@ -38,9 +38,12 @@ async function main(): Promise<void> {
   // that is present and unreadable must stop the server rather than start one
   // that silently protects nothing. An absent or empty directory is fine and
   // simply means the cross-check is not in use.
-  const programmed = await loadProgrammedCaptures(PROJECT_ROOT, `${PROJECT_ROOT}/${PROGRAMMED_DIR}`);
+  const captureSource = { projectRoot: PROJECT_ROOT, directory: `${PROJECT_ROOT}/${PROGRAMMED_DIR}` };
+  const programmed = await loadProgrammedCaptures(captureSource.projectRoot, captureSource.directory);
 
-  const built = buildServer({ db, cfg, logger: false, captures: programmed.captures });
+  // `captureSource` lets the UI's Reload captures button read the folder again
+  // without a restart. A reload that fails changes nothing -- see the route.
+  const built = buildServer({ db, cfg, logger: false, captures: programmed.captures, captureSource });
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`\n${signal} -- closing`);

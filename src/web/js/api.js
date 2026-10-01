@@ -248,6 +248,9 @@ export const api = {
   coverage: (params) => impl.get('/api/coverage', params),
 
   exportManifest: (payload) => impl.post('/api/export', payload),
+  // Re-reads programmed_media_crosscheck/. A 409 means it refused and the
+  // captures loaded before are still in force -- see the route.
+  reloadCaptures: () => impl.post('/api/programmed/reload', {}),
 
   /* --------------------------------------------------------------------- */
   /* The rig survey. Every one of these is session state in the server's     */

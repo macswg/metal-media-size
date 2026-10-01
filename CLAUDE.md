@@ -290,10 +290,35 @@ their setlists), plus `tracks` and `setlists` summaries for the filter panel.
   hid nothing would look like a filter that worked.
 - Exclusion lists are **newline-separated** — a track name is a file stem and
   can carry a comma. A version on an excluded track AND another one is hidden.
+- **File rows carry `programmedOn` too**, with the same null-versus-`[]` rule,
+  for the Files table's Programmed column. The column is drawn only while a
+  usable capture is loaded (`state.programmedLoaded`), like Resolution: a column
+  of dashes would read as "nothing is programmed". The row signature includes
+  the tracks, so a reload repaints cells whose verdict did not move.
 - The drill-down is the version ladder: `/api/assets/:id/versions` returns
   `programmedOn` per version — **null when no usable capture is loaded, `[]`
   when it is and the show does not play that version.** Those differ, and the
   ladder says which.
+
+### Reload captures, without a restart
+
+`POST /api/programmed/reload` (`src/server/routes/programmed.ts`, the **Reload
+captures** button) re-reads the folder through the same loader and swaps the
+set in with `ReclaimCache.setCaptures`, which drops every memoised verdict --
+so every route sees the new protection on its next request.
+
+- **A failed reload changes nothing.** Startup stops on an unreadable capture;
+  a running server cannot, so the reload refuses (409 `capture_unreadable`) and
+  the previous set stays in force, and the message says so. Never swap in a
+  partial or empty set because one file failed: that would unprotect
+  everything the rest of the folder named.
+- An empty folder after a reload is a legitimate result: the cross-check is
+  then NOT in use, and every surface says so (`programmed: null`).
+- One reload at a time. The browser drops filter values the new captures
+  cannot honour (a hidden track that is gone) before refreshing, or every list
+  request would 400. It does not clear the manifest selection.
+- `captureSource` is passed by `serve.ts`; a server built without one (tests)
+  answers 409 `reload_unavailable` rather than guessing a directory.
 
 ### Region gaps measure against the CANVAS, anomalies against the SIBLINGS
 

@@ -123,8 +123,9 @@ however many newer renders sit above it.
 
 **Drop the d3 project file (`.d3`) into `programmed_media_crosscheck/`.** That
 is the whole setup. A Susan summary `.json` exported from the project works
-too, and so does a mix of the two. Restart `npm run serve` and it is in force —
-the startup line names each file, whether it was read as a project or a
+too, and so does a mix of the two. Press **Reload captures** in the filter
+panel (or restart `npm run serve`) and it is in force. Removing a file works
+the same way. The startup line names each file, whether it was read as a project or a
 summary, and how many media references and setlists it held, and says so just
 as plainly when it read none.
 
@@ -155,7 +156,10 @@ hidden track *and* on another one is hidden — it is from that track.
 These filters **hide rows and do nothing else**. A hidden version is still
 programmed, still protected, and still cannot reach a removal job.
 
-**Which tracks play this file?** Click a file or version to open its version
+**Which tracks play this file?** The Files table has a **Programmed** column
+naming the track that plays each file (`+2` when there are more); hover it for
+every track and its setlists. It appears only while a capture is loaded. Click
+a file or version to open its version
 ladder. Every version lists each track that plays it and the setlists that
 track is on, or says it is not programmed in the loaded capture.
 
@@ -180,7 +184,9 @@ A few things worth knowing:
   capture date is printed in the UI and in every export banner for exactly this
   reason.
 - **A broken capture stops the server** rather than starting one that silently
-  protects nothing. An empty directory is fine and simply means the cross-check
+  protects nothing. A broken file found by **Reload captures** changes nothing:
+  the reload is refused and the captures loaded before stay in force, which the
+  panel says in words. An empty directory is fine and simply means the cross-check
   is not in use — which every artefact then says out loud, because an export
   with no cross-check and an export whose cross-check found nothing produce
   identical file lists.

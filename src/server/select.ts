@@ -17,6 +17,7 @@
 
 import type { AppContext } from './context.ts';
 import { badRequest } from './errors.ts';
+import type { ProgrammedUse } from '../programmed/protect.ts';
 import {
   toFileRow,
   toVersionRow,
@@ -121,6 +122,21 @@ export function programmedPredicate(
 }
 
 /**
+ * Where each file's version is programmed, for the Files table's Programmed
+ * column. Null throughout when no usable capture is loaded -- see
+ * `FileRow.programmedOn`.
+ */
+function programmedOnLookup(
+  ctx: AppContext,
+  snapshotId: number,
+  keepN: number,
+): (versionId: number | null) => readonly ProgrammedUse[] | null {
+  const prot = ctx.reclaim.get(snapshotId, keepN).programmed;
+  if (prot === null || !prot.usable) return () => null;
+  return (versionId) => (versionId === null ? [] : (prot.programmedOn.get(versionId) ?? []));
+}
+
+/**
  * Every asset-version in `snapshotId` that passes `filters`, annotated with its
  * keep/supersede verdict at `keepN`.
  *
@@ -215,8 +231,13 @@ export function selectFilesPaged(
   // whole-snapshot computation the version rows use, so the two can never
   // disagree about the same version.
   const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
+  const programmedOn = programmedOnLookup(ctx, snapshotId, keepN);
   const rowsOut = rows.map((r) =>
-    toFileRow(r, r.asset_version_id === null ? undefined : verdicts.get(r.asset_version_id)),
+    toFileRow(
+      r,
+      r.asset_version_id === null ? undefined : verdicts.get(r.asset_version_id),
+      programmedOn(r.asset_version_id),
+    ),
   );
   return { rows: rowsOut, total: totals.n, matchedBytes: totals.b };
 }
@@ -250,6 +271,7 @@ export function selectFilesFiltered(
   // verdict on its version, so the Files view can show it.
   const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
   const programmed = programmedPredicate(ctx, snapshotId, keepN, filters);
+  const programmedOn = programmedOnLookup(ctx, snapshotId, keepN);
 
   const out: FileRow[] = [];
   for (const r of dbRows) {
@@ -260,7 +282,7 @@ export function selectFilesFiltered(
       const status = v === undefined ? 'unknown' : v.keep ? 'kept' : 'superseded';
       if (status !== filters.status) continue;
     }
-    out.push(toFileRow(r, v));
+    out.push(toFileRow(r, v, programmedOn(r.asset_version_id)));
   }
   return out;
 }

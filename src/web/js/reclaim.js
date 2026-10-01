@@ -313,10 +313,10 @@ export class ReclaimStrip {
       el.append(
         h('b', { text: 'Not cross-checked against the show file.' }),
         ' Nothing here has been checked against what the show actually plays — ',
-        'an empty cross-check is not a clean bill of health. Put a Susan summary ',
-        'export into ',
+        'an empty cross-check is not a clean bill of health. Put the d3 project ',
+        '(.d3) or a Susan summary export into ',
         h('code', { text: 'programmed_media_crosscheck/' }),
-        ' and restart the server.',
+        ' and press Reload captures in the filter panel.',
       );
       return;
     }

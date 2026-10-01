@@ -2,6 +2,17 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-10-01 — Reload captures, and a Programmed column
+
+- **Reload captures** button (`POST /api/programmed/reload`): adding or removing
+  a `.d3` / `.json` takes effect without a restart. A file that will not read
+  refuses the reload and leaves the previous captures in force — never a
+  partial or empty set. ~0.3 s on the 293 MB project.
+- **Programmed column** in the Files table: the track that plays each file,
+  `+N` for more, every track and setlist on hover. Shown only while a usable
+  capture is loaded.
+- Tests: 4 more in `test/programmed-d3.test.ts`.
+
 ## 2026-10-01 — read the d3 project directly; filter on what the show plays
 
 - **`.d3` files in `programmed_media_crosscheck/` are read as captures**, with

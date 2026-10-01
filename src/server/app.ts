@@ -40,6 +40,7 @@ import { registerFileRoutes } from './routes/files.ts';
 import { registerMachineRoutes } from './routes/machines.ts';
 import { registerReclaimRoutes } from './routes/reclaim.ts';
 import { registerProbeRoutes } from './routes/probe.ts';
+import { registerProgrammedRoutes, type CaptureSource } from './routes/programmed.ts';
 import { registerScanRoutes } from './routes/scan.ts';
 import { registerSnapshotRoutes } from './routes/snapshots.ts';
 import { registerSongRoutes } from './routes/songs.ts';
@@ -89,6 +90,12 @@ export interface BuildServerOptions {
    * cross-check is not in use.
    */
   captures?: readonly ProgrammedCapture[];
+  /**
+   * Where those captures came from, so `POST /api/programmed/reload` can read
+   * the folder again. Absent in tests that hand captures in directly; the
+   * route then answers 409 rather than guessing a directory.
+   */
+  captureSource?: CaptureSource;
 }
 
 export interface BuiltServer {
@@ -187,6 +194,7 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
   registerCoverageRoutes(app, ctx);
   registerRigRoutes(app, ctx);
   registerExportRoutes(app, ctx);
+  registerProgrammedRoutes(app, ctx, opts.captureSource);
 
   return { app, ctx };
 }

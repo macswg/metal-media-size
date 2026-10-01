@@ -283,3 +283,94 @@ describe('the drill-down', () => {
     await bare.close();
   });
 });
+
+describe('the Programmed column', () => {
+  it('carries where each file is programmed, and null when nothing was checked', async () => {
+    const s = await server(true);
+    const res = (await s.get('/api/files?limit=2000')).json();
+    const hit = res.rows.find((r: FileRowLike) => /100_ALPHA_MAIN_LL180_v001_region1/.test(nameOf(r)));
+    expect(hit.programmedOn).toEqual([{ track: 'alpha_song', setlists: ['band review', 'night1'] }]);
+    const other = res.rows.find((r: FileRowLike) => /100_ALPHA_MAIN_LL180_v002/.test(nameOf(r)));
+    expect(other.programmedOn).toEqual([]);
+    // The JS-pass route builds rows separately; it must say the same.
+    const slow = (await s.get('/api/files?limit=2000&programmed=1')).json();
+    expect(slow.rows.find((r: { id: number }) => r.id === hit.id).programmedOn).toEqual(hit.programmedOn);
+    await s.close();
+
+    const bare = await server(false);
+    for (const r of (await bare.get('/api/files?limit=50')).json().rows) expect(r.programmedOn).toBeNull();
+    await bare.close();
+  });
+});
+
+describe('POST /api/programmed/reload', () => {
+  async function reloadable(dir: string) {
+    const { makeFixture } = await import('./server/fixture.ts');
+    const { buildServer } = await import('../src/server/app.ts');
+    const fx = makeFixture();
+    const { app } = buildServer({
+      db: fx.db,
+      cfg: fx.cfg,
+      captures: [],
+      captureSource: { projectRoot: dir, directory: dir },
+    });
+    await app.ready();
+    return {
+      reload: () => app.inject({ method: 'POST', url: '/api/programmed/reload', payload: {} }),
+      programmed: async () => (await app.inject({ method: 'GET', url: '/api/reclaim?keepN=1' })).json().programmed,
+      close: async () => {
+        await app.close();
+        fx.db.close();
+      },
+    };
+  }
+
+  it('picks up a capture dropped in after startup, and drops one removed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mms-reload-'));
+    const s = await reloadable(dir);
+    expect(await s.programmed()).toBeNull();
+
+    writeFileSync(join(dir, 'show.json'), twoSetlistCapture());
+    const res = await s.reload();
+    expect(res.statusCode).toBe(200);
+    expect(res.json().captures.map((c: { sourceFile: string }) => c.sourceFile)).toEqual(['show.json']);
+    expect((await s.programmed()).protectedVersions).toBe(2);
+
+    const { rmSync } = await import('node:fs');
+    rmSync(join(dir, 'show.json'));
+    expect((await s.reload()).json().captures).toEqual([]);
+    // Back to "not cross-checked" -- stated, not an empty protection list.
+    expect(await s.programmed()).toBeNull();
+    await s.close();
+  });
+
+  it('refuses on an unreadable file and leaves the old captures in force', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mms-reload-'));
+    writeFileSync(join(dir, 'show.json'), twoSetlistCapture());
+    const s = await reloadable(dir);
+    expect((await s.reload()).statusCode).toBe(200);
+    const before = await s.programmed();
+
+    writeFileSync(join(dir, 'broken.d3'), 'cut short in the copy');
+    const res = await s.reload();
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('capture_unreadable');
+    expect(res.json().error.message).toMatch(/still in force/);
+    // Not a partial set, not an empty one: exactly what was there before.
+    expect(await s.programmed()).toEqual(before);
+    await s.close();
+  });
+
+  it('answers 409 when the server was given no directory to reload from', async () => {
+    const { buildServer } = await import('../src/server/app.ts');
+    const { makeFixture } = await import('./server/fixture.ts');
+    const fx = makeFixture();
+    const { app } = buildServer({ db: fx.db, cfg: fx.cfg });
+    await app.ready();
+    const res = await app.inject({ method: 'POST', url: '/api/programmed/reload', payload: {} });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('reload_unavailable');
+    await app.close();
+    fx.db.close();
+  });
+});

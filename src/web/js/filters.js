@@ -84,11 +84,16 @@ export class FilterPanel {
     if (p === null) {
       return group(
         'Programmed in show',
-        hint('No show capture loaded. Drop a .d3 project or a Susan summary .json into programmed_media_crosscheck/ and restart the server.'),
+        hint('No show capture loaded. Drop a .d3 project or a Susan summary .json into programmed_media_crosscheck/, then reload.'),
+        this.reloadControl(),
       );
     }
     if (!p.usable) {
-      return group('Programmed in show', hint('The loaded show capture matched nothing in this archive, so it cannot filter.'));
+      return group(
+        'Programmed in show',
+        hint('The loaded show capture matched nothing in this archive, so it cannot filter.'),
+        this.reloadControl(),
+      );
     }
 
     const source = p.captures
@@ -173,6 +178,7 @@ export class FilterPanel {
       ),
       h('div.fhint', { style: { whiteSpace: 'pre-line' }, text: source }),
       hint(`${p.protectedVersions.toLocaleString()} version(s) programmed. Hiding rows never unprotects them.`),
+      this.reloadControl(),
       h('div', { style: { height: '8px' } }),
       h('span.flabel', 'Hide setlists'),
       p.setlists.length
@@ -183,6 +189,70 @@ export class FilterPanel {
       h('div.track-list', ...rows),
       trackCount,
     );
+  }
+
+  /**
+   * Reload captures: re-read programmed_media_crosscheck/ so an added or
+   * removed .d3 / .json takes effect without restarting the server.
+   *
+   * The outcome line is held on the panel, not the button, because a
+   * successful reload re-renders this whole panel from the new summary -- a
+   * message drawn on the old button would vanish with it. A refusal is shown
+   * in full: it is the server saying the old captures are STILL in force,
+   * which is the one thing the operator must not miss.
+   */
+  reloadControl() {
+    const note = h('div.fhint', { style: { whiteSpace: 'pre-line' } });
+    // Always paint the CURRENT line and button: a successful reload has
+    // re-rendered the panel by the time the click handler resumes, and the
+    // ones this closure made are detached.
+    this.reloadNoteEl = note;
+    const paintNote = () => {
+      const el = this.reloadNoteEl;
+      const n = this.reloadNote;
+      el.textContent = n ? n.text : '';
+      el.classList.toggle('bad', Boolean(n?.bad));
+      el.hidden = !n;
+    };
+    paintNote();
+    const btn = h('button.btn.sm', {
+      type: 'button',
+      text: 'Reload captures',
+      title: 'Re-read programmed_media_crosscheck/ — pick up a .d3 or .json added or removed since the server started',
+      style: { width: '100%', marginTop: '8px' },
+      disabled: this.reloading || !this.onReloadCaptures,
+      onClick: async () => {
+        if (!this.onReloadCaptures || this.reloading) return;
+        this.reloading = true;
+        btn.disabled = true;
+        btn.textContent = 'Reloading…';
+        // A panel re-rendered mid-reload must not offer the button again.
+        this.reloadNote = null;
+        paintNote();
+        try {
+          const res = await this.onReloadCaptures();
+          const caps = res?.captures ?? [];
+          const warnings = caps.reduce((n, c) => n + (c.warnings?.length ?? 0), 0);
+          this.reloadNote = {
+            text:
+              (caps.length === 0
+                ? 'Reloaded: the folder holds no capture, so the cross-check is now NOT in use.'
+                : `Reloaded ${caps.length} capture(s): ${caps.map((c) => c.sourceFile).join(', ')}.`) +
+              (warnings ? `\n${warnings} reference(s) could not be resolved — see the server window.` : ''),
+            bad: caps.length === 0 || warnings > 0,
+          };
+        } catch (err) {
+          this.reloadNote = { text: err?.message || String(err), bad: true };
+        } finally {
+          this.reloading = false;
+          this.reloadBtn.disabled = false;
+          this.reloadBtn.textContent = 'Reload captures';
+          paintNote();
+        }
+      },
+    });
+    this.reloadBtn = btn;
+    return h('div', btn, note);
   }
 
   /** Show the clear button only when there is something to clear. */

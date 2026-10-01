@@ -50,6 +50,7 @@ async function boot() {
 
   app.reclaim = new ReclaimStrip($('#reclaimStrip'));
   app.filters = new FilterPanel($('#filterPanel'));
+  app.filters.onReloadCaptures = reloadCaptures;
   app.filters.render();
 
   buildTabs();
@@ -255,6 +256,10 @@ async function loadSummary() {
 
     // Drives whether the Files table shows a Resolution column at all.
     state.mediaProbed = Number(s?.media?.withDimensions ?? 0);
+    // And whether it shows a Programmed column: only when a usable capture is
+    // loaded. Without one the column would be dashes that read as "nothing
+    // here is programmed"; the board already says "not cross-checked".
+    state.programmedLoaded = Boolean(s?.programmed?.usable);
 
     app.filters.setOptions({
       songFolders: s?.songFolders || [],
@@ -498,6 +503,46 @@ function handleStateChange(reasons) {
     }
   }
   void reloading;
+}
+
+/**
+ * Re-read programmed_media_crosscheck/ and redraw everything that depends on
+ * it: the board, the lists, the ladder, coverage. Throws with the server's
+ * message when it refused, in which case nothing changed on either side.
+ *
+ * Not `reloadEverything`, which also clears the manifest selection: a new
+ * capture changes verdicts, not which versions you chose to keep.
+ *
+ * Filter values the new captures cannot honour are dropped first. A hidden
+ * track that no longer exists would make every request a 400, and a
+ * Programmed filter with no capture would be refused outright.
+ */
+async function reloadCaptures() {
+  const res = await api.reloadCaptures();
+  await loadSummary();
+  const p = app.summary?.programmed ?? null;
+  const patch = {};
+  if (!p?.usable) {
+    for (const k of ['programmed', 'excludeTrack', 'excludeSetlist']) if (state.filters[k]) patch[k] = '';
+  } else {
+    const keep = (raw, known) => String(raw || '').split('\n').filter((x) => x && known.has(x)).join('\n');
+    const tracks = keep(state.filters.excludeTrack, new Set(p.tracks.map((t) => t.track)));
+    const setlists = keep(state.filters.excludeSetlist, new Set(p.setlists.map((x) => x.setlist)));
+    if (tracks !== (state.filters.excludeTrack || '')) patch.excludeTrack = tracks;
+    if (setlists !== (state.filters.excludeSetlist || '')) patch.excludeSetlist = setlists;
+  }
+  if (Object.keys(patch).length) {
+    // update() refreshes the table and the board itself.
+    update({ filters: patch }, 'filters');
+  } else {
+    app.reclaim.refresh();
+    await app.table.refresh();
+  }
+  app.ladder.refresh();
+  if (state.tab === 'coverage') app.coverage.load();
+  else app.coverageStale = true;
+  paintStatusBar();
+  return res;
 }
 
 async function reloadEverything() {
