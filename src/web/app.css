@@ -246,6 +246,9 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .crosscheck.aging { border-color: color-mix(in srgb, var(--patch) 45%, transparent); }
 .cc-meta { color: var(--faint); white-space: nowrap; }
 .cc-stale { color: var(--patch); }
+.cc-sources { margin-top: 4px; }
+.cc-source { overflow-wrap: anywhere; }
+.crosscheck .cc-project { color: var(--fg); }
 
 /* ------------------------------------------------------------- workspace */
 

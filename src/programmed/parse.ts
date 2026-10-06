@@ -89,6 +89,11 @@ export interface ProgrammedSetlist {
 export interface ProgrammedCapture {
   /** File it came from, for the banner and the UI. */
   sourceFile: string;
+  /**
+   * Absolute path of that file, set by the loader -- where the project being
+   * analysed actually sits. Absent on a capture parsed from memory (tests).
+   */
+  location?: string;
   /** `capturedAt` from the file. A capture is a POINT IN TIME -- see below. */
   capturedAt: string | null;
   project: string | null;

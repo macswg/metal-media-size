@@ -106,6 +106,14 @@ describe('loadProgrammedCaptures with .d3 files', () => {
     writeFileSync(join(dir, 'broken.d3'), 'truncated in the copy');
     await expect(loadProgrammedCaptures(dir, dir)).rejects.toThrow(/broken\.d3/);
   });
+
+  it('records where each capture was read from, for the banner', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mms-loc-'));
+    writeFileSync(join(dir, 'show.json'), twoSetlistCapture());
+    const { captures } = await loadProgrammedCaptures(dir, dir);
+    expect(captures[0]?.location).toBe(`${dir}/show.json`);
+    expect(captures[0]?.project).toBe('test_project');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -123,6 +123,7 @@ export function registerVersionRoutes(app: FastifyInstance, ctx: AppContext): vo
             usable: prot.usable,
             captures: prot.captures.map((c) => ({
               sourceFile: c.sourceFile,
+              location: c.location ?? null,
               capturedAt: c.capturedAt,
               capturedAtSource: c.capturedAtSource,
               kind: c.kind,

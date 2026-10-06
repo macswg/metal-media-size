@@ -70,6 +70,7 @@ export function registerProgrammedRoutes(
         previous: before,
         captures: loaded.captures.map((c) => ({
           sourceFile: c.sourceFile,
+          location: c.location ?? null,
           kind: c.kind,
           capturedAt: c.capturedAt,
           capturedAtSource: c.capturedAtSource,

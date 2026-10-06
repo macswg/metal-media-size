@@ -84,6 +84,7 @@ export interface ProgrammedProtection {
   /** Captures that fed this, newest `capturedAt` first. */
   captures: Array<{
     sourceFile: string;
+    location: string | null;
     capturedAt: string | null;
     capturedAtSource: 'capture' | 'file-mtime';
     kind: 'summary' | 'project';
@@ -269,6 +270,7 @@ export function resolveProgrammed(
   const captureSummaries = captures
     .map((c) => ({
       sourceFile: c.sourceFile,
+      location: c.location ?? null,
       capturedAt: c.capturedAt,
       capturedAtSource: c.capturedAtSource,
       kind: c.kind,

@@ -101,11 +101,10 @@ export async function loadProgrammedCaptures(
     }
     // Both parsers throw on anything they cannot read. Deliberately not
     // caught -- see the header.
-    captures.push(
-      isProject
-        ? parseD3Project(bytes, name, modifiedMs)
-        : parseProgrammedCapture(bytes.toString('utf8'), name),
-    );
+    const capture = isProject
+      ? parseD3Project(bytes, name, modifiedMs)
+      : parseProgrammedCapture(bytes.toString('utf8'), name);
+    captures.push({ ...capture, location: full });
   }
 
   return { captures, directory, skipped };

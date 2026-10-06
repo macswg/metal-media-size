@@ -9,7 +9,7 @@
  * the filter set currently on screen.
  */
 
-import { h, clear, debounce } from './dom.js';
+import { h, clear, debounce, append } from './dom.js';
 import { state, update, emit, filterParams } from './state.js';
 import { api } from './api.js';
 import { bytesParts, tib, count, bytes as fmtBytes } from './format.js';
@@ -332,6 +332,7 @@ export class ReclaimStrip {
         'protecting nothing. Check it is a capture of this show, and of a project whose ',
         'media came from this delivery folder.',
       );
+      append(el, [captureSources(p.captures)]);
       return;
     }
 
@@ -370,7 +371,30 @@ export class ReclaimStrip {
         }),
       );
     }
+    append(el, [captureSources(p.captures)]);
   }
+}
+
+/**
+ * Which project the cross-check was read from, and where the file sits. The
+ * figures above say THAT the archive was checked; this says against WHAT, which
+ * is the first thing to confirm before trusting them -- a capture of another
+ * show, or an old save of this one, produces a perfectly well-formed banner.
+ * One line per capture, since every file in the folder is unioned.
+ */
+function captureSources(captures) {
+  const rows = (captures ?? []).map((c) => {
+    const kind = c.kind === 'project' ? 'd3 project' : 'Susan summary';
+    const name = c.project || c.sourceFile.replace(/\.[^.]*$/, '');
+    return h(
+      'div.cc-source',
+      h('span.cc-meta', { text: `${kind} ` }),
+      h('b.cc-project', { text: name }),
+      h('span.cc-meta', { text: '  ·  ' }),
+      h('code', { text: c.location ?? c.sourceFile, title: c.location ?? c.sourceFile }),
+    );
+  });
+  return rows.length ? h('div.cc-sources', ...rows) : null;
 }
 
 /**

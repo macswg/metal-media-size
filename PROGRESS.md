@@ -2,6 +2,17 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-10-05 — the cross-check banner names its project
+
+- The cross-check line on the board now says **which project** it was checked
+  against and **where the file sits**: one line per capture, with its kind
+  (d3 project / Susan summary), project name and full path. Drawn on the
+  matched-nothing banner too, where "which file was that?" is the first
+  question.
+- Captures carry a `location` (the absolute path the loader read), passed
+  through `/api/reclaim`, `/api/assets/:id/versions` and the reload route.
+- Tests: 1 more in `test/programmed-d3.test.ts`.
+
 ## 2026-10-01 — Reload captures, and a Programmed column
 
 - **Reload captures** button (`POST /api/programmed/reload`): adding or removing
