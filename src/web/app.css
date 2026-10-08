@@ -224,6 +224,7 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 /* Not a verdict colour either: this is media the SHOW needs, which the keep-N
    slider has no opinion about. */
 .fact.programmed .v { color: var(--kept); }
+.fact.cluster .v { color: var(--superseded); }
 
 /* ------------------------------------------------- show-file cross-check */
 /* Drawn in BOTH states on purpose. An archive with no capture loaded and one
@@ -231,6 +232,11 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
    the board; this line is the only thing that tells them apart. */
 .crosscheck {
   flex: 1 0 100%;
+  /* A flex item's minimum is its content's by default, so a long line -- or
+     the per-machine grid inside the cluster line -- would widen the page on a
+     phone instead of wrapping. */
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 7px 10px;
   border-radius: 5px;
   font-size: 12px;
@@ -243,6 +249,36 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius
 .crosscheck.ok b { color: var(--kept); }
 .crosscheck.warn { color: var(--fg); background: color-mix(in srgb, var(--superseded) 12%, transparent); border-color: color-mix(in srgb, var(--superseded) 40%, transparent); }
 .crosscheck.warn b { color: var(--superseded); }
+.crosscheck.cluster { margin-top: 6px; }
+.cluster-machines { margin-top: 8px; }
+.cm-head { all: unset; cursor: pointer; display: block; width: 100%; box-sizing: border-box; text-align: left; color: var(--faint); }
+.cm-head b { color: var(--text); }
+.cm-note { color: var(--faint); }
+.cm-caret { display: inline-block; width: 14px; color: var(--text); }
+.cm-group { margin-top: 6px; }
+.cm-role { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); margin: 2px 0 4px; }
+.cm-scanned { text-transform: none; letter-spacing: 0; color: var(--faint); }
+.cm-cell.uncounted { opacity: 0.55; }
+.cm-unread { color: var(--patch); font-size: 11px; margin-top: 2px; }
+.crosscheck .cc-roles { color: var(--dim); margin-right: 10px; white-space: nowrap; }
+.crosscheck .cc-role { margin-left: 6px; cursor: pointer; }
+.crosscheck .cc-role input { vertical-align: -2px; margin-right: 3px; }
+.cm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 6px; }
+@media (max-width: 520px) { .crosscheck .inshow { white-space: normal; } }
+.cm-cell { border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; background: var(--panel-2, var(--panel)); }
+.cm-cell.is-over { border-color: color-mix(in srgb, var(--warn) 60%, transparent); }
+.cm-cell.is-critical { border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.cm-top { display: flex; align-items: baseline; gap: 6px; margin-bottom: 3px; }
+.cm-key { font-family: var(--mono); color: var(--text); }
+.cm-reg { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.cm-pct { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
+.cm-pct .meter-pct { min-width: 0; }
+.cm-cell .meter-pct { display: none; }
+.cm-cell .cm-pct .meter-pct { display: inline; }
+.cm-frees { font-family: var(--mono); font-size: 11px; color: var(--superseded); margin-top: 3px; }
+.crosscheck .inshow { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; padding: 2px 8px 2px 4px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.crosscheck .inshow input { margin: 0; accent-color: var(--kept); cursor: pointer; }
+.crosscheck .inshow.on { border-color: color-mix(in srgb, var(--kept) 55%, transparent); background: color-mix(in srgb, var(--kept) 14%, transparent); }
 .crosscheck.aging { border-color: color-mix(in srgb, var(--patch) 45%, transparent); }
 .cc-meta { color: var(--faint); white-space: nowrap; }
 .cc-stale { color: var(--patch); }

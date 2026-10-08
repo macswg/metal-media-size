@@ -290,6 +290,21 @@ their setlists), plus `tracks` and `setlists` summaries for the filter panel.
   hid nothing would look like a filter that worked.
 - Exclusion lists are **newline-separated** — a track name is a file stem and
   can carry a comma. A version on an excluded track AND another one is hidden.
+- **`inShow=0|1` is the ASSET-level one** — the **Only assets the show uses**
+  checkbox on the board's cross-check line. `inShow=1` keeps every version of
+  an asset with at least one programmed version (`programmedAssetIds`),
+  superseded renders included, and hides assets the show has dropped entirely.
+  Asked for by the user because a dropped asset is already off the machines,
+  so its old renders free archive space and nothing on the rig. Same predicate,
+  same refusals, same rule: it hides rows and never touches a verdict.
+  **Why setlists and not the project's own media lists** — measured on the
+  1 October `.d3`: its `objects/videoclip` entries cover 2,396 of 2,399 assets,
+  its `VideoFragment` version lists 326 of 328 keep-1 superseded versions, and
+  `internal/videofile` 34,485 of 35,891 files. Lists that name nearly the
+  whole archive cannot be the ones that dropped what has left the machines
+  (inferred, not confirmed against d3), so none can say what is on a drive.
+  At snapshot 24 `inShow=1` takes keep-1 from 34.32 to 33.39 TiB (51 versions
+  hidden). For what is actually on a machine, the rig survey is the evidence.
 - **File rows carry `programmedOn` too**, with the same null-versus-`[]` rule,
   for the Files table's Programmed column. The column is drawn only while a
   usable capture is loaded (`state.programmedLoaded`), like Resolution: a column
@@ -908,6 +923,89 @@ never seen as missing, so without it silence would classify a stray as
 covers every name in the snapshot, regionless files included, because the
 question it answers is "does the archive have this name", which is not a
 question about regions. Built in the same pass as the expectations.
+
+## The cluster, read from the Media Index catalog
+
+The rig scanner in `../project_code/moose_2026/media_search_base` (the "Media
+Index") walks every playback machine and keeps a Postgres catalog of what is
+on each one, marking a file `missing_at` once a completed scan stops finding
+it. `src/cluster/catalog.ts` READS that catalog, so the analyser can tell
+superseded media still taking space on the machines apart from media already
+cleared off them and surviving only on long-term storage. Asked for by the
+user: *"use that to scan the cluster (actors only) as a location … treat the
+cluster as a single location."*
+
+- **It never scans.** A rig scan is armed in the Media Index and run there by
+  a person (`rig-scan.sh`); a rig is never scanned by itself, and nothing here
+  may start, request or schedule one. **Reload cluster** re-reads the catalog
+  and nothing else. The listing is a point in time, so the time of the last
+  complete scan is printed beside it.
+- **Read-only three times over.** The login is `metal_media_ro`, a role in the
+  catalog's Postgres granted SELECT on `files`, `cluster_machines`, `clusters`,
+  `scans`, `locations`, `root_space` and nothing else, with
+  `default_transaction_read_only = on`; every read runs in `BEGIN READ ONLY`;
+  and `test/readonly-enforcement.test.ts` fails if `pg` is imported outside
+  `catalog.ts` or that file sends anything but SELECTs. Created 2026-10-07 with
+  the user's OK; `root_space` was added the same day for the drive figures, and
+  is asked about with `has_table_privilege` first, so a role without it loses
+  the drive meters and nothing else. It is a cluster-level role, not in the Media Index's
+  migrations, and `pg_dump` backups do not carry roles: a catalog rebuilt from
+  a fresh volume needs it made again.
+- **The credential lives in `config/local.json`** (gitignored), as
+  `mediaIndex.databaseUrl`, or in `MEDIA_INDEX_DATABASE_URL`. No message quotes
+  the URL. The listing is held in memory (`ClusterSource`) and never stored.
+- **One location.** A file is on the cluster when any seat in
+  `mediaIndex.roles` holds it — `actor` and `understudy` here, at the user's
+  request; `actor` alone is the default. It holds it at the archive's SIZE, name
+  matched ignoring case. A wrong-sized copy is not a copy, and is counted on
+  its own. Which machine holds it decides nothing here.
+- **`onCluster=0|1`** hides rows and nothing else — per FILE in file lists, per
+  VERSION (any file there) in version lists. It never touches a verdict.
+  `/api/reclaim` adds `clusterReclaimBytes`: superseded bytes in view the
+  cluster still holds, the **ON CLUSTER** tile. That is less than the headline
+  even under the filter, because region-0 proxies never sit on an actor.
+- **Three states, never one.** Not configured: `cluster: null`, no line on the
+  board. Configured and unreadable: `usable: false` with the reason, the filter
+  refuses (`cluster_unavailable`), and a stale link carrying it is dropped by
+  the board rather than blanking every figure. Loaded: the listing, its scan
+  times, any seat with no files, and the files on the cluster the archive has
+  no name for. **An unreadable catalog never reads as an empty one.** Startup
+  does not stop on it, unlike an unreadable capture: the cluster scopes what is
+  shown, it protects nothing. A failed reload leaves the old listing in force
+  and says so.
+- **Per machine** (`clusterMachines` on `/api/reclaim`, the grid under the
+  cluster line): what removing the superseded versions in view frees on each
+  seat, against its drive. These are **not additive** and the board says so —
+  a file on an actor and its understudy frees on both and is one file in
+  ON CLUSTER. The drive is the rig scanner's MEASURED size and free space
+  (`root_space`), not the 32 TB the Machines tab assumes; percentages are of
+  usable space after the same 5% reserve, judged by the same `driveState`. A
+  seat with no reading draws no meter and says so, never an empty drive.
+  Grouped by role, in key order; colour carries fullness.
+- **Each location is scanned on its own, and so is stated on its own.** Actors
+  are `d3-main`, understudies `d3-us`; a scan marks files missing only in the
+  location it scanned, so a fresh actor scan is used as soon as it lands, beside
+  an old understudy one. The board gives each a separate age, and the grid gives
+  each role group its own — never one oldest-or-newest figure, which hides one
+  behind the other. Asked for by the user. **`clusterRoles`** (the **count:**
+  checkboxes) narrows what "on the cluster" means for `onCluster` and ON CLUSTER,
+  so an understudy scan that has gone stale can be left out; the grid still draws
+  every machine, dimmed when not counted. It hides no row by itself, so it is
+  not an active filter, and a role the listing was not read for is refused
+  (`bad_cluster_role`).
+- **A machine the last scan could not reach keeps its old file list** — the
+  Media Index leaves files under an unreadable path alone and still completes
+  the scan, recording the path in `scans.unreadable`. `machineReadState` turns
+  that into `read` / `partly` / `not-read` per machine, with when it was last
+  reached, and the board says so; otherwise a stale listing sits under a fresh
+  scan time. Scan 795 on 2026-10-07 missed 306 this way.
+- At snapshot 25 with understudies: 22 seats, 73,725 files; keep-1 on the
+  cluster 24.82 TiB. 301 (r6, r7) is 98.9% of usable and keep-1 takes it only
+  to 92.2%: it holds 1.79 TiB superseded while its actors 105/106 hold 5.29.
+  It is 26.17 of 26.26 TiB media — full from two heavy slices, not strays.
+- Measured at snapshot 25 against the 10:06 UTC scan: 14 actors, 38,805
+  files; 32,019 archive files (139.22 TiB) on them. Keep-1 is 35.50 TiB across
+  339 versions; 318 of them still have files on the actors, holding 24.49 TiB.
 
 ## FreeFileSync
 

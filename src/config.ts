@@ -37,6 +37,22 @@ export interface AppConfig {
   /** family label -> tokens that, if present in `base`, select that label. */
   families: Record<string, string[]>;
   defaultFamily: string;
+  /**
+   * The Media Index catalog the rig scanner fills, read for which files are on
+   * the cluster. Absent means the cluster is not in use. Lives in
+   * `config/local.json` only: the URL carries a credential. See
+   * `src/cluster/catalog.ts`.
+   */
+  mediaIndex?: MediaIndexConfig;
+}
+
+export interface MediaIndexConfig {
+  /** postgres:// URL for a SELECT-only role. Never logged. */
+  databaseUrl: string;
+  /** `clusters.slug` in the catalog. */
+  cluster: string;
+  /** Which seats count as "the cluster": `actor`, `director`, `understudy`. */
+  roles: string[];
 }
 
 /** Absolute path of the project root (the directory containing package.json). */
@@ -66,6 +82,7 @@ export const LOCAL_CONFIG = 'config/local.json';
 const ENV_ROOT = 'ARCHIVE_ROOT';
 const ENV_NAME = 'ARCHIVE_NAME';
 const ENV_ALLOWED = 'ARCHIVE_ALLOWED_ROOTS';
+const ENV_MEDIA_INDEX = 'MEDIA_INDEX_DATABASE_URL';
 
 /** Read a project file through the chokepoint, or null if it is not there. */
 async function readProjectFile(fs: ReadOnlyFs, p: string): Promise<string | null> {
@@ -129,6 +146,14 @@ export async function loadConfig(configPath: string): Promise<AppConfig> {
     sources.push(`$${ENV_ALLOWED}`);
   }
 
+  const envMediaIndex = process.env[ENV_MEDIA_INDEX];
+  if (envMediaIndex) {
+    merged = {
+      ...merged,
+      mediaIndex: { cluster: 'd3', roles: ['actor'], ...merged.mediaIndex, databaseUrl: envMediaIndex },
+    };
+  }
+
   return normaliseConfig(merged, sources.join(' + '));
 }
 
@@ -184,7 +209,21 @@ export function normaliseConfig(input: Partial<AppConfig>, source = '<inline>'):
     },
     families: input.families ?? {},
     defaultFamily: input.defaultFamily ?? 'OTHER',
+    ...(input.mediaIndex ? { mediaIndex: normaliseMediaIndex(input.mediaIndex, source) } : {}),
   };
+}
+
+const ROLES = new Set(['actor', 'director', 'understudy']);
+
+function normaliseMediaIndex(m: Partial<MediaIndexConfig>, source: string): MediaIndexConfig {
+  if (typeof m.databaseUrl !== 'string' || !/^postgres(ql)?:\/\//.test(m.databaseUrl)) {
+    throw new Error(`Config ${source}: mediaIndex.databaseUrl must be a postgres:// URL`);
+  }
+  const roles = m.roles ?? ['actor'];
+  if (!Array.isArray(roles) || roles.length === 0 || roles.some((r) => !ROLES.has(r))) {
+    throw new Error(`Config ${source}: mediaIndex.roles must list some of ${[...ROLES].join(', ')}`);
+  }
+  return { databaseUrl: m.databaseUrl, cluster: m.cluster ?? 'd3', roles: [...roles] };
 }
 
 /** Resolve the configured db path to an absolute path under the project. */

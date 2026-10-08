@@ -81,6 +81,13 @@ export interface ProgrammedProtection {
   protectedVersionIds: ReadonlySet<number>;
   /** Assets protected in full because a reference named no version. */
   wholeAssetIds: ReadonlySet<number>;
+  /**
+   * Assets with at least one programmed version -- the assets the show uses at
+   * all. Drives the `inShow` filter, which hides every version of an asset the
+   * show does not use. A superset of `wholeAssetIds`. Display only: it decides
+   * nothing about what is protected.
+   */
+  programmedAssetIds: ReadonlySet<number>;
   /** Captures that fed this, newest `capturedAt` first. */
   captures: Array<{
     sourceFile: string;
@@ -149,6 +156,7 @@ export function resolveProgrammed(
 
   const protectedVersionIds = new Set<number>();
   const wholeAssetIds = new Set<number>();
+  const programmedAssetIds = new Set<number>();
   const unmatchedNames = new Map<string, UnmatchedName>();
   const unmatchedVersions = new Map<string, UnmatchedVersion>();
   const names = new Set<string>();
@@ -205,6 +213,7 @@ export function resolveProgrammed(
         // No readable version: the show plays this asset and the capture will
         // not say which render. Protect all of them -- see the header.
         wholeAssetIds.add(asset.id);
+        if (asset.versions.length > 0) programmedAssetIds.add(asset.id);
         for (const v of asset.versions) use(v.id, ref);
         continue;
       }
@@ -227,6 +236,7 @@ export function resolveProgrammed(
           });
         continue;
       }
+      programmedAssetIds.add(asset.id);
       for (const v of rows) use(v.id, ref);
     }
   }
@@ -283,6 +293,7 @@ export function resolveProgrammed(
   return {
     protectedVersionIds,
     wholeAssetIds,
+    programmedAssetIds,
     captures: captureSummaries,
     programmedOn,
     tracks,

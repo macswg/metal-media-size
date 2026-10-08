@@ -523,7 +523,7 @@ async function reloadCaptures() {
   const p = app.summary?.programmed ?? null;
   const patch = {};
   if (!p?.usable) {
-    for (const k of ['programmed', 'excludeTrack', 'excludeSetlist']) if (state.filters[k]) patch[k] = '';
+    for (const k of ['programmed', 'excludeTrack', 'excludeSetlist', 'inShow']) if (state.filters[k]) patch[k] = '';
   } else {
     const keep = (raw, known) => String(raw || '').split('\n').filter((x) => x && known.has(x)).join('\n');
     const tracks = keep(state.filters.excludeTrack, new Set(p.tracks.map((t) => t.track)));

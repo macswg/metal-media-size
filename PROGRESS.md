@@ -2,6 +2,66 @@
 
 Running log, newest on top. Prepend new entries; don't rewrite history.
 
+## 2026-10-07 (late) — Cluster scan ages per role, actors without understudies, unread machines
+
+- The board printed only the OLDEST scan time, so this morning's actor scan
+  read as 18 h old behind yesterday's understudy one. Each location's age is
+  now stated with its role, and the grid's role groups carry their own.
+- `clusterRoles` and the **count:** checkboxes: leave a stale role out of
+  ON CLUSTER and the `onCluster` filter. Live at snapshot 25, keep-1: 24.82 TiB
+  (325 versions) actors and understudies, 24.49 TiB (318) actors alone.
+- Per-machine read state from `scans.unreadable`: a machine the last scan
+  could not reach is flagged with when it was last read. All 22 read in the
+  latest scans.
+- `test/scan.integration.test.ts` fails 12 of 27 on the last commit as well:
+  the archive has grown past its ground truth (36.7k files). Not touched here.
+
+## 2026-10-07 — Understudies, and per-machine figures
+
+- `mediaIndex.roles` is now `actor` + `understudy`: 22 seats, 73,725 files.
+  Keep-1 on the cluster 24.82 TiB / 325 versions.
+- **Per machine** grid under the cluster line: what the superseded versions in
+  view free on each seat, a drive meter from the Media Index's MEASURED
+  `root_space` (role granted SELECT on it), and used → after as % of usable.
+  Not additive across seats, and labelled so.
+- 301 is 98.9% → 92.2% at keep-1, still critical: it frees 1.79 TiB where its
+  actors 105/106 free 5.29. 106 is 86.8% → 72.7%; 208, 303, 304 leave watch.
+- Fixed a phone overflow: `.crosscheck` had no `min-width: 0`, so a long line
+  widened the page (23 px before; the per-machine grid made it 1,376 px).
+- Tests: 2 more in `test/cluster.test.ts`.
+
+## 2026-10-07 — The cluster as a location, from the Media Index
+
+- Reads the Media Index catalog (the rig scanner's Postgres) for what is on
+  the actors, treated as one location: `src/cluster/catalog.ts` (the only
+  module that may import `pg`; SELECT only, in a read-only transaction),
+  `src/cluster/presence.ts` (name + size matching), `ClusterSource` in memory.
+- Catalog side: a `metal_media_ro` role, SELECT on five tables, read-only by
+  default. Credential in `config/local.json` (gitignored).
+- **Only what is on the cluster** checkbox on the board (`onCluster=0|1`), an
+  **ON CLUSTER** tile (superseded bytes the actors still hold), and **Reload
+  cluster**. Starts no rig scan.
+- Snapshot 25, scan of 10:06 UTC: keep-1 35.50 TiB / 339 versions; on the
+  actors 24.49 TiB / 318. Keep-2 18.10 → 12.35; keep-3 7.58 → 5.47.
+- Tests: `test/cluster.test.ts` (10), plus a database-boundary test in
+  `test/readonly-enforcement.test.ts`.
+
+## 2026-10-07 — Only assets the show uses
+
+- **`inShow=0|1`**, drawn as an **Only assets the show uses** checkbox on the
+  board's cross-check line: hides every asset with no version on a setlist,
+  keeps every version (superseded included) of one that has. Asset-level,
+  unlike `programmed`. View-only, same refusals as the other programmed
+  filters. `/api/reclaim`'s `programmed` block gains `programmedAssets`.
+- Measured at snapshot 24 against `moose_sphere_backup_1Oct2026_0648.d3`: 899
+  assets in the show. Keep-1 34.32 → 33.39 TiB (328 → 277 versions); keep-2
+  15.93 → 15.73; keep-3 6.84 → 6.78.
+- The project's own media lists (`objects/videoclip`, `VideoFragment`,
+  `internal/videofile`) were tried as the "what d3 sees" signal and rejected:
+  they still name nearly every asset, version and file in the archive, so they
+  do not reflect what has been removed from the machines.
+- Tests: 4 more in `test/programmed-d3.test.ts`.
+
 ## 2026-10-05 — the cross-check banner names its project
 
 - The cross-check line on the board now says **which project** it was checked

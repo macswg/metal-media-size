@@ -1018,7 +1018,7 @@ export class TableView {
  * and reachable while the drive still has bytes on it. Severity is never colour
  * alone: the critical and over states carry a word as well.
  */
-function driveMeter(row, { stacked = false } = {}) {
+export function driveMeter(row, { stacked = false } = {}) {
   const cap = row.capacityBytes || 1;
   const pctOf = (n) => `${Math.max(0, (n / cap) * 100)}%`;
   const over = row.freeBytes < 0;

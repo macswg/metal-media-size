@@ -257,6 +257,68 @@ describe('the programmed filters', () => {
   });
 });
 
+describe('only assets the show uses (inShow)', () => {
+  type V = { versionId: number; assetId: number; base: string; bytes: number; status: string };
+
+  it('keeps every version of an asset the show uses, superseded ones included, and hides the rest', async () => {
+    const s = await server(true);
+    const all: V[] = (await s.get('/api/versions?keepN=1&limit=2000')).json().rows;
+    const yes: V[] = (await s.get('/api/versions?keepN=1&limit=2000&inShow=1')).json().rows;
+    const no: V[] = (await s.get('/api/versions?keepN=1&limit=2000&inShow=0')).json().rows;
+    const programmed: V[] = (await s.get('/api/versions?keepN=1&limit=2000&programmed=1')).json().rows;
+
+    const showAssets = new Set(programmed.map((r) => r.assetId));
+    expect(showAssets.size).toBeGreaterThan(0);
+    // Asset-level, not version-level: every version of a used asset, nothing else.
+    expect(new Set(yes.map((r) => r.versionId))).toEqual(
+      new Set(all.filter((r) => showAssets.has(r.assetId)).map((r) => r.versionId)),
+    );
+    // The point of it: a used asset's old renders stay in view.
+    expect(yes.some((r) => r.status === 'superseded')).toBe(true);
+    // A partition -- nothing lost, nothing doubled.
+    expect(yes.length + no.length).toBe(all.length);
+    expect(no.some((r) => showAssets.has(r.assetId))).toBe(false);
+    await s.close();
+  });
+
+  it('splits the file list the same way', async () => {
+    const s = await server(true);
+    const all = (await s.get('/api/files?limit=2000')).json();
+    const yes = (await s.get('/api/files?limit=2000&inShow=1')).json();
+    const no = (await s.get('/api/files?limit=2000&inShow=0')).json();
+    expect(yes.total).toBeGreaterThan(0);
+    expect(yes.total + no.total).toBe(all.total);
+    expect(yes.matchedBytes + no.matchedBytes).toBe(all.matchedBytes);
+    await s.close();
+  });
+
+  it('hides rows and changes no verdict', async () => {
+    const s = await server(true);
+    const all: V[] = (await s.get('/api/versions?keepN=1&limit=2000')).json().rows;
+    const yes: V[] = (await s.get('/api/versions?keepN=1&limit=2000&inShow=1')).json().rows;
+    const before = new Map(all.map((r) => [r.versionId, r.status]));
+    for (const r of yes) expect(r.status).toBe(before.get(r.versionId));
+
+    const whole = (await s.get('/api/reclaim?keepN=1')).json();
+    const scoped = (await s.get('/api/reclaim?keepN=1&inShow=1')).json();
+    expect(scoped.programmed.protectedVersions).toBe(whole.programmed.protectedVersions);
+    expect(scoped.reclaimBytes).toBe(
+      yes.filter((r) => r.status === 'superseded').reduce((n, r) => n + r.bytes, 0),
+    );
+    // The board's checkbox states how many assets it keeps.
+    expect(whole.programmed.programmedAssets).toBe(new Set(yes.map((r) => r.assetId)).size);
+    await s.close();
+  });
+
+  it('refuses without a capture rather than calling every asset unused', async () => {
+    const s = await server(false);
+    const res = await s.get('/api/versions?inShow=1');
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('no_capture');
+    await s.close();
+  });
+});
+
 describe('the drill-down', () => {
   it('lists the tracks and setlists on each ladder version', async () => {
     const s = await server(true);

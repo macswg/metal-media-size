@@ -41,6 +41,9 @@ import { registerMachineRoutes } from './routes/machines.ts';
 import { registerReclaimRoutes } from './routes/reclaim.ts';
 import { registerProbeRoutes } from './routes/probe.ts';
 import { registerProgrammedRoutes, type CaptureSource } from './routes/programmed.ts';
+import { registerClusterRoutes } from './routes/cluster.ts';
+import { readClusterListing } from '../cluster/catalog.ts';
+import type { ClusterReader } from './cluster-source.ts';
 import { registerScanRoutes } from './routes/scan.ts';
 import { registerSnapshotRoutes } from './routes/snapshots.ts';
 import { registerSongRoutes } from './routes/songs.ts';
@@ -96,6 +99,12 @@ export interface BuildServerOptions {
    * route then answers 409 rather than guessing a directory.
    */
   captureSource?: CaptureSource;
+  /**
+   * How to read the cluster's file list. Defaults to the Media Index catalog
+   * named in `cfg.mediaIndex`, and to nothing when that is absent. Tests hand
+   * in a function so no test ever opens a database connection.
+   */
+  clusterReader?: ClusterReader | null;
 }
 
 export interface BuiltServer {
@@ -110,7 +119,14 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
     routerOptions: { maxParamLength: 500 },
   });
 
-  const ctx = createContext(opts.db, opts.cfg, opts.exportsDir, opts.captures ?? []);
+  const mediaIndex = opts.cfg.mediaIndex;
+  const clusterReader =
+    opts.clusterReader !== undefined
+      ? opts.clusterReader
+      : mediaIndex
+        ? () => readClusterListing(mediaIndex)
+        : null;
+  const ctx = createContext(opts.db, opts.cfg, opts.exportsDir, opts.captures ?? [], clusterReader);
 
   // Fastify types the thrown value as `unknown`, which is correct: a route can
   // throw anything. Each shape is narrowed with a real guard rather than cast,
@@ -195,6 +211,7 @@ export function buildServer(opts: BuildServerOptions): BuiltServer {
   registerRigRoutes(app, ctx);
   registerExportRoutes(app, ctx);
   registerProgrammedRoutes(app, ctx, opts.captureSource);
+  registerClusterRoutes(app, ctx);
 
   return { app, ctx };
 }

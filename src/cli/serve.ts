@@ -54,6 +54,10 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
+  // The cluster listing, from the Media Index catalog. A catalog that does not
+  // answer is reported, not fatal -- see src/server/cluster-source.ts.
+  await built.ctx.cluster.load();
+
   const address = await startServer(built, port);
 
   const latest = latestSnapshot(db);
@@ -82,6 +86,17 @@ async function main(): Promise<void> {
     // Each is a reference the extractor could not resolve, so it protects
     // less than it should. Printed, never dropped.
     for (const w of c.warnings) console.log(`             warning: ${w}`);
+  }
+  const cl = built.ctx.cluster;
+  if (!cl.configured) console.log('cluster  : no mediaIndex in config -- cluster NOT in use');
+  else if (cl.listing === null) console.log(`cluster  : UNAVAILABLE -- ${cl.error ?? 'not read'}`);
+  else {
+    const l = cl.listing;
+    console.log(
+      `cluster  : ${l.cluster} ${l.roles.join('/')} -- ${l.machines.length} machine(s), ` +
+        `${l.files.length.toLocaleString()} file(s); last complete scan ` +
+        `${l.scans.map((s) => `${s.location} ${s.lastCompleteAt ?? 'never'}`).join(', ')}`,
+    );
   }
   console.log(`listening: ${address}  (bound to ${BIND_HOST} only)`);
 }

@@ -53,7 +53,8 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.ts';
 import { resolveSnapshot } from '../context.ts';
 import { isEmptyFilter, parseFilters, parseKeepN, type Query } from '../query.ts';
-import { selectVersions } from '../select.ts';
+import { clusterRolesOf, selectVersions } from '../select.ts';
+import { clusterMachineFrees, clusterReport } from './cluster.ts';
 import { makeParser } from '../../scan/parse.ts';
 
 /**
@@ -122,6 +123,13 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
     let protectedPatchCount = 0;
     let programmedBytes = 0;
     let programmedCount = 0;
+    // What of the superseded set is actually on the cluster, by the Media
+    // Index's last scan. Null throughout when no listing is in force.
+    const countedRoles = clusterRolesOf(ctx, filters);
+    const onCluster = ctx.cluster.presence(snapshot.id, countedRoles);
+    let clusterReclaimBytes = 0;
+    let clusterReclaimCount = 0;
+    const supersededInView = new Set<number>();
     let keptBytes = 0;
     let totalBytes = 0;
     let totalFiles = 0;
@@ -159,6 +167,12 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
         supersededFiles += r.fileCount;
         tally.reclaimBytes += r.bytes;
         tally.supersededCount += 1;
+        supersededInView.add(r.versionId);
+        const there = onCluster?.byVersion.get(r.versionId);
+        if (there) {
+          clusterReclaimBytes += there.bytes;
+          clusterReclaimCount += 1;
+        }
       } else {
         keptBytes += r.bytes;
         if (r.keepReason === 'kept-patch-newer-than-latest-full' || r.keepReason === 'kept-patch-of-latest-full') {
@@ -217,6 +231,17 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
       /** Bytes and versions the cross-check rescued, within the rows in view. */
       programmedBytes,
       programmedCount,
+      /** Superseded bytes in view the cluster still holds. Null with no listing. */
+      clusterReclaimBytes: onCluster ? clusterReclaimBytes : null,
+      clusterReclaimCount: onCluster ? clusterReclaimCount : null,
+      /** The cluster listing, or null when the Media Index is not configured. */
+      cluster: clusterReport(ctx, snapshot.id, countedRoles),
+      /**
+       * Per machine: what removing the superseded versions in view frees on
+       * it. Null with no listing. Does not sum to clusterReclaimBytes -- see
+       * `clusterMachineFrees`.
+       */
+      clusterMachines: clusterMachineFrees(ctx, snapshot.id, supersededInView, countedRoles),
       /**
        * THE CROSS-CHECK'S OWN STATUS. **Null means no show-file capture is
        * loaded**, which is NOT the same as a capture that protected nothing --
@@ -236,6 +261,8 @@ export function registerReclaimRoutes(app: FastifyInstance, ctx: AppContext): vo
             })),
             /** Version rows held back across the WHOLE snapshot. */
             protectedVersions: prot.protectedVersionIds.size,
+            /** Assets with any programmed version: what `inShow=1` keeps. */
+            programmedAssets: prot.programmedAssetIds.size,
             matchedNames: prot.matchedNames,
             totalNames: prot.totalNames,
             /** Names in the capture the archive has no asset for. */

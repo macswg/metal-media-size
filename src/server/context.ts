@@ -20,6 +20,7 @@ import { badRequest, notFound } from './errors.ts';
 import { intParam, type Query } from './query.ts';
 import type { ProgrammedCapture } from '../programmed/parse.ts';
 import type { ProgrammedUse } from '../programmed/protect.ts';
+import { ClusterSource, type ClusterReader } from './cluster-source.ts';
 
 export interface AppContext {
   db: Db;
@@ -38,6 +39,11 @@ export interface AppContext {
    * context because it is per-server, not per-request. See rig-session.ts.
    */
   rig: RigSession;
+  /**
+   * Which files are on the cluster, read from the Media Index catalog. In
+   * memory only. Not configured unless `mediaIndex` is. See cluster-source.ts.
+   */
+  cluster: ClusterSource;
   /**
    * Where the exporter puts its artefacts. Undefined in normal operation, so
    * the exporter uses its own jailed default of `<project>/exports`. Tests set
@@ -59,12 +65,14 @@ export function createContext(
   cfg: AppConfig,
   exportsDir?: string,
   captures: readonly ProgrammedCapture[] = [],
+  clusterReader: ClusterReader | null = null,
 ): AppContext {
   const reclaim = new ReclaimCache(db, captures);
   const scans = new ScanRunner(db, cfg, (snapshotId) => reclaim.invalidate(snapshotId));
   const probes = new ProbeRunner(db, cfg);
   const rig = new RigSession();
-  return { db, cfg, reclaim, scans, probes, rig, ...(exportsDir === undefined ? {} : { exportsDir }) };
+  const cluster = new ClusterSource(db, clusterReader);
+  return { db, cfg, reclaim, scans, probes, rig, cluster, ...(exportsDir === undefined ? {} : { exportsDir }) };
 }
 
 /**

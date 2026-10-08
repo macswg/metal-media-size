@@ -45,6 +45,12 @@
  *                programmed on any of these  on any of these tracks
  *                tracks
  *   excludeSetlist  as excludeTrack, for every track on these setlists
+ *   inShow       the file's ASSET has a      the version's ASSET has a
+ *   (0|1)        programmed version          programmed version
+ *   onCluster    the file is on the          at least one of the version's
+ *   (0|1)        cluster (name and size)     files is on the cluster
+ *   clusterRoles which seats count for onCluster and ON CLUSTER (comma list;
+ *                absent = every role the listing was read for)
  *   q            substring of rel_path       substring of
  *                                            "song_folder/base ver_label"
  *
@@ -56,6 +62,12 @@
  * against no evidence would read as "the show plays none of this". A name not
  * in the capture is refused too -- a typo or a stale link that hid nothing
  * would look like a filter that worked.
+ *
+ * `inShow` is the ASSET-level question: does the show use this asset at all,
+ * in any version? `inShow=1` keeps every version of such an asset -- the
+ * superseded ones included, which is the point: an asset the show has dropped
+ * is already off the machines, so its old renders free nothing there. It is
+ * the same evidence as `programmed` and the same refusals apply.
  *
  * `excludeTrack` and `excludeSetlist` are NEWLINE-separated, because a track
  * name is a file stem and can carry a comma. A version programmed on an
@@ -107,6 +119,24 @@ export interface FilterSpec {
   excludeTrack?: string[];
   /** Hide versions programmed on any track on these setlists. */
   excludeSetlist?: string[];
+  /**
+   * 1 = only assets with at least one programmed version, every version of
+   * them; 0 = only assets with none. Asset-level, unlike `programmed`.
+   */
+  inShow?: 0 | 1;
+  /**
+   * 1 = only what the Media Index catalog last saw on the cluster; 0 = only
+   * what it did not. Per FILE for file rows, per VERSION (any file) for
+   * version rows. Hides rows; decides nothing. See src/server/cluster-source.ts.
+   */
+  onCluster?: 0 | 1;
+  /**
+   * Which of the listing's roles count as "on the cluster", for `onCluster`
+   * and the ON CLUSTER figure. Absent = every role the listing was read for.
+   * Lets a fresh actor scan be used on its own while the understudies' scan
+   * is old. Comma-separated; a role is one word.
+   */
+  clusterRoles?: string[];
   q?: string;
   /**
    * Restrict to these version ids. Exists so the UI can show "only what I have
@@ -361,6 +391,16 @@ export function parseFilters(q: Query): FilterSpec {
   if (excludeTrack !== undefined) f.excludeTrack = excludeTrack;
   const excludeSetlist = lineListParam(q, 'excludeSetlist');
   if (excludeSetlist !== undefined) f.excludeSetlist = excludeSetlist;
+  const inShow = boolIntParam(q, 'inShow');
+  if (inShow !== undefined) f.inShow = inShow;
+  const onCluster = boolIntParam(q, 'onCluster');
+  if (onCluster !== undefined) f.onCluster = onCluster;
+  const clusterRoles = str(q, 'clusterRoles');
+  if (clusterRoles !== undefined) {
+    const list = [...new Set(clusterRoles.split(',').map((x) => x.trim()).filter(Boolean))];
+    if (list.length === 0) throw badRequest('bad_param', 'clusterRoles must name at least one role');
+    f.clusterRoles = list;
+  }
 
   const qq = str(q, 'q');
   if (qq !== undefined) f.q = qq;
@@ -368,9 +408,12 @@ export function parseFilters(q: Query): FilterSpec {
   return f;
 }
 
-/** True when nothing at all was requested. */
+/**
+ * True when nothing that hides a row was requested. `clusterRoles` alone hides
+ * nothing -- it only says what `onCluster` and ON CLUSTER count.
+ */
 export function isEmptyFilter(f: FilterSpec): boolean {
-  return Object.keys(f).length === 0;
+  return Object.keys(f).every((k) => k === 'clusterRoles');
 }
 
 // ---------------------------------------------------------------------------

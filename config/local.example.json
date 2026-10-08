@@ -1,4 +1,12 @@
 {
   "name": "my_show_2026",
-  "root": "/Volumes/YourArchive/SHOW/00_D3_Delivery"
+  "root": "/Volumes/YourArchive/SHOW/00_D3_Delivery",
+  "mediaIndex": {
+    "databaseUrl": "postgres://metal_media_ro:<password>@127.0.0.1:5432/media_index",
+    "cluster": "d3",
+    "roles": [
+      "actor",
+      "understudy"
+    ]
+  }
 }

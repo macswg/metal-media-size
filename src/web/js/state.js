@@ -20,8 +20,17 @@ export const FILTER_KEYS = [
   'programmed',
   'excludeTrack',
   'excludeSetlist',
+  'inShow',
+  'onCluster',
+  'clusterRoles',
   'q',
 ];
+
+/**
+ * Mirrored and sent like a filter, but hides no row by itself -- it says what
+ * `onCluster` and ON CLUSTER count -- so it is not an active filter.
+ */
+const SCOPE_KEYS = new Set(['clusterRoles']);
 
 const DEFAULT_SORT = {
   versions: { sort: 'bytes', dir: 'desc' },
@@ -142,7 +151,7 @@ export function resetFilters() {
 }
 
 export function activeFilterCount() {
-  return FILTER_KEYS.filter((k) => state.filters[k] !== '' && state.filters[k] != null).length;
+  return FILTER_KEYS.filter((k) => !SCOPE_KEYS.has(k) && state.filters[k] !== '' && state.filters[k] != null).length;
 }
 
 /* ---------------------------------------------------------------- */

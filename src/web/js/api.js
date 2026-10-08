@@ -202,6 +202,13 @@ function normaliseReclaim(r) {
     programmed: r.programmed ?? null,
     programmedBytes: r.programmedBytes ?? 0,
     programmedCount: r.programmedCount ?? 0,
+    // The cluster, from the Media Index catalog. Null = not configured; a
+    // block with `usable: false` = configured and unreadable. Null figures,
+    // not 0, when no listing is in force: "nothing on the cluster" is a claim.
+    cluster: r.cluster ?? null,
+    clusterReclaimBytes: r.clusterReclaimBytes ?? null,
+    clusterReclaimCount: r.clusterReclaimCount ?? null,
+    clusterMachines: r.clusterMachines ?? null,
     bySong: r.bySong || [],
   };
 }
@@ -251,6 +258,9 @@ export const api = {
   // Re-reads programmed_media_crosscheck/. A 409 means it refused and the
   // captures loaded before are still in force -- see the route.
   reloadCaptures: () => impl.post('/api/programmed/reload', {}),
+  // Re-reads the Media Index catalog's cluster listing. A 409 means it refused
+  // and the listing read before is still in force. Starts no rig scan.
+  reloadCluster: () => impl.post('/api/cluster/reload', {}),
 
   /* --------------------------------------------------------------------- */
   /* The rig survey. Every one of these is session state in the server's     */

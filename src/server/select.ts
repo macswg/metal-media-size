@@ -54,9 +54,10 @@ const FILE_FROM = `FROM file f
   LEFT JOIN file_media fm ON fm.file_id = f.id`;
 
 /**
- * The programmed-media filters as one predicate over a version id, or null
- * when none is in use. A file with no version (an unparsed name) is never
- * programmed: no capture can name it.
+ * The programmed-media filters as one predicate over a version id and its
+ * asset id, or null when none is in use. A file with no version (an unparsed
+ * name) is never programmed, and its asset is never in the show: no capture
+ * can name it.
  *
  * Reads the protection the reclaim cache resolved over the WHOLE snapshot, so
  * the filter and the verdicts agree about what the show plays. It hides rows
@@ -67,8 +68,8 @@ export function programmedPredicate(
   snapshotId: number,
   keepN: number,
   filters: FilterSpec,
-): ((versionId: number | null) => boolean) | null {
-  const wantsProgrammed = filters.programmed !== undefined;
+): ((versionId: number | null, assetId: number | null) => boolean) | null {
+  const wantsProgrammed = filters.programmed !== undefined || filters.inShow !== undefined;
   const tracks = filters.excludeTrack ?? [];
   const setlists = filters.excludeSetlist ?? [];
   if (!wantsProgrammed && tracks.length === 0 && setlists.length === 0) return null;
@@ -110,14 +111,73 @@ export function programmedPredicate(
     return false;
   };
 
-  return (versionId) => {
+  return (versionId, assetId) => {
     const isProgrammed = versionId !== null && prot.protectedVersionIds.has(versionId);
     if (filters.programmed === 1 && !isProgrammed) return false;
     if (filters.programmed === 0 && isProgrammed) return false;
+    const assetInShow = assetId !== null && prot.programmedAssetIds.has(assetId);
+    if (filters.inShow === 1 && !assetInShow) return false;
+    if (filters.inShow === 0 && assetInShow) return false;
     if (versionId !== null && (hideTracks.size > 0 || hideSetlists.size > 0) && hidden(versionId)) {
       return false;
     }
     return true;
+  };
+}
+
+/**
+ * The roles `clusterRoles` asks to count, checked against the listing in
+ * force. Undefined when absent, or when no listing is in force (the figure is
+ * then null anyway, and `onCluster` refuses on its own). A role the listing
+ * was not read for is refused: a typo that counted nothing would look like a
+ * cluster with nothing on it.
+ */
+export function clusterRolesOf(ctx: AppContext, filters: FilterSpec): string[] | undefined {
+  const want = filters.clusterRoles;
+  const l = ctx.cluster.listing;
+  if (want === undefined || l === null) return undefined;
+  const bad = want.find((r) => !l.roles.includes(r));
+  if (bad !== undefined) {
+    throw badRequest(
+      'bad_cluster_role',
+      `clusterRoles names ${JSON.stringify(bad)}, which the cluster listing was not read for (${l.roles.join(', ')}).`,
+    );
+  }
+  return want;
+}
+
+/**
+ * The `onCluster` filter, or null when it is not in use. Takes the version id
+ * and, for a file row, the file id: a FILE is on the cluster when the catalog
+ * has it at that size, a VERSION when any of its files is.
+ *
+ * Refuses when no listing is in force -- "not on the cluster" read off a
+ * catalog nobody could reach would hide everything for no reason.
+ */
+export function clusterPredicate(
+  ctx: AppContext,
+  snapshotId: number,
+  filters: FilterSpec,
+): ((versionId: number | null, fileId: number | null) => boolean) | null {
+  if (filters.onCluster === undefined) return null;
+  if (!ctx.cluster.configured) {
+    throw badRequest(
+      'no_cluster',
+      'The cluster filter needs the Media Index catalog, and none is configured. ' +
+        'Add mediaIndex to config/local.json and restart.',
+    );
+  }
+  const p = ctx.cluster.presence(snapshotId, clusterRolesOf(ctx, filters));
+  if (p === null) {
+    throw badRequest(
+      'cluster_unavailable',
+      `The Media Index catalog could not be read, so what is on the cluster is unknown: ${ctx.cluster.error ?? 'not read yet'}`,
+    );
+  }
+  const want = filters.onCluster === 1;
+  return (versionId, fileId) => {
+    const on = fileId !== null ? p.fileIds.has(fileId) : versionId !== null && p.byVersion.has(versionId);
+    return on === want;
   };
 }
 
@@ -169,11 +229,13 @@ export function selectVersions(
 
   const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
   const programmed = programmedPredicate(ctx, snapshotId, keepN, filters);
+  const onCluster = clusterPredicate(ctx, snapshotId, filters);
 
   const out: VersionRow[] = [];
   for (const r of dbRows) {
     if (allowedIds !== null && !allowedIds.has(r.version_id)) continue;
-    if (programmed !== null && !programmed(r.version_id)) continue;
+    if (programmed !== null && !programmed(r.version_id, r.asset_id)) continue;
+    if (onCluster !== null && !onCluster(r.version_id, null)) continue;
     const row = toVersionRow(r, verdicts.get(r.version_id));
     if (filters.status !== undefined && row.status !== filters.status) continue;
     out.push(row);
@@ -193,6 +255,8 @@ export function fileNeedsJsPass(filters: FilterSpec, sortKey: string): boolean {
     filters.programmed !== undefined ||
     filters.excludeTrack !== undefined ||
     filters.excludeSetlist !== undefined ||
+    filters.inShow !== undefined ||
+    filters.onCluster !== undefined ||
     sortKey === 'status'
   );
 }
@@ -272,11 +336,13 @@ export function selectFilesFiltered(
   const verdicts = ctx.reclaim.get(snapshotId, keepN).byVersionId;
   const programmed = programmedPredicate(ctx, snapshotId, keepN, filters);
   const programmedOn = programmedOnLookup(ctx, snapshotId, keepN);
+  const onCluster = clusterPredicate(ctx, snapshotId, filters);
 
   const out: FileRow[] = [];
   for (const r of dbRows) {
     if (pathPredicate !== null && !pathPredicate(r.rel_path)) continue;
-    if (programmed !== null && !programmed(r.asset_version_id)) continue;
+    if (programmed !== null && !programmed(r.asset_version_id, r.asset_id)) continue;
+    if (onCluster !== null && !onCluster(r.asset_version_id, r.id)) continue;
     const v = r.asset_version_id === null ? undefined : verdicts.get(r.asset_version_id);
     if (filters.status !== undefined) {
       const status = v === undefined ? 'unknown' : v.keep ? 'kept' : 'superseded';

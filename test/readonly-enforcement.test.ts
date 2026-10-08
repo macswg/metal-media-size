@@ -377,4 +377,39 @@ describe('read-only enforcement', () => {
     // And it must not import a write-capable helper.
     expect(source).not.toMatch(/\bwriteFile\b|\bcreateWriteStream\b|\bmkdir\b/);
   });
+
+  it('DATABASE BOUNDARY: pg is imported only by the catalog reader, which only SELECTs', () => {
+    // The Media Index catalog belongs to another project, and the rig scanner
+    // there is what keeps it true. We read it and nothing else: one module may
+    // hold a Postgres client, and every statement it sends is a read.
+    const CATALOG = 'src/cluster/catalog.ts';
+    const pgImport = /(?:from|import|require)\s*\(?\s*['"](pg|pg-[\w-]+|postgres)['"]/;
+    const violations: string[] = [];
+    for (const file of files) {
+      const relPath = rel(file);
+      if (relPath === CATALOG) continue;
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((text, i) => {
+          if (pgImport.test(text)) violations.push(`${relPath}:${i + 1}  ${text.trim()}`);
+        });
+    }
+    expect(violations, `pg imported outside ${CATALOG}:\n${violations.join('\n')}`).toEqual([]);
+
+    const source = readFileSync(join(PROJECT_ROOT, CATALOG), 'utf8');
+    expect(source).toMatch(pgImport);
+    // Every query() call: the transaction brackets, and SELECTs.
+    const statements = [...source.matchAll(/\.query(?:<[\s\S]*?>)?\(\s*(['`])([\s\S]*?)\1/g)].map((m) =>
+      (m[2] as string).trim(),
+    );
+    expect(statements.length).toBeGreaterThanOrEqual(5);
+    for (const sql of statements) {
+      expect(['BEGIN READ ONLY', 'COMMIT'].includes(sql) || /^SELECT\b/i.test(sql), sql).toBe(true);
+    }
+    // No write keyword anywhere in the module, prose included.
+    expect(source).not.toMatch(/\b(INSERT|UPDATE|DELETE|UPSERT|ALTER|CREATE|DROP|GRANT|REVOKE|COPY)\b/);
+    // And the transaction is opened read-only, so Postgres refuses a write
+    // even from a login that could make one.
+    expect(source).toMatch(/query\('BEGIN READ ONLY'\)/);
+  });
 });
